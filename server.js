@@ -7,8 +7,8 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 
-const { createCheckoutSession, cancelSubscription, constructWebhookEvent } = require('./services/stripeService');
-const { provisionEsim } = require('./services/esimService');
+const { createCheckoutSession, cancelSubscription, constructWebhookEvent } = require('./stripeService');
+const { provisionEsim } = require('./esimService');
 const { getUser, saveUser, getUserByStripeCustomerId } = require('./db');
 
 const app = express();
