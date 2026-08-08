@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Тарифи — Сигнал</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=Space+Mono&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="wrap">
+    <div class="brand"><div class="mark">📶</div><span>Сигнал</span></div>
+    <h1>Обери тариф</h1>
+    <p class="lead">Підписка щомісячна, діє у 30+ країнах Європи. Скасувати можна будь-коли в дашборді.</p>
+
+    <div class="tier selected" data-plan="basic" onclick="selectTier(this)">
+      <div class="tier-top">
+        <div><div class="tier-name">Базовий</div><div class="tier-data">10 ГБ / місяць</div></div>
+        <div class="tier-price"><b>$9.99</b><span>/міс</span></div>
+      </div>
+    </div>
+
+    <div class="tier" data-plan="standard" onclick="selectTier(this)">
+      <div class="tier-tag">Популярний</div>
+      <div class="tier-top">
+        <div><div class="tier-name">Стандарт</div><div class="tier-data">20 ГБ / місяць</div></div>
+        <div class="tier-price"><b>$19.99</b><span>/міс</span></div>
+      </div>
+    </div>
+
+    <div class="tier" data-plan="unlimited" onclick="selectTier(this)">
+      <div class="tier-top">
+        <div><div class="tier-name">Безліміт</div><div class="tier-data">Необмежено</div></div>
+        <div class="tier-price"><b>$34.99</b><span>/міс</span></div>
+      </div>
+    </div>
+
+    <label>Email (на нього прийде чек і туди прив'яжеться підписка)</label>
+    <input type="email" id="email" placeholder="you@example.com" />
+    <div class="err" id="err" style="display:none;"></div>
+
+    <button class="btn" id="payBtn" onclick="startCheckout()">Оформити підписку</button>
+    <p class="muted" style="margin-top:14px;">Натискаючи «Оформити підписку», перейдеш на захищену сторінку оплати Stripe.</p>
+  </div>
+
+  <script src="config.js"></script>
+  <script>
+    let selectedPlan = 'basic';
+    function selectTier(el){
+      document.querySelectorAll('.tier').forEach(t=>t.classList.remove('selected'));
+      el.classList.add('selected');
+      selectedPlan = el.dataset.plan;
+    }
+
+    async function startCheckout(){
+      const email = document.getElementById('email').value.trim();
+      const err = document.getElementById('err');
+      const btn = document.getElementById('payBtn');
+      err.style.display = 'none';
+
+      if(!email || !email.includes('@')){
+        err.textContent = 'Введи коректний email.';
+        err.style.display = 'block';
+        return;
+      }
+
+      btn.disabled = true;
+      btn.textContent = 'Зачекай...';
+
+      try{
+        const res = await fetch(`${API_URL}/api/create-subscription`, {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ email, plan: selectedPlan })
+        });
+        const data = await res.json();
+        if(!res.ok) throw new Error(data.error || 'Помилка сервера');
+
+        // Перенаправляємо на справжню сторінку оплати Stripe
+        window.location.href = data.url;
+      }catch(e){
+        err.textContent = 'Не вдалося створити оплату: ' + e.message + '. Переконайся, що backend запущений і ключі Stripe у .env правильні.';
+        err.style.display = 'block';
+        btn.disabled = false;
+        btn.textContent = 'Оформити підписку';
+      }
+    }
+  </script>
+</body>
+</html>

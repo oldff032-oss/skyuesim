@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Встановлення eSIM — Сигнал</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=Space+Mono&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="wrap">
+    <div class="brand"><div class="mark">📶</div><span>Сигнал</span></div>
+    <h1>Готуємо eSIM</h1>
+    <p class="lead">Це займає кілька секунд — не закривай сторінку.</p>
+
+    <div class="install-ring">
+      <svg viewBox="0 0 150 150">
+        <circle class="track" cx="75" cy="75" r="66"></circle>
+        <circle class="fill" id="ringFill" cx="75" cy="75" r="66" stroke-dasharray="415" stroke-dashoffset="415"></circle>
+      </svg>
+      <div class="label" id="ringLabel">0/3</div>
+    </div>
+
+    <div class="install-steps">
+      <div class="install-step" id="step1"><div class="num">1</div><span class="label-text">Підтверджуємо оплату</span></div>
+      <div class="install-step" id="step2"><div class="num">2</div><span class="label-text">Замовляємо профіль eSIM</span></div>
+      <div class="install-step" id="step3"><div class="num">3</div><span class="label-text">Готуємо QR-код активації</span></div>
+    </div>
+
+    <a class="btn ghost" id="skipBtn" href="dashboard.html" style="margin-top:32px;">Перейти в дашборд</a>
+  </div>
+
+  <script src="config.js"></script>
+  <script>
+    // Три кроки тут — переважно UI-анімація, яка синхронізується з реальним
+    // станом на бекенді (перевіряємо статус через /api/status, поки він не
+    // стане "active"). Це не фейк заради красоти — кроки 1 і 2 справді вже
+    // відбулись до того, як людина потрапила на цю сторінку (Stripe + вебхук),
+    // а крок 3 триває по-справжньому, поки бекенд чекає відповіді від eSIM Access.
+
+    const ring = document.getElementById('ringFill');
+    const label = document.getElementById('ringLabel');
+    const CIRC = 415;
+
+    function setStep(n) {
+      label.textContent = n + '/3';
+      ring.style.strokeDashoffset = CIRC - (CIRC * n / 3);
+      for (let i = 1; i <= 3; i++) {
+        const el = document.getElementById('step' + i);
+        el.classList.remove('done', 'active');
+        if (i < n) el.classList.add('done');
+        else if (i === n) el.classList.add('active');
+      }
+    }
+
+    setStep(0);
+    setTimeout(() => setStep(1), 400);
+
+    const params = new URLSearchParams(window.location.search);
+    const email = params.get('email') || localStorageEmailFallback();
+    function localStorageEmailFallback() { return ''; } // navigate вручну, якщо email невідомий
+
+    let attempts = 0;
+    async function poll() {
+      attempts++;
+      if (!email) { setStep(2); setTimeout(() => window.location.href = 'dashboard.html', 1500); return; }
+      try {
+        const res = await fetch(`${API_URL}/api/status?email=${encodeURIComponent(email)}`);
+        const data = await res.json();
+        if (data.status === 'active') {
+          setStep(3);
+          setTimeout(() => { window.location.href = 'dashboard.html'; }, 900);
+          return;
+        }
+        setStep(2);
+      } catch (e) { /* бекенд ще не відповів — пробуємо ще раз */ }
+
+      if (attempts < 20) {
+        setTimeout(poll, 1500);
+      } else {
+        // Занадто довго — не блокуємо людину, пускаємо в дашборд подивитись статус самостійно
+        window.location.href = 'dashboard.html';
+      }
+    }
+    setTimeout(poll, 900);
+  </script>
+</body>
+</html>
