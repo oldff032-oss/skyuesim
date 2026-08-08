@@ -27,22 +27,30 @@ const PACKAGE_CODE_MAP = {
   unlimited: process.env.ESIM_PACKAGE_CODE_UNLIMITED || 'REPLACE_ME_UNLIMITED',
 };
 
-async function esimAccessRequest(path, body) {
-  const response = await fetch(`${BASE_URL}${path}`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'RT-AccessCode': process.env.ESIM_PROVIDER_API_KEY,
-    },
-    body: JSON.stringify(body),
-  });
+async function queryProfileWithRetry(orderNo, maxAttempts = 20) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const profile = await esimAccessRequest('/api/v1/open/esim/query', {
+        orderNo,
+        pager: { pageNum: 1, pageSize: 20 },
+      });
 
-  const data = await response.json().catch(() => null);
+      const esim = await queryProfileWithRetry(orderNo);
 
-  if (!response.ok || (data && data.success === false)) {
-    throw new Error(`eSIM Access error: ${response.status} ${JSON.stringify(data)}`);
+      if (esim) {
+        console.log(`✅ eSIM профіль готовий. Спроба ${attempt}`);
+        return esim;
+      }
+
+      console.log(`⏳ eSIM ще створюється... Спроба ${attempt}`);
+    } catch (err) {
+      console.log(`⏳ eSIM Access ще не готовий: ${err.message}`);
+    }
+
+    await new Promise(resolve => setTimeout(resolve, 2000));
   }
-  return data;
+
+  throw new Error(`eSIM Access не видав профіль протягом очікуваного часу. orderNo=${orderNo}`);
 }
 
 async function provisionEsim({ email, plan }) {
