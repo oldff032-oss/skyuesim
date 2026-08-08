@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Дашборд — Сигнал</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=Space+Mono&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="wrap">
+    <div class="brand"><div class="mark">📶</div><span>Сигнал</span></div>
+
+    <div id="loginBox">
+      <h1>Твоя eSIM</h1>
+      <p class="lead">Введи email, яким оформлював(ла) підписку.</p>
+      <label>Email</label>
+      <input type="email" id="email" placeholder="you@example.com" />
+      <div class="err" id="err" style="display:none;"></div>
+      <button class="btn" onclick="loadStatus()">Показати статус</button>
+    </div>
+
+    <div id="statusBox" style="display:none;">
+      <h1>Твоя eSIM</h1>
+
+      <div class="toggle" id="toggleBtn" onclick="toggleConnect()">
+        <div>
+          <div class="toggle-icon" id="toggleIcon">📶</div>
+          <div class="toggle-label" id="toggleLabel">Підключити</div>
+        </div>
+      </div>
+
+      <div class="card" id="planCard"></div>
+      <div id="qrWrap"></div>
+
+      <button class="btn ghost" onclick="cancelSub()">Скасувати підписку</button>
+      <button class="btn ghost" onclick="logout()">Вийти</button>
+    </div>
+  </div>
+
+  <script src="config.js"></script>
+  <script>
+    let currentUser = null;
+    let connected = false;
+
+    function showErr(msg){
+      const err = document.getElementById('err');
+      err.textContent = msg;
+      err.style.display = 'block';
+    }
+
+    async function loadStatus(){
+      const email = document.getElementById('email').value.trim();
+      if(!email){ showErr('Введи email'); return; }
+
+      try{
+        const res = await fetch(`${API_URL}/api/status?email=${encodeURIComponent(email)}`);
+        const data = await res.json();
+        if(!res.ok) throw new Error(data.error || 'Користувача не знайдено. Можливо, оплата ще обробляється — онови сторінку через кілька секунд.');
+
+        currentUser = data;
+        renderStatus();
+      }catch(e){
+        showErr(e.message);
+      }
+    }
+
+    function renderStatus(){
+      document.getElementById('loginBox').style.display = 'none';
+      document.getElementById('statusBox').style.display = 'block';
+
+      const planNames = { basic:'Базовий · 10 ГБ', standard:'Стандарт · 20 ГБ', unlimited:'Безліміт' };
+      const planCard = document.getElementById('planCard');
+
+      if(currentUser.status === 'active' && currentUser.esim){
+        const limitGb = currentUser.esim.dataLimitGb;
+        const usedGb = 0; // Usage Check у eSIM Access ще не підключено — поки що показуємо 0
+        const pct = limitGb ? Math.min(100, Math.round((usedGb / limitGb) * 100)) : 0;
+
+        planCard.innerHTML = `
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <div>
+              <div style="font-family:'Space Grotesk',sans-serif; font-weight:700;">${planNames[currentUser.plan] || currentUser.plan}</div>
+              <div class="muted" style="margin-top:4px;">ICCID: ${currentUser.esim.iccid}</div>
+            </div>
+            <span class="status-pill on"><span class="dot"></span>Активна</span>
+          </div>
+          <div class="usage-card" style="margin-top:14px; padding:0; background:transparent; border:none;">
+            <div class="usage-top"><span>Використано трафіку</span><b>${limitGb ? usedGb + ' / ' + limitGb + ' ГБ' : 'Безліміт'}</b></div>
+            ${limitGb ? `<div class="usage-track"><div class="usage-fill" style="width:${pct}%;"></div></div>` : ''}
+          </div>`;
+        document.getElementById('qrWrap').innerHTML = `
+          <p class="muted" style="margin-top:16px;">Відскануй QR-код камерою телефону, щоб додати eSIM:</p>
+          ${currentUser.esim.qrCodeUrl ? `<img src="${currentUser.esim.qrCodeUrl}" alt="QR" style="width:150px; height:150px; border-radius:12px; margin-top:10px; background:#fff; padding:8px;" />` : ''}
+          <p class="muted" style="margin-top:12px;">Або введи вручну (Налаштування → Стільниковий зв'язок → Додати eSIM вручну):</p>
+          <code class="qr">${currentUser.esim.activationCode}</code>`;
+      } else if(currentUser.status === 'pending_payment'){
+        planCard.innerHTML = `<span class="status-pill off"><span class="dot"></span>Очікуємо підтвердження оплати...</span>`;
+      } else if(currentUser.status === 'canceled'){
+        planCard.innerHTML = `<span class="status-pill off"><span class="dot"></span>Підписку скасовано</span>`;
+      } else {
+        planCard.innerHTML = `<span class="status-pill off"><span class="dot"></span>Статус: ${currentUser.status || 'невідомо'}</span>`;
+      }
+    }
+
+    function toggleConnect(){
+      connected = !connected;
+      const btn = document.getElementById('toggleBtn');
+      const icon = document.getElementById('toggleIcon');
+      const label = document.getElementById('toggleLabel');
+      btn.classList.toggle('on', connected);
+      icon.textContent = connected ? '✅' : '📶';
+      label.textContent = connected ? 'Підключено' : 'Підключити';
+    }
+
+    async function cancelSub(){
+      if(!confirm('Скасувати підписку? Доступ до eSIM припиниться в кінці оплаченого періоду.')) return;
+      try{
+        const res = await fetch(`${API_URL}/api/cancel`, {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ email: currentUser.email })
+        });
+        const data = await res.json();
+        if(!res.ok) throw new Error(data.error);
+        alert('Підписку скасовано.');
+        loadStatus();
+      }catch(e){ alert('Помилка: ' + e.message); }
+    }
+
+    function logout(){
+      currentUser = null;
+      document.getElementById('statusBox').style.display = 'none';
+      document.getElementById('loginBox').style.display = 'block';
+    }
+  </script>
+</body>
+</html>

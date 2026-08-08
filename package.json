@@ -1,0 +1,17 @@
+{
+  "name": "signal-backend",
+  "version": "1.0.0",
+  "description": "Backend for Signal global eSIM subscription app",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "stripe": "^16.2.0"
+  }
+}
