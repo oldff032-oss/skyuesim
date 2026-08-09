@@ -10,16 +10,27 @@
 const fs = require('fs');
 const path = require('path');
 
-const DB_FILE = path.join(__dirname, 'data', 'users.json');
+const DATA_DIR = path.join(__dirname, 'data');
+const DB_FILE = path.join(DATA_DIR, 'users.json');
+
+function ensureDbFile() {
+  if (!fs.existsSync(DATA_DIR)) {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+  }
+  if (!fs.existsSync(DB_FILE)) {
+    fs.writeFileSync(DB_FILE, '{}');
+  }
+}
 
 function readAll() {
-  if (!fs.existsSync(DB_FILE)) return {};
+  ensureDbFile();
   const raw = fs.readFileSync(DB_FILE, 'utf-8').trim();
   if (!raw) return {};
   return JSON.parse(raw);
 }
 
 function writeAll(data) {
+  ensureDbFile();
   fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2));
 }
 

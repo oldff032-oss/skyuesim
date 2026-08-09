@@ -3,23 +3,28 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Сигнал — інтернет по всій Європі, одна підписка</title>
+<title>Сигнал — інтернет без кордонів</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=Space+Mono&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <div class="wrap">
-    <div class="brand">
-      <div class="mark">📶</div>
-      <span>Сигнал</span>
+  <div class="glow-orb" style="top:10%; left:10%;"></div>
+  <div class="glow-orb" style="bottom:5%; right:5%; animation-delay:3s; background:radial-gradient(circle, var(--violet-glow), transparent 70%);"></div>
+
+  <div class="wrap" style="justify-content:center; align-items:center; text-align:center;">
+    <div class="brand" style="flex-direction:column; margin-bottom:28px;">
+      <div class="mark" style="width:64px; height:64px; border-radius:20px; font-size:30px; margin-bottom:16px;">📶</div>
+      <span style="font-size:26px;">Сигнал</span>
     </div>
 
-    <h1>Один <em>тариф</em>.<br>Інтернет по всій Європі.</h1>
-    <p class="lead">Оформи підписку один раз. eSIM буде готова в застосунку — просто натисни «Підключити», коли приземлишся в новій країні Європи. Скасувати можна будь-коли.</p>
+    <h1 style="font-size:23px; max-width:280px;">Інтернет <em>без кордонів</em></h1>
+    <p class="lead" style="max-width:280px; margin:12px auto 40px;">Одна підписка — покриття по всій Європі. Активуй за хвилину, коли приземлишся.</p>
 
-    <a class="btn" href="device-check.html">Обрати тариф підписки</a>
-    <a class="btn ghost" href="dashboard.html">Я вже підписаний(а)</a>
+    <div style="width:100%; max-width:320px;">
+      <a class="btn" href="register-email.html">Створити акаунт</a>
+      <a class="btn ghost" href="login.html" style="margin-top:10px;">Увійти</a>
+    </div>
   </div>
 </body>
 </html>

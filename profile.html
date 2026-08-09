@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Профіль — Сигнал</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<style>
+  .menu-row{ display:flex; align-items:center; justify-content:space-between; padding:15px 18px; cursor:pointer; }
+  .menu-row:not(:last-child){ border-bottom:1px solid var(--glass-border); }
+  .menu-row .left{ display:flex; align-items:center; gap:12px; font-size:14px; }
+  .menu-row .left .ic{ font-size:18px; width:22px; text-align:center; }
+  .menu-row .chev{ color:var(--text-muted); }
+  .menu-row.disabled{ opacity:.5; }
+  .soon-tag{ font-size:9.5px; background:var(--glass); border:1px solid var(--glass-border); padding:2px 7px; border-radius:6px; color:var(--text-muted); margin-left:8px; }
+</style>
+</head>
+<body class="has-bottomnav">
+  <div class="wrap">
+    <div class="brand"><div class="mark">📶</div><span>Сигнал</span></div>
+
+    <div style="display:flex; align-items:center; gap:14px; margin-top:24px;">
+      <div style="width:56px; height:56px; border-radius:16px; background:linear-gradient(135deg,var(--blue),var(--violet)); display:flex; align-items:center; justify-content:center; font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:20px;" id="avatarLetter">?</div>
+      <div>
+        <div style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:16px;" id="emailShown">—</div>
+        <div class="muted">Акаунт Сигнал</div>
+      </div>
+    </div>
+
+    <div class="glass" style="margin-top:24px; overflow:hidden;">
+      <div class="menu-row" onclick="window.location.href='plans.html'">
+        <div class="left"><span class="ic">💳</span>Тариф і білінг</div>
+        <span class="chev">›</span>
+      </div>
+      <div class="menu-row" onclick="window.location.href='usage.html'">
+        <div class="left"><span class="ic">📊</span>Витрати трафіку</div>
+        <span class="chev">›</span>
+      </div>
+      <div class="menu-row disabled">
+        <div class="left"><span class="ic">🤖</span>AI Network Copilot<span class="soon-tag">скоро</span></div>
+        <span class="chev">›</span>
+      </div>
+      <div class="menu-row disabled">
+        <div class="left"><span class="ic">🛡️</span>Security Center<span class="soon-tag">скоро</span></div>
+        <span class="chev">›</span>
+      </div>
+      <div class="menu-row disabled">
+        <div class="left"><span class="ic">👨‍👩‍👧</span>Family / Team<span class="soon-tag">скоро</span></div>
+        <span class="chev">›</span>
+      </div>
+      <div class="menu-row disabled">
+        <div class="left"><span class="ic">🌍</span>Travel Mode<span class="soon-tag">скоро</span></div>
+        <span class="chev">›</span>
+      </div>
+      <div class="menu-row" onclick="window.location.href='mailto:support@example.com'">
+        <div class="left"><span class="ic">💬</span>Підтримка</div>
+        <span class="chev">›</span>
+      </div>
+    </div>
+
+    <button class="btn danger" style="margin-top:24px;" onclick="logout()">Вийти з акаунта</button>
+  </div>
+
+  <nav class="bottomnav">
+    <a href="dashboard.html"><span class="ic">🏠</span>Головна</a>
+    <a href="plans.html"><span class="ic">📶</span>Тариф</a>
+    <a href="usage.html"><span class="ic">📊</span>Витрати</a>
+    <a href="profile.html" class="active"><span class="ic">👤</span>Профіль</a>
+  </nav>
+
+  <script>
+    const email = localStorage.getItem('signal_email');
+    if(!email){ window.location.href = 'login.html'; }
+    document.getElementById('emailShown').textContent = email;
+    document.getElementById('avatarLetter').textContent = email[0].toUpperCase();
+
+    function logout(){
+      localStorage.removeItem('signal_session_token');
+      localStorage.removeItem('signal_email');
+      window.location.href = 'login.html';
+    }
+  </script>
+</body>
+</html>

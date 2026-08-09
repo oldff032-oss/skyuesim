@@ -8,20 +8,21 @@
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=Space+Mono&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
 </head>
-<body>
+<body class="has-bottomnav">
   <div class="wrap">
     <div class="brand"><div class="mark">📶</div><span>Сигнал</span></div>
-    <h1>Обери тариф</h1>
-    <p class="lead">Підписка щомісячна, діє у 30+ країнах Європи. Скасувати можна будь-коли в дашборді.</p>
+    <h1 style="margin-top:20px;">Обери тариф</h1>
+    <p class="lead">Підписка щомісячна, діє у 30+ країнах Європи. Скасувати можна будь-коли в профілі.</p>
 
-    <div class="tier selected" data-plan="basic" onclick="selectTier(this)">
+    <div class="stagger">
+    <div class="tier glass selected" data-plan="basic" onclick="selectTier(this)">
       <div class="tier-top">
         <div><div class="tier-name">Базовий</div><div class="tier-data">10 ГБ / місяць</div></div>
         <div class="tier-price"><b>$9.99</b><span>/міс</span></div>
       </div>
     </div>
 
-    <div class="tier" data-plan="standard" onclick="selectTier(this)">
+    <div class="tier glass" data-plan="standard" onclick="selectTier(this)">
       <div class="tier-tag">Популярний</div>
       <div class="tier-top">
         <div><div class="tier-name">Стандарт</div><div class="tier-data">20 ГБ / місяць</div></div>
@@ -29,23 +30,32 @@
       </div>
     </div>
 
-    <div class="tier" data-plan="unlimited" onclick="selectTier(this)">
+    <div class="tier glass" data-plan="unlimited" onclick="selectTier(this)">
       <div class="tier-top">
         <div><div class="tier-name">Безліміт</div><div class="tier-data">Необмежено</div></div>
         <div class="tier-price"><b>$34.99</b><span>/міс</span></div>
       </div>
     </div>
+    </div>
 
-    <label>Email (на нього прийде чек і туди прив'яжеться підписка)</label>
-    <input type="email" id="email" placeholder="you@example.com" />
-    <div class="err" id="err" style="display:none;"></div>
+    <div class="err-text" id="err" style="display:none;"></div>
 
-    <button class="btn" id="payBtn" onclick="startCheckout()">Оформити підписку</button>
-    <p class="muted" style="margin-top:14px;">Натискаючи «Оформити підписку», перейдеш на захищену сторінку оплати Stripe.</p>
+    <button class="btn" id="payBtn" style="margin-top:22px;" onclick="startCheckout()">Оформити підписку</button>
+    <p class="muted" style="margin-top:14px; text-align:center;">Натискаючи «Оформити підписку», перейдеш на захищену сторінку оплати Stripe.</p>
   </div>
+
+  <nav class="bottomnav">
+    <a href="dashboard.html"><span class="ic">🏠</span>Головна</a>
+    <a href="plans.html" class="active"><span class="ic">📶</span>Тариф</a>
+    <a href="usage.html"><span class="ic">📊</span>Витрати</a>
+    <a href="profile.html"><span class="ic">👤</span>Профіль</a>
+  </nav>
 
   <script src="config.js"></script>
   <script>
+    const email = localStorage.getItem('signal_email');
+    if(!email){ window.location.href = 'login.html'; }
+
     let selectedPlan = 'basic';
     function selectTier(el){
       document.querySelectorAll('.tier').forEach(t=>t.classList.remove('selected'));
@@ -54,18 +64,11 @@
     }
 
     async function startCheckout(){
-      const email = document.getElementById('email').value.trim();
       const err = document.getElementById('err');
       const btn = document.getElementById('payBtn');
       err.style.display = 'none';
 
-      if(!email || !email.includes('@')){
-        err.textContent = 'Введи коректний email.';
-        err.style.display = 'block';
-        return;
-      }
-
-      btn.disabled = true;
+      btn.classList.add('loading');
       btn.textContent = 'Зачекай...';
 
       try{
@@ -77,12 +80,11 @@
         const data = await res.json();
         if(!res.ok) throw new Error(data.error || 'Помилка сервера');
 
-        // Перенаправляємо на справжню сторінку оплати Stripe
         window.location.href = data.url;
       }catch(e){
-        err.textContent = 'Не вдалося створити оплату: ' + e.message + '. Переконайся, що backend запущений і ключі Stripe у .env правильні.';
-        err.style.display = 'block';
-        btn.disabled = false;
+        err.textContent = 'Не вдалося створити оплату: ' + e.message;
+        err.style.display = 'flex';
+        btn.classList.remove('loading');
         btn.textContent = 'Оформити підписку';
       }
     }

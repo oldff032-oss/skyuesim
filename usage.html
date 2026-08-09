@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Витрати — Сигнал</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=Space+Mono&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body class="has-bottomnav">
+  <div class="wrap">
+    <div class="brand"><div class="mark">📶</div><span>Сигнал</span></div>
+    <h1 style="margin-top:20px;">Витрати трафіку</h1>
+    <p class="lead">Скільки даних ти використав(ла) цього циклу</p>
+
+    <div id="loading" class="shimmer" style="height:160px; margin-top:20px;"></div>
+    <div id="content" style="display:none;"></div>
+  </div>
+
+  <nav class="bottomnav">
+    <a href="dashboard.html"><span class="ic">🏠</span>Головна</a>
+    <a href="plans.html"><span class="ic">📶</span>Тариф</a>
+    <a href="usage.html" class="active"><span class="ic">📊</span>Витрати</a>
+    <a href="profile.html"><span class="ic">👤</span>Профіль</a>
+  </nav>
+
+  <script src="config.js"></script>
+  <script>
+    const email = localStorage.getItem('signal_email');
+    if(!email){ window.location.href = 'login.html'; }
+
+    async function load(){
+      const loading = document.getElementById('loading');
+      const content = document.getElementById('content');
+      try{
+        const res = await fetch(`${API_URL}/api/status?email=${encodeURIComponent(email)}`);
+        const data = await res.json();
+        loading.style.display = 'none';
+        content.style.display = 'block';
+
+        if(data.status !== 'active' || !data.esim){
+          content.innerHTML = `<div class="card"><p class="muted">Немає активної підписки. <a href="plans.html" style="color:var(--cyan);">Обрати тариф</a></p></div>`;
+          return;
+        }
+
+        const limitGb = data.esim.dataLimitGb;
+        const usedGb = 0; // Реальні дані про використання підключимо через Usage Check API eSIM Access пізніше
+        const pct = limitGb ? Math.min(100, Math.round((usedGb / limitGb) * 100)) : 0;
+
+        content.innerHTML = `
+          <div class="card">
+            <div class="usage-top"><span>Використано</span><b>${limitGb ? usedGb + ' / ' + limitGb + ' ГБ' : 'Безліміт'}</b></div>
+            ${limitGb ? `<div class="usage-track"><div class="usage-fill" style="width:${pct}%;"></div></div>` : ''}
+            <p class="muted" style="margin-top:14px;">Залишилось днів: —</p>
+          </div>
+
+          <div class="card">
+            <p class="muted" style="line-height:1.6;">📡 Детальна статистика по днях зʼявиться тут, коли підключимо Usage Check API від eSIM Access — зараз показуємо тільки загальний ліміт тарифу.</p>
+          </div>`;
+      }catch(e){
+        loading.style.display = 'none';
+        content.style.display = 'block';
+        content.innerHTML = `<div class="card"><p class="err-text">Не вдалося завантажити дані</p></div>`;
+      }
+    }
+    load();
+  </script>
+</body>
+</html>

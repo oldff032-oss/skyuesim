@@ -10,6 +10,7 @@ const cors = require('cors');
 const { createCheckoutSession, cancelSubscription, constructWebhookEvent } = require('./stripeService');
 const { provisionEsim } = require('./esimService');
 const { getUser, saveUser, getUserByStripeCustomerId } = require('./db');
+const authService = require('./authService');
 
 const app = express();
 app.use(cors());
@@ -18,6 +19,66 @@ app.use(cors());
 // тому для цього одного маршруту JSON-парсер вимикаємо.
 app.use('/api/webhook', express.raw({ type: 'application/json' }));
 app.use(express.json());
+
+// =========================================================
+// АВТЕНТИФІКАЦІЯ: email -> код -> пароль -> акаунт, і логін
+// =========================================================
+
+app.post('/api/auth/request-code', async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email || !email.includes('@')) return res.status(400).json({ error: 'Введи коректний email' });
+    await authService.requestCode(email);
+    res.json({ sent: true });
+  } catch (err) {
+    const status = err.code === 'COOLDOWN' ? 429 : 500;
+    res.status(status).json({ error: err.message, code: err.code, waitSec: err.waitSec });
+  }
+});
+
+app.post('/api/auth/verify-code', (req, res) => {
+  try {
+    const { email, code } = req.body;
+    if (!email || !code) return res.status(400).json({ error: 'Потрібні email і code' });
+    const result = authService.verifyCode(email, code);
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message, code: err.code });
+  }
+});
+
+app.post('/api/auth/set-password', async (req, res) => {
+  try {
+    const { verifyToken, password } = req.body;
+    if (!verifyToken || !password) return res.status(400).json({ error: 'Потрібні verifyToken і password' });
+    const result = await authService.setPassword(verifyToken, password);
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message, code: err.code });
+  }
+});
+
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    if (!email || !password) return res.status(400).json({ error: 'Потрібні email і password' });
+    const result = await authService.login(email, password);
+    res.json(result);
+  } catch (err) {
+    res.status(401).json({ error: err.message, code: err.code });
+  }
+});
+
+app.get('/api/auth/me', (req, res) => {
+  const sessionToken = req.headers['x-session-token'];
+  const email = authService.getSessionEmail(sessionToken);
+  if (!email) return res.status(401).json({ error: 'Сесія недійсна, увійди знову' });
+  res.json({ email });
+});
+
+// =========================================================
+// ПІДПИСКА / eSIM
+// =========================================================
 
 // ---------- 1. Створити сесію оплати підписки ----------
 // Фронтенд викликає це, коли людина натискає "Оформити підписку"

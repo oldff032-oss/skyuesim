@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Створити акаунт — Сигнал</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="wrap">
+    <div class="brand"><div class="mark">📶</div><span>Сигнал</span></div>
+
+    <h1 style="margin-top:20px;">Create Account</h1>
+    <p class="lead">Enter your e-mail to continue</p>
+
+    <div class="field-group">
+      <label class="field-label">Email</label>
+      <input type="email" id="email" placeholder="you@example.com" autocomplete="email" />
+      <div class="err-text" id="err" style="display:none;"></div>
+    </div>
+
+    <button class="btn" id="continueBtn" style="margin-top:24px;" onclick="requestCode()">Continue</button>
+    <p class="muted" style="text-align:center; margin-top:16px;">Вже маєш акаунт? <a href="login.html" style="color:var(--cyan); text-decoration:none;">Увійти</a></p>
+  </div>
+
+  <script src="config.js"></script>
+  <script>
+    async function requestCode(){
+      const emailInput = document.getElementById('email');
+      const email = emailInput.value.trim();
+      const err = document.getElementById('err');
+      const btn = document.getElementById('continueBtn');
+      err.style.display = 'none';
+      emailInput.classList.remove('error');
+
+      if(!email || !email.includes('@')){
+        err.textContent = 'Введи коректний email';
+        err.style.display = 'flex';
+        emailInput.classList.add('error');
+        return;
+      }
+
+      btn.classList.add('loading');
+      btn.textContent = 'Надсилаємо код...';
+
+      try{
+        const res = await fetch(`${API_URL}/api/auth/request-code`, {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ email })
+        });
+        const data = await res.json();
+        if(!res.ok) throw new Error(data.error || 'Помилка сервера');
+
+        localStorage.setItem('signal_pending_email', email);
+        window.location.href = 'verify-code.html';
+      }catch(e){
+        err.textContent = e.message;
+        err.style.display = 'flex';
+        btn.classList.remove('loading');
+        btn.textContent = 'Continue';
+      }
+    }
+
+    document.getElementById('email').addEventListener('keydown', e => { if(e.key === 'Enter') requestCode(); });
+  </script>
+</body>
+</html>

@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Увійти — Сигнал</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="wrap">
+    <div class="brand"><div class="mark">📶</div><span>Сигнал</span></div>
+
+    <h1 style="margin-top:20px;">Welcome back</h1>
+    <p class="lead">Увійди у свій акаунт</p>
+
+    <div class="field-group">
+      <label class="field-label">Email</label>
+      <input type="email" id="email" placeholder="you@example.com" autocomplete="email" />
+    </div>
+    <div class="field-group">
+      <label class="field-label">Password</label>
+      <div class="input-icon-wrap">
+        <input type="password" id="password" placeholder="••••••••" autocomplete="current-password" />
+        <button class="icon-btn" onclick="togglePw()" type="button">👁️</button>
+      </div>
+    </div>
+    <div class="err-text" id="err" style="display:none;"></div>
+
+    <button class="btn" id="loginBtn" style="margin-top:24px;" onclick="doLogin()">Log In</button>
+    <p class="muted" style="text-align:center; margin-top:16px;">Ще немає акаунта? <a href="register-email.html" style="color:var(--cyan); text-decoration:none;">Створити</a></p>
+  </div>
+
+  <script src="config.js"></script>
+  <script>
+    function togglePw(){
+      const inp = document.getElementById('password');
+      inp.type = inp.type === 'password' ? 'text' : 'password';
+    }
+
+    async function doLogin(){
+      const email = document.getElementById('email').value.trim();
+      const password = document.getElementById('password').value;
+      const err = document.getElementById('err');
+      const btn = document.getElementById('loginBtn');
+      err.style.display = 'none';
+
+      if(!email || !password){
+        err.textContent = 'Заповни обидва поля';
+        err.style.display = 'flex';
+        return;
+      }
+
+      btn.classList.add('loading');
+      btn.textContent = 'Входимо...';
+
+      try{
+        const res = await fetch(`${API_URL}/api/auth/login`, {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ email, password })
+        });
+        const data = await res.json();
+        if(!res.ok) throw new Error(data.error || 'Помилка входу');
+
+        localStorage.setItem('signal_session_token', data.sessionToken);
+        localStorage.setItem('signal_email', data.email);
+        window.location.href = 'dashboard.html';
+      }catch(e){
+        err.textContent = e.message + '. Перевір мережу і спробуй ще раз.';
+        err.style.display = 'flex';
+        btn.classList.remove('loading');
+        btn.textContent = 'Log In';
+      }
+    }
+
+    document.getElementById('password').addEventListener('keydown', e => { if(e.key === 'Enter') doLogin(); });
+  </script>
+</body>
+</html>
