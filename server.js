@@ -7,13 +7,13 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 
-const { createCheckoutSession, cancelSubscription, constructWebhookEvent, getNextBillingDate } = require('./services/stripeService');
-const { provisionEsim, checkUsage } = require('./services/esimService');
+const { createCheckoutSession, cancelSubscription, constructWebhookEvent, getNextBillingDate } = require('./stripeService');
+const { provisionEsim, checkUsage } = require('./esimService');
 const { getUser, saveUser, getUserByStripeCustomerId } = require('./db');
-const authService = require('./services/authService');
+const authService = require('./authService');
 const ticketStore = require('./ticketStore');
-const adminAuth = require('./services/adminAuthService');
-const { sendEmail } = require('./services/emailService');
+const adminAuth = require('./adminAuthService');
+const { sendEmail } = require('./emailService');
 
 const app = express();
 app.use(cors());
