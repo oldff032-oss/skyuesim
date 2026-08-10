@@ -235,25 +235,23 @@ code.qr{ display:block; background:#000; color:var(--success); font-family:'Spac
 }
 .earth-globe{
   position:absolute; inset:0; border-radius:50%; overflow:hidden;
-  background:
-    radial-gradient(circle at 35% 30%, rgba(255,255,255,0.25), transparent 45%),
-    radial-gradient(ellipse 60% 40% at 60% 65%, rgba(52,228,184,0.55), transparent 70%),
-    radial-gradient(ellipse 45% 55% at 25% 60%, rgba(52,228,184,0.4), transparent 65%),
-    radial-gradient(circle at 50% 50%, #1a4fd6, #0a1a52 70%, #050814 100%);
+  background-image: url('https://commons.wikimedia.org/wiki/Special:FilePath/The_Blue_Marble.jpg');
+  background-size: cover;
+  background-position: 42% 38%;
   box-shadow:
-    0 0 90px 10px rgba(59,130,246,0.35),
-    inset -30px -20px 80px rgba(0,0,0,0.55),
-    inset 20px 10px 60px rgba(120,180,255,0.25);
+    0 0 100px 14px rgba(59,130,246,0.4),
+    inset -34px -22px 90px rgba(0,0,0,0.65),
+    inset 18px 10px 50px rgba(140,190,255,0.15);
+  filter: saturate(1.15) brightness(0.95);
 }
 .earth-globe::after{
   content:""; position:absolute; inset:0; border-radius:50%;
-  background: repeating-linear-gradient(0deg, transparent 0 18px, rgba(255,255,255,0.03) 18px 19px);
-  mix-blend-mode: overlay;
+  background: radial-gradient(circle at 38% 32%, transparent 45%, rgba(5,6,13,0.55) 100%);
 }
 .earth-ring{
   position:absolute; inset:-14px; border-radius:50%;
-  border:1px solid rgba(59,130,246,0.25);
-  box-shadow: 0 0 40px rgba(59,130,246,0.2);
+  border:1px solid rgba(59,130,246,0.3);
+  box-shadow: 0 0 50px rgba(59,130,246,0.25);
 }
 
 .card{ background: var(--glass); border:1px solid var(--glass-border); border-radius:16px; padding:18px; margin-top:16px; backdrop-filter: blur(20px); }
