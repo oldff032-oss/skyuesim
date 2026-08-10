@@ -1,6 +1,3 @@
 // config.js
-// Адреса твого backend-сервера. Локально він працює на 4242.
-// Коли задеплоїш backend (наприклад на Render чи Railway),
-// зміни це значення на реальну адресу, наприклад:
-// const API_URL = "https://signal-backend.onrender.com";
+// Адреса твого backend-сервера на Render.
 const API_URL = "https://signal-backend-7bov.onrender.com";
