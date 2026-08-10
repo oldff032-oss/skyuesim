@@ -61,7 +61,7 @@
         <a class="btn" href="device-check.html" style="margin-top:20px;">Обрати тариф</a>`;
     }
 
-    function render(){
+    async function render(){
       document.getElementById('loading').style.display = 'none';
       const content = document.getElementById('content');
       content.style.display = 'block';
@@ -70,7 +70,12 @@
 
       if(currentUser.status === 'active' && currentUser.esim){
         const limitGb = currentUser.esim.dataLimitGb;
-        const usedGb = 0;
+        let usedGb = currentUser.esim.usedGb || 0;
+        try{
+          const usageRes = await fetch(`${API_URL}/api/usage?email=${encodeURIComponent(email)}`);
+          const usageData = await usageRes.json();
+          if(usageRes.ok) usedGb = usageData.usedGb;
+        }catch(e){}
         const pct = limitGb ? Math.min(100, Math.round((usedGb / limitGb) * 100)) : 0;
 
         content.innerHTML = `

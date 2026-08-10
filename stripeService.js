@@ -37,6 +37,13 @@ async function cancelSubscription(subscriptionId) {
   return stripe.subscriptions.cancel(subscriptionId);
 }
 
+// Дата наступного списання — реальні дані напряму зі Stripe (не розрахунок,
+// а те, що Stripe сам планує списати наступного разу).
+async function getNextBillingDate(subscriptionId) {
+  const sub = await stripe.subscriptions.retrieve(subscriptionId);
+  return sub.current_period_end ? new Date(sub.current_period_end * 1000).toISOString() : null;
+}
+
 // Перевіряє, що вебхук справді прийшов від Stripe (а не від когось,
 // хто намагається підробити "оплату успішна").
 //
@@ -54,4 +61,4 @@ function constructWebhookEvent(rawBody, signature) {
   );
 }
 
-module.exports = { createCheckoutSession, cancelSubscription, constructWebhookEvent };
+module.exports = { createCheckoutSession, cancelSubscription, constructWebhookEvent, getNextBillingDate };

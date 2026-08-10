@@ -7,10 +7,13 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 
-const { createCheckoutSession, cancelSubscription, constructWebhookEvent } = require('./stripeService');
-const { provisionEsim } = require('./esimService');
+const { createCheckoutSession, cancelSubscription, constructWebhookEvent, getNextBillingDate } = require('./services/stripeService');
+const { provisionEsim, checkUsage } = require('./services/esimService');
 const { getUser, saveUser, getUserByStripeCustomerId } = require('./db');
-const authService = require('./authService');
+const authService = require('./services/authService');
+const ticketStore = require('./ticketStore');
+const adminAuth = require('./services/adminAuthService');
+const { sendEmail } = require('./services/emailService');
 
 const app = express();
 app.use(cors());
@@ -74,6 +77,126 @@ app.get('/api/auth/me', (req, res) => {
   const email = authService.getSessionEmail(sessionToken);
   if (!email) return res.status(401).json({ error: 'Сесія недійсна, увійди знову' });
   res.json({ email });
+});
+
+// =========================================================
+// ПІДТРИМКА (SUPPORT): звернення користувачів
+// =========================================================
+
+app.post('/api/support/tickets', async (req, res) => {
+  try {
+    const { email, category, subject, message } = req.body;
+    if (!email || !subject || !message) return res.status(400).json({ error: 'Потрібні email, subject і message' });
+
+    const ticket = ticketStore.createTicket({ email, category: category || 'Інше', subject, message });
+    res.json(ticket);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/support/tickets', (req, res) => {
+  const email = req.query.email;
+  if (!email) return res.status(400).json({ error: 'Потрібен email' });
+  res.json(ticketStore.getTicketsByEmail(email));
+});
+
+app.get('/api/support/tickets/:id', (req, res) => {
+  const ticket = ticketStore.getTicket(req.params.id);
+  if (!ticket) return res.status(404).json({ error: 'Тікет не знайдено' });
+  // Проста перевірка власності — email в query має збігатись з email тікета
+  if (req.query.email && ticket.email !== req.query.email) {
+    return res.status(403).json({ error: 'Немає доступу до цього тікета' });
+  }
+  res.json(ticket);
+});
+
+app.post('/api/support/tickets/:id/reply', (req, res) => {
+  const { email, message } = req.body;
+  const ticket = ticketStore.getTicket(req.params.id);
+  if (!ticket) return res.status(404).json({ error: 'Тікет не знайдено' });
+  if (ticket.email !== email) return res.status(403).json({ error: 'Немає доступу до цього тікета' });
+
+  const updated = ticketStore.addMessage(req.params.id, { from: 'user', text: message });
+  res.json(updated);
+});
+
+// =========================================================
+// АДМІН-ПАНЕЛЬ (базова версія: один пароль, без ролей поки що)
+// =========================================================
+
+app.post('/api/admin/login', (req, res) => {
+  try {
+    const token = adminAuth.login(req.body.password);
+    res.json({ token });
+  } catch (err) {
+    res.status(401).json({ error: err.message, code: err.code });
+  }
+});
+
+app.get('/api/admin/tickets', adminAuth.requireAdmin, (req, res) => {
+  const { status, priority, search } = req.query;
+  res.json(ticketStore.getAllTickets({ status, priority, search }));
+});
+
+app.get('/api/admin/tickets/:id', adminAuth.requireAdmin, (req, res) => {
+  const ticket = ticketStore.getTicket(req.params.id);
+  if (!ticket) return res.status(404).json({ error: 'Тікет не знайдено' });
+  // Прикладаємо картку користувача (підписка, eSIM) — зв'язок User → Ticket → Subscription
+  const userSubscription = getUser(ticket.email);
+  res.json({ ticket, userSubscription });
+});
+
+app.patch('/api/admin/tickets/:id', adminAuth.requireAdmin, (req, res) => {
+  const { status, priority } = req.body;
+  const updated = ticketStore.updateTicket(req.params.id, {
+    ...(status && { status }),
+    ...(priority && { priority }),
+  });
+  if (!updated) return res.status(404).json({ error: 'Тікет не знайдено' });
+  res.json(updated);
+});
+
+app.post('/api/admin/tickets/:id/reply', adminAuth.requireAdmin, async (req, res) => {
+  try {
+    const { message } = req.body;
+    const ticket = ticketStore.getTicket(req.params.id);
+    if (!ticket) return res.status(404).json({ error: 'Тікет не знайдено' });
+
+    const updated = ticketStore.addMessage(req.params.id, { from: 'admin', text: message });
+
+    // Реальна відправка email користувачу з Ticket ID у темі
+    try {
+      await sendEmail({
+        to: ticket.email,
+        subject: `[Сигнал Підтримка #${ticket.id}] ${ticket.subject}`,
+        html: `
+          <div style="font-family: sans-serif; max-width: 480px;">
+            <p>${message.replace(/\n/g, '<br>')}</p>
+            <hr style="border:none; border-top:1px solid #eee; margin:20px 0;">
+            <p style="color:#888; font-size:12px;">Ticket ID: #${ticket.id}. Щоб відповісти, зайди в застосунок Сигнал → Підтримка.</p>
+          </div>`,
+      });
+    } catch (emailErr) {
+      console.error('Не вдалося надіслати email по тікету:', emailErr.message);
+    }
+
+    res.json(updated);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Список користувачів для адмінки (з'єднуємо дані підписки + auth-акаунт)
+app.get('/api/admin/users', adminAuth.requireAdmin, (req, res) => {
+  const { readAll: readAuth } = require('./authStore');
+  const authData = readAuth();
+  const users = Object.keys(authData.users || {}).map(email => ({
+    email,
+    createdAt: authData.users[email].createdAt,
+    subscription: getUser(email) || null,
+  }));
+  res.json(users);
 });
 
 // =========================================================
@@ -152,6 +275,59 @@ app.get('/api/status', (req, res) => {
   if (!user) return res.status(404).json({ error: 'Користувача не знайдено' });
 
   res.json(user);
+});
+
+// ---------- 3.5. Оновити реальне використання трафіку ----------
+app.get('/api/usage', async (req, res) => {
+  try {
+    const email = req.query.email;
+    if (!email) return res.status(400).json({ error: 'Потрібен email' });
+
+    const user = getUser(email);
+    if (!user || !user.esim?.orderNo) {
+      return res.status(404).json({ error: 'Немає активної eSIM для цього користувача' });
+    }
+
+    const usage = await checkUsage(user.esim.orderNo);
+    const usedGb = +(usage.usedBytes / 1e9).toFixed(2);
+    const totalGb = usage.totalBytes ? Math.round(usage.totalBytes / 1e9) : user.esim.dataLimitGb;
+
+    // Зберігаємо оновлені дані, щоб дашборд теж їх бачив без повторного запиту
+    saveUser(email, {
+      esim: {
+        ...user.esim,
+        usedGb,
+        dataLimitGb: totalGb,
+        apn: usage.apn ?? user.esim.apn,
+        expiredTime: usage.expiredTime ?? user.esim.expiredTime,
+        activateTime: usage.activateTime ?? user.esim.activateTime,
+      },
+    });
+
+    res.json({ usedGb, totalGb, esimStatus: usage.esimStatus, apn: usage.apn, expiredTime: usage.expiredTime, activateTime: usage.activateTime });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ---------- 3.6. Дата наступного списання (реальна, зі Stripe) ----------
+app.get('/api/billing', async (req, res) => {
+  try {
+    const email = req.query.email;
+    if (!email) return res.status(400).json({ error: 'Потрібен email' });
+
+    const user = getUser(email);
+    if (!user || !user.stripeSubscriptionId) {
+      return res.status(404).json({ error: 'Немає активної підписки' });
+    }
+
+    const nextBillingDate = await getNextBillingDate(user.stripeSubscriptionId);
+    res.json({ nextBillingDate });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ---------- 4. Скасування підписки ----------

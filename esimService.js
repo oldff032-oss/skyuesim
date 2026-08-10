@@ -59,6 +59,9 @@ async function provisionEsim({ email, plan }) {
       qrCodeUrl: null,
       dataLimitGb: plan === 'unlimited' ? null : plan === 'standard' ? 20 : 10,
       provider: 'mock-provider',
+      apn: 'mock.apn',
+      expiredTime: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+      activateTime: new Date().toISOString(),
     };
   }
 
@@ -102,7 +105,42 @@ async function provisionEsim({ email, plan }) {
     dataLimitGb: volumeBytes ? Math.round(volumeBytes / 1e9) : (plan === 'unlimited' ? null : plan === 'standard' ? 20 : 10),
     provider: 'esim-access',
     orderNo,
+    apn: esim.apn || null,
+    expiredTime: esim.expiredTime || null,
+    activateTime: esim.activateTime || null,
   };
 }
 
 module.exports = { provisionEsim };
+
+// ---- Оновлення використання трафіку ----
+// Перевикористовуємо ВЖЕ ПЕРЕВІРЕНИЙ ендпоінт /esim/query (той самий, що й
+// при видачі eSIM) замість окремого /usage/query — у його відповіді вже є
+// поле orderUsage (скільки байтів використано) і totalVolume (ліміт).
+// Це надійніше, ніж вгадувати формат ще не звіреного ендпоінта.
+async function checkUsage(orderNo) {
+  const useMock = !process.env.ESIM_PROVIDER_API_KEY || process.env.ESIM_PROVIDER_API_KEY === 'your_access_code_here';
+
+  if (useMock) {
+    return { usedBytes: 0, totalBytes: null };
+  }
+
+  const profile = await esimAccessRequest('/api/v1/open/esim/query', {
+    orderNo,
+    pager: { pageNum: 1, pageSize: 20 },
+  });
+
+  const esim = profile.obj?.esimList?.[0];
+  if (!esim) throw new Error(`Не вдалося оновити дані використання для замовлення ${orderNo}`);
+
+  return {
+    usedBytes: esim.orderUsage || 0,
+    totalBytes: esim.packageList?.[0]?.volume || null,
+    esimStatus: esim.esimStatus,
+    apn: esim.apn || null,
+    expiredTime: esim.expiredTime || null,
+    activateTime: esim.activateTime || null,
+  };
+}
+
+module.exports.checkUsage = checkUsage;

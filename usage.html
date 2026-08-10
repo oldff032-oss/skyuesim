@@ -45,19 +45,74 @@
         }
 
         const limitGb = data.esim.dataLimitGb;
-        const usedGb = 0; // Реальні дані про використання підключимо через Usage Check API eSIM Access пізніше
+        let usedGb = data.esim.usedGb || 0;
+        let apn = data.esim.apn;
+        let expiredTime = data.esim.expiredTime;
+        let activateTime = data.esim.activateTime;
+
+        // Тягнемо СВІЖІ дані використання з eSIM Access (не з кешу)
+        try{
+          const usageRes = await fetch(`${API_URL}/api/usage?email=${encodeURIComponent(email)}`);
+          const usageData = await usageRes.json();
+          if(usageRes.ok){
+            usedGb = usageData.usedGb;
+            apn = usageData.apn || apn;
+            expiredTime = usageData.expiredTime || expiredTime;
+            activateTime = usageData.activateTime || activateTime;
+          }
+        }catch(e){ /* якщо не вдалось оновити — показуємо останнє відоме значення */ }
+
         const pct = limitGb ? Math.min(100, Math.round((usedGb / limitGb) * 100)) : 0;
+        const isLow = limitGb && pct >= 80;
+
+        // Дні до закінчення eSIM
+        let daysLeftHtml = '';
+        if(expiredTime){
+          const daysLeft = Math.max(0, Math.ceil((new Date(expiredTime) - new Date()) / 86400000));
+          daysLeftHtml = `<div class="card"><div style="display:flex; justify-content:space-between; align-items:center;"><span class="muted">Днів до закінчення eSIM</span><b style="font-family:'Space Mono',monospace;">${daysLeft}</b></div></div>`;
+        }
+
+        // Прогноз закінчення трафіку за поточним темпом
+        let forecastHtml = '';
+        if(limitGb && usedGb > 0 && activateTime){
+          const daysSinceActivation = Math.max(1, (Date.now() - new Date(activateTime).getTime()) / 86400000);
+          const dailyAvg = usedGb / daysSinceActivation;
+          if(dailyAvg > 0){
+            const remainingGb = Math.max(0, limitGb - usedGb);
+            const daysUntilOut = remainingGb / dailyAvg;
+            const projectedDate = new Date(Date.now() + daysUntilOut * 86400000);
+            const dateStr = projectedDate.toLocaleDateString('uk-UA', { day:'numeric', month:'long' });
+            forecastHtml = `<div class="card"><p class="muted">При такому темпі використання (~${dailyAvg.toFixed(2)} ГБ/день) трафіку вистачить приблизно до <b style="color:var(--text);">${dateStr}</b>.</p></div>`;
+          }
+        } else if(limitGb) {
+          forecastHtml = `<div class="card"><p class="muted">Прогноз з'явиться, коли назбирається трохи даних про використання.</p></div>`;
+        }
 
         content.innerHTML = `
-          <div class="card">
-            <div class="usage-top"><span>Використано</span><b>${limitGb ? usedGb + ' / ' + limitGb + ' ГБ' : 'Безліміт'}</b></div>
-            ${limitGb ? `<div class="usage-track"><div class="usage-fill" style="width:${pct}%;"></div></div>` : ''}
-            <p class="muted" style="margin-top:14px;">Залишилось днів: —</p>
-          </div>
+          ${isLow ? `<div class="card" style="border-color:var(--danger);"><p style="color:var(--danger); font-size:13px; display:flex; align-items:center; gap:8px;">⚠️ Використано понад 80% трафіку тарифу</p></div>` : ''}
 
           <div class="card">
-            <p class="muted" style="line-height:1.6;">📡 Детальна статистика по днях зʼявиться тут, коли підключимо Usage Check API від eSIM Access — зараз показуємо тільки загальний ліміт тарифу.</p>
-          </div>`;
+            <div class="usage-top"><span>Використано</span><b>${limitGb ? usedGb + ' / ' + limitGb + ' ГБ' : 'Безліміт'}</b></div>
+            ${limitGb ? `<div class="usage-track"><div class="usage-fill" style="width:${pct}%; ${isLow ? 'background:linear-gradient(90deg,#f5a623,var(--danger));' : ''}"></div></div>` : ''}
+            ${apn ? `<p class="muted" style="margin-top:14px;">📡 Мережа: <span style="color:var(--text);">${apn}</span></p>` : ''}
+          </div>
+
+          ${daysLeftHtml}
+          <div id="billingCard" class="card"><p class="muted">Завантажуємо дату списання...</p></div>
+          ${forecastHtml}`;
+
+        // Дата наступного списання — окремий запит до Stripe
+        try{
+          const billingRes = await fetch(`${API_URL}/api/billing?email=${encodeURIComponent(email)}`);
+          const billingData = await billingRes.json();
+          const billingCard = document.getElementById('billingCard');
+          if(billingRes.ok && billingData.nextBillingDate){
+            const d = new Date(billingData.nextBillingDate).toLocaleDateString('uk-UA', { day:'numeric', month:'long', year:'numeric' });
+            billingCard.innerHTML = `<div style="display:flex; justify-content:space-between; align-items:center;"><span class="muted">Наступне списання</span><b>${d}</b></div>`;
+          } else {
+            billingCard.remove();
+          }
+        }catch(e){ document.getElementById('billingCard')?.remove(); }
       }catch(e){
         loading.style.display = 'none';
         content.style.display = 'block';

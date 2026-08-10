@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Нове звернення — Сигнал</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<style>
+  select{
+    width:100%; background: rgba(255,255,255,0.04); border:1.5px solid var(--border); border-radius:14px;
+    padding:15px 16px; color:var(--text); font-family:'Inter',sans-serif; font-size:15px; appearance:none;
+  }
+  textarea{
+    width:100%; background: rgba(255,255,255,0.04); border:1.5px solid var(--border); border-radius:14px;
+    padding:15px 16px; color:var(--text); font-family:'Inter',sans-serif; font-size:15px; min-height:120px; resize:vertical;
+  }
+  textarea:focus, select:focus{ outline:none; border-color:var(--blue); box-shadow:0 0 0 4px rgba(59,130,246,0.15); }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="brand"><div class="mark">📶</div><span>Сигнал</span></div>
+    <h1 style="margin-top:20px;">Нове звернення</h1>
+    <p class="lead">Опиши проблему — ми відповімо на email</p>
+
+    <div class="field-group">
+      <label class="field-label">Категорія</label>
+      <select id="category">
+        <option>eSIM не активується</option>
+        <option>Немає інтернету</option>
+        <option>Оплата / пакет не активувався</option>
+        <option>Питання про підписку</option>
+        <option>Інше</option>
+      </select>
+    </div>
+
+    <div class="field-group">
+      <label class="field-label">Тема</label>
+      <input type="text" id="subject" placeholder="Коротко опиши проблему" />
+    </div>
+
+    <div class="field-group">
+      <label class="field-label">Опис</label>
+      <textarea id="message" placeholder="Детальніше — що сталося, коли, на якому пристрої..."></textarea>
+    </div>
+
+    <div class="err-text" id="err" style="display:none;"></div>
+
+    <button class="btn" id="sendBtn" style="margin-top:22px;" onclick="submitTicket()">Надіслати звернення</button>
+    <a class="btn ghost" href="support.html" style="margin-top:10px;">Скасувати</a>
+  </div>
+
+  <script src="config.js"></script>
+  <script>
+    const email = localStorage.getItem('signal_email');
+    if(!email){ window.location.href = 'login.html'; }
+
+    async function submitTicket(){
+      const category = document.getElementById('category').value;
+      const subject = document.getElementById('subject').value.trim();
+      const message = document.getElementById('message').value.trim();
+      const err = document.getElementById('err');
+      const btn = document.getElementById('sendBtn');
+      err.style.display = 'none';
+
+      if(!subject || !message){
+        err.textContent = 'Заповни тему й опис проблеми';
+        err.style.display = 'flex';
+        return;
+      }
+
+      btn.classList.add('loading');
+      btn.textContent = 'Надсилаємо...';
+
+      try{
+        const res = await fetch(`${API_URL}/api/support/tickets`, {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ email, category, subject, message })
+        });
+        const data = await res.json();
+        if(!res.ok) throw new Error(data.error || 'Помилка сервера');
+        window.location.href = `ticket.html?id=${data.id}`;
+      }catch(e){
+        err.textContent = e.message;
+        err.style.display = 'flex';
+        btn.classList.remove('loading');
+        btn.textContent = 'Надіслати звернення';
+      }
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Звернення — Сигнал</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<style>
+  .msg{ max-width:85%; padding:12px 15px; border-radius:16px; margin-top:10px; font-size:13.5px; line-height:1.5; }
+  .msg.user{ background:linear-gradient(135deg,var(--blue),var(--violet)); margin-left:auto; border-bottom-right-radius:4px; }
+  .msg.admin{ background:var(--glass); border:1px solid var(--glass-border); border-bottom-left-radius:4px; }
+  .msg-time{ font-size:10px; color:var(--text-muted); margin-top:4px; }
+  textarea{
+    width:100%; background: rgba(255,255,255,0.04); border:1.5px solid var(--border); border-radius:14px;
+    padding:14px; color:var(--text); font-family:'Inter',sans-serif; font-size:14px; min-height:70px; resize:vertical;
+  }
+  textarea:focus{ outline:none; border-color:var(--blue); }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div style="display:flex; align-items:center; gap:12px;">
+      <a href="support.html" style="color:var(--text-muted); text-decoration:none; font-size:20px;">←</a>
+      <div class="brand"><span>Сигнал</span></div>
+    </div>
+
+    <div id="loading" class="shimmer" style="height:100px; margin-top:20px;"></div>
+    <div id="content" style="display:none;"></div>
+
+    <div id="replyBox" style="display:none; margin-top:16px;">
+      <textarea id="replyText" placeholder="Напиши відповідь..."></textarea>
+      <button class="btn" id="replyBtn" style="margin-top:10px;" onclick="sendReply()">Надіслати</button>
+    </div>
+  </div>
+
+  <script src="config.js"></script>
+  <script>
+    const email = localStorage.getItem('signal_email');
+    if(!email){ window.location.href = 'login.html'; }
+    const ticketId = new URLSearchParams(window.location.search).get('id');
+
+    const statusLabels = { open:'Відкритий', in_progress:'В роботі', waiting_customer:'Очікує вас', resolved:'Вирішено', closed:'Закрито' };
+
+    async function load(){
+      const loading = document.getElementById('loading');
+      const content = document.getElementById('content');
+      try{
+        const res = await fetch(`${API_URL}/api/support/tickets/${ticketId}?email=${encodeURIComponent(email)}`);
+        const t = await res.json();
+        loading.style.display = 'none';
+        if(!res.ok) throw new Error(t.error);
+
+        content.style.display = 'block';
+        content.innerHTML = `
+          <h1 style="margin-top:20px; font-size:20px;">#${t.id} · ${t.subject}</h1>
+          <p class="muted" style="margin-top:6px;">${t.category} · <span class="status-pill on" style="padding:3px 9px;">${statusLabels[t.status]||t.status}</span></p>
+          <div style="margin-top:20px;">
+            ${t.messages.map(m => `
+              <div class="msg ${m.from}">
+                ${m.text.replace(/\n/g,'<br>')}
+                <div class="msg-time">${new Date(m.createdAt).toLocaleString('uk-UA')}</div>
+              </div>`).join('')}
+          </div>`;
+
+        if(t.status !== 'closed'){
+          document.getElementById('replyBox').style.display = 'block';
+        }
+      }catch(e){
+        loading.style.display = 'none';
+        content.style.display = 'block';
+        content.innerHTML = `<div class="card"><p class="err-text">${e.message || 'Не вдалося завантажити звернення'}</p></div>`;
+      }
+    }
+
+    async function sendReply(){
+      const text = document.getElementById('replyText').value.trim();
+      if(!text) return;
+      const btn = document.getElementById('replyBtn');
+      btn.classList.add('loading');
+      try{
+        await fetch(`${API_URL}/api/support/tickets/${ticketId}/reply`, {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ email, message: text })
+        });
+        document.getElementById('replyText').value = '';
+        btn.classList.remove('loading');
+        load();
+      }catch(e){
+        btn.classList.remove('loading');
+      }
+    }
+
+    load();
+  </script>
+</body>
+</html>

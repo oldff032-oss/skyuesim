@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Тікет — E7 Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<style>
+  .split{ display:flex; gap:24px; margin-top:20px; align-items:flex-start; }
+  .split .main{ flex:1; min-width:0; }
+  .split .side{ width:280px; flex-shrink:0; }
+  .msg{ max-width:80%; padding:12px 15px; border-radius:16px; margin-top:10px; font-size:13.5px; line-height:1.5; }
+  .msg.user{ background:var(--glass); border:1px solid var(--glass-border); border-bottom-left-radius:4px; }
+  .msg.admin{ background:linear-gradient(135deg,var(--blue),var(--violet)); margin-left:auto; border-bottom-right-radius:4px; }
+  .msg-time{ font-size:10px; color:var(--text-muted); margin-top:4px; }
+  textarea{ width:100%; background: rgba(255,255,255,0.04); border:1.5px solid var(--border); border-radius:14px; padding:14px; color:var(--text); font-family:'Inter',sans-serif; font-size:14px; min-height:80px; resize:vertical; }
+  textarea:focus{ outline:none; border-color:var(--blue); }
+  select{ width:100%; background:rgba(255,255,255,0.04); border:1.5px solid var(--border); border-radius:10px; padding:9px 12px; color:var(--text); font-size:13px; margin-top:6px; }
+  .side-row{ margin-top:14px; }
+  .side-row .k{ font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:.04em; }
+  .side-row .v{ font-size:13.5px; margin-top:3px; }
+</style>
+</head>
+<body>
+  <div class="admin-shell">
+    <aside class="admin-sidebar">
+      <div class="brand"><div class="mark" style="width:32px;height:32px;font-size:15px;">🛠️</div><span style="font-size:15px;">E7 Admin</span></div>
+      <nav class="admin-nav">
+        <a href="admin-dashboard.html">📊 Dashboard</a>
+        <a href="admin-tickets.html" class="active">🎫 Support</a>
+        <a href="admin-users.html">👥 Users</a>
+        <a href="#" onclick="logout()">⎋ Вийти</a>
+      </nav>
+    </aside>
+    <main class="admin-main">
+      <a href="admin-tickets.html" style="color:var(--text-muted); text-decoration:none; font-size:13px;">← Усі тікети</a>
+      <div id="loading" class="shimmer" style="height:200px; margin-top:16px;"></div>
+      <div id="content" class="split" style="display:none;"></div>
+    </main>
+  </div>
+
+  <script src="config.js"></script>
+  <script src="admin-common.js"></script>
+  <script>
+    requireAdminAuth();
+    const ticketId = new URLSearchParams(window.location.search).get('id');
+
+    async function load(){
+      try{
+        const res = await adminFetch(`/api/admin/tickets/${ticketId}`);
+        const { ticket, userSubscription } = await res.json();
+        document.getElementById('loading').style.display = 'none';
+        const content = document.getElementById('content');
+        content.style.display = 'flex';
+
+        content.innerHTML = `
+          <div class="main">
+            <h1 style="font-size:20px;">#${ticket.id} · ${ticket.subject}</h1>
+            <p class="muted" style="margin-top:6px;">${ticket.email} · ${ticket.category}</p>
+            <div style="margin-top:16px;">
+              ${ticket.messages.map(m => `
+                <div class="msg ${m.from}">
+                  ${m.text.replace(/\n/g,'<br>')}
+                  <div class="msg-time">${m.from === 'admin' ? 'Ви' : 'Клієнт'} · ${new Date(m.createdAt).toLocaleString('uk-UA')}</div>
+                </div>`).join('')}
+            </div>
+            <div style="margin-top:18px;">
+              <textarea id="replyText" placeholder="Напиши відповідь клієнту (реально надішлеться на email)..."></textarea>
+              <button class="btn" id="replyBtn" style="margin-top:10px; width:auto; padding:12px 24px;" onclick="sendReply()">Відправити відповідь</button>
+            </div>
+          </div>
+          <div class="side">
+            <div class="glass glass-card">
+              <div class="side-row" style="margin-top:0;"><div class="k">Статус</div>
+                <select id="statusSelect" onchange="updateTicket()">
+                  ${['open','in_progress','waiting_customer','resolved','closed'].map(s => `<option value="${s}" ${s===ticket.status?'selected':''}>${s}</option>`).join('')}
+                </select>
+              </div>
+              <div class="side-row"><div class="k">Пріоритет</div>
+                <select id="prioritySelect" onchange="updateTicket()">
+                  ${['normal','priority','high','critical'].map(p => `<option value="${p}" ${p===ticket.priority?'selected':''}>${p}</option>`).join('')}
+                </select>
+              </div>
+            </div>
+
+            <div class="glass glass-card" style="margin-top:14px;">
+              <div style="font-weight:700; font-size:13px;">Користувач</div>
+              ${userSubscription ? `
+                <div class="side-row"><div class="k">Тариф</div><div class="v">${userSubscription.plan || '—'}</div></div>
+                <div class="side-row"><div class="k">Статус підписки</div><div class="v">${userSubscription.status || '—'}</div></div>
+                ${userSubscription.esim ? `
+                  <div class="side-row"><div class="k">ICCID</div><div class="v" style="font-family:'Space Mono',monospace; font-size:11px;">${userSubscription.esim.iccid || '—'}</div></div>
+                  <div class="side-row"><div class="k">Використано / Ліміт</div><div class="v">${userSubscription.esim.usedGb ?? 0} / ${userSubscription.esim.dataLimitGb ?? '∞'} ГБ</div></div>
+                ` : ''}
+              ` : `<p class="muted" style="margin-top:10px;">Немає активної підписки</p>`}
+            </div>
+          </div>`;
+      }catch(e){
+        document.getElementById('loading').style.display = 'none';
+      }
+    }
+
+    async function updateTicket(){
+      const status = document.getElementById('statusSelect').value;
+      const priority = document.getElementById('prioritySelect').value;
+      await adminFetch(`/api/admin/tickets/${ticketId}`, { method:'PATCH', body: JSON.stringify({ status, priority }) });
+    }
+
+    async function sendReply(){
+      const text = document.getElementById('replyText').value.trim();
+      if(!text) return;
+      const btn = document.getElementById('replyBtn');
+      btn.classList.add('loading');
+      try{
+        await adminFetch(`/api/admin/tickets/${ticketId}/reply`, { method:'POST', body: JSON.stringify({ message: text }) });
+        document.getElementById('replyText').value = '';
+        load();
+      }catch(e){}
+      btn.classList.remove('loading');
+    }
+
+    load();
+  </script>
+</body>
+</html>

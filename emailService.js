@@ -53,4 +53,35 @@ async function sendVerificationCode(email, code) {
   return await response.json();
 }
 
-module.exports = { sendVerificationCode };
+module.exports = { sendVerificationCode, sendEmail };
+
+// Універсальна відправка листа — використовується і для коду підтвердження,
+// і для відповідей підтримки на тікети.
+async function sendEmail({ to, subject, html }) {
+  const useMock = !process.env.RESEND_API_KEY || process.env.RESEND_API_KEY === 'your_resend_api_key_here';
+
+  if (useMock) {
+    console.log(`\n📧 [emailService] MOCK-режим: лист "${subject}" для ${to} не надіслано насправді.\n`);
+    return { mocked: true };
+  }
+
+  const response = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${process.env.RESEND_API_KEY}`,
+    },
+    body: JSON.stringify({
+      from: process.env.RESEND_FROM_EMAIL || 'Сигнал <onboarding@resend.dev>',
+      to: [to],
+      subject,
+      html,
+    }),
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`Resend error: ${response.status} ${errText}`);
+  }
+  return await response.json();
+}

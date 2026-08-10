@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Support — E7 Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="admin-shell">
+    <aside class="admin-sidebar">
+      <div class="brand"><div class="mark" style="width:32px;height:32px;font-size:15px;">🛠️</div><span style="font-size:15px;">E7 Admin</span></div>
+      <nav class="admin-nav">
+        <a href="admin-dashboard.html">📊 Dashboard</a>
+        <a href="admin-tickets.html" class="active">🎫 Support</a>
+        <a href="admin-users.html">👥 Users</a>
+        <a href="#" onclick="logout()">⎋ Вийти</a>
+      </nav>
+    </aside>
+    <main class="admin-main">
+      <h1 style="font-size:22px;">Тікети підтримки</h1>
+      <p class="lead">Усі звернення користувачів</p>
+
+      <div class="filter-bar">
+        <input type="text" id="search" placeholder="Пошук: ID, email, тема..." style="min-width:220px;" />
+        <select id="statusFilter">
+          <option value="">Усі статуси</option>
+          <option value="open">Відкритий</option>
+          <option value="in_progress">В роботі</option>
+          <option value="waiting_customer">Очікує клієнта</option>
+          <option value="resolved">Вирішено</option>
+          <option value="closed">Закрито</option>
+        </select>
+        <select id="priorityFilter">
+          <option value="">Усі пріоритети</option>
+          <option value="normal">Normal</option>
+          <option value="priority">Priority</option>
+          <option value="high">High</option>
+          <option value="critical">Critical</option>
+        </select>
+      </div>
+
+      <div id="loading" class="shimmer" style="height:200px; margin-top:16px;"></div>
+      <table class="admin-table" id="table" style="display:none;">
+        <thead><tr><th>ID</th><th>Користувач</th><th>Тема</th><th>Категорія</th><th>Пріоритет</th><th>Статус</th><th>Оновлено</th></tr></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </main>
+  </div>
+
+  <script src="config.js"></script>
+  <script src="admin-common.js"></script>
+  <script>
+    requireAdminAuth();
+    const statusLabels = { open:'Відкритий', in_progress:'В роботі', waiting_customer:'Очікує клієнта', resolved:'Вирішено', closed:'Закрито' };
+    const priorityColors = { normal:'var(--text-muted)', priority:'var(--blue)', high:'#f5a623', critical:'var(--danger)' };
+
+    async function load(){
+      const search = document.getElementById('search').value;
+      const status = document.getElementById('statusFilter').value;
+      const priority = document.getElementById('priorityFilter').value;
+      const params = new URLSearchParams({ ...(search&&{search}), ...(status&&{status}), ...(priority&&{priority}) });
+
+      try{
+        const res = await adminFetch(`/api/admin/tickets?${params}`);
+        const tickets = await res.json();
+        document.getElementById('loading').style.display = 'none';
+        document.getElementById('table').style.display = 'table';
+        document.getElementById('tbody').innerHTML = tickets.map(t => `
+          <tr onclick="window.location.href='admin-ticket.html?id=${t.id}'">
+            <td>#${t.id}</td>
+            <td>${t.email}</td>
+            <td>${t.subject}</td>
+            <td>${t.category}</td>
+            <td style="color:${priorityColors[t.priority]};">${t.priority}</td>
+            <td>${statusLabels[t.status]||t.status}</td>
+            <td>${new Date(t.updatedAt).toLocaleString('uk-UA')}</td>
+          </tr>`).join('') || '<tr><td colspan="7" class="muted">Нічого не знайдено</td></tr>';
+      }catch(e){}
+    }
+
+    document.getElementById('search').addEventListener('input', load);
+    document.getElementById('statusFilter').addEventListener('change', load);
+    document.getElementById('priorityFilter').addEventListener('change', load);
+    load();
+  </script>
+</body>
+</html>

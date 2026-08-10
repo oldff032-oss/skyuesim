@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Вхід — E7 Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="wrap" style="max-width:380px;">
+    <div class="brand"><div class="mark">🛠️</div><span>Сигнал Admin</span></div>
+    <h1 style="margin-top:20px; font-size:22px;">Вхід в адмін-панель</h1>
+    <p class="lead">Тільки для команди підтримки</p>
+
+    <div class="field-group">
+      <label class="field-label">Пароль</label>
+      <input type="password" id="password" placeholder="••••••••" />
+    </div>
+    <div class="err-text" id="err" style="display:none;"></div>
+
+    <button class="btn" id="loginBtn" style="margin-top:20px;" onclick="doLogin()">Увійти</button>
+  </div>
+
+  <script src="config.js"></script>
+  <script>
+    async function doLogin(){
+      const password = document.getElementById('password').value;
+      const err = document.getElementById('err');
+      const btn = document.getElementById('loginBtn');
+      err.style.display = 'none';
+
+      if(!password){ err.textContent = 'Введи пароль'; err.style.display='flex'; return; }
+
+      btn.classList.add('loading');
+      try{
+        const res = await fetch(`${API_URL}/api/admin/login`, {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ password })
+        });
+        const data = await res.json();
+        if(!res.ok) throw new Error(data.error);
+        localStorage.setItem('signal_admin_token', data.token);
+        window.location.href = 'admin-dashboard.html';
+      }catch(e){
+        err.textContent = e.message;
+        err.style.display = 'flex';
+        btn.classList.remove('loading');
+      }
+    }
+    document.getElementById('password').addEventListener('keydown', e => { if(e.key==='Enter') doLogin(); });
+  </script>
+</body>
+</html>

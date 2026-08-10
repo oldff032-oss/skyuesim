@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dashboard — E7 Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="admin-shell">
+    <aside class="admin-sidebar">
+      <div class="brand"><div class="mark" style="width:32px;height:32px;font-size:15px;">🛠️</div><span style="font-size:15px;">E7 Admin</span></div>
+      <nav class="admin-nav">
+        <a href="admin-dashboard.html" class="active">📊 Dashboard</a>
+        <a href="admin-tickets.html">🎫 Support</a>
+        <a href="admin-users.html">👥 Users</a>
+        <a href="#" onclick="logout()">⎋ Вийти</a>
+      </nav>
+    </aside>
+    <main class="admin-main">
+      <h1 style="font-size:22px;">Dashboard</h1>
+      <p class="lead">Загальний стан системи</p>
+
+      <div id="loading" class="shimmer" style="height:100px; margin-top:20px;"></div>
+      <div class="stat-grid" id="stats" style="display:none;"></div>
+    </main>
+  </div>
+
+  <script src="config.js"></script>
+  <script src="admin-common.js"></script>
+  <script>
+    requireAdminAuth();
+
+    async function load(){
+      try{
+        const [ticketsRes, usersRes] = await Promise.all([
+          adminFetch('/api/admin/tickets'),
+          adminFetch('/api/admin/users'),
+        ]);
+        const tickets = await ticketsRes.json();
+        const users = await usersRes.json();
+
+        document.getElementById('loading').style.display = 'none';
+        const statsEl = document.getElementById('stats');
+        statsEl.style.display = 'grid';
+
+        const open = tickets.filter(t => t.status === 'open').length;
+        const inProgress = tickets.filter(t => t.status === 'in_progress').length;
+        const activeSubs = users.filter(u => u.subscription?.status === 'active').length;
+
+        statsEl.innerHTML = `
+          <div class="glass stat-card"><div class="num">${users.length}</div><div class="lbl">Усього користувачів</div></div>
+          <div class="glass stat-card"><div class="num" style="color:var(--success);">${activeSubs}</div><div class="lbl">Активних підписок</div></div>
+          <div class="glass stat-card"><div class="num">${tickets.length}</div><div class="lbl">Усього тікетів</div></div>
+          <div class="glass stat-card"><div class="num" style="color:var(--blue);">${open}</div><div class="lbl">Відкритих</div></div>
+          <div class="glass stat-card"><div class="num" style="color:var(--violet);">${inProgress}</div><div class="lbl">В роботі</div></div>`;
+      }catch(e){
+        document.getElementById('loading').style.display = 'none';
+      }
+    }
+    load();
+  </script>
+</body>
+</html>
