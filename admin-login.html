@@ -15,6 +15,10 @@
     <p class="lead">Тільки для команди підтримки</p>
 
     <div class="field-group">
+      <label class="field-label">Email</label>
+      <input type="email" id="email" placeholder="admin@example.com" />
+    </div>
+    <div class="field-group">
       <label class="field-label">Пароль</label>
       <input type="password" id="password" placeholder="••••••••" />
     </div>
@@ -26,22 +30,25 @@
   <script src="config.js"></script>
   <script>
     async function doLogin(){
+      const email = document.getElementById('email').value.trim();
       const password = document.getElementById('password').value;
       const err = document.getElementById('err');
       const btn = document.getElementById('loginBtn');
       err.style.display = 'none';
 
-      if(!password){ err.textContent = 'Введи пароль'; err.style.display='flex'; return; }
+      if(!email || !password){ err.textContent = 'Заповни email і пароль'; err.style.display='flex'; return; }
 
       btn.classList.add('loading');
       try{
         const res = await fetch(`${API_URL}/api/admin/login`, {
           method:'POST', headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({ password })
+          body: JSON.stringify({ email, password })
         });
         const data = await res.json();
         if(!res.ok) throw new Error(data.error);
         localStorage.setItem('signal_admin_token', data.token);
+        localStorage.setItem('signal_admin_role', data.role);
+        localStorage.setItem('signal_admin_email', data.email);
         window.location.href = 'admin-dashboard.html';
       }catch(e){
         err.textContent = e.message;

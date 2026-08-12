@@ -26,7 +26,7 @@ function writeAll(data) {
   fs.writeFileSync(FILE, JSON.stringify(data, null, 2));
 }
 
-function createTicket({ email, category, subject, message }) {
+function createTicket({ email, category, subject, message, attachment }) {
   const store = readAll();
   const id = store.nextId;
   const ticket = {
@@ -39,7 +39,7 @@ function createTicket({ email, category, subject, message }) {
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     messages: [
-      { from: 'user', text: message, createdAt: new Date().toISOString() },
+      { from: 'user', text: message, attachment: attachment || null, createdAt: new Date().toISOString() },
     ],
   };
   store.tickets.push(ticket);
@@ -74,15 +74,22 @@ function getTicket(id) {
   return store.tickets.find(t => t.id === Number(id)) || null;
 }
 
-function addMessage(id, { from, text }) {
+function addMessage(id, { from, text, attachment }) {
   const store = readAll();
   const ticket = store.tickets.find(t => t.id === Number(id));
   if (!ticket) return null;
-  ticket.messages.push({ from, text, createdAt: new Date().toISOString() });
+  ticket.messages.push({ from, text, attachment: attachment || null, createdAt: new Date().toISOString() });
   ticket.updatedAt = new Date().toISOString();
   if (from === 'admin' && ticket.status === 'open') ticket.status = 'in_progress';
   writeAll(store);
   return ticket;
+}
+
+// Внутрішні нотатки видно тільки адмінам — ця функція прибирає їх перед
+// тим, як віддати тікет користувачу.
+function stripNotesForUser(ticket) {
+  if (!ticket) return ticket;
+  return { ...ticket, messages: ticket.messages.filter(m => m.from !== 'note') };
 }
 
 function updateTicket(id, patch) {
@@ -94,4 +101,4 @@ function updateTicket(id, patch) {
   return ticket;
 }
 
-module.exports = { createTicket, getTicketsByEmail, getAllTickets, getTicket, addMessage, updateTicket };
+module.exports = { createTicket, getTicketsByEmail, getAllTickets, getTicket, addMessage, updateTicket, stripNotesForUser };

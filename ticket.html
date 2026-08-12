@@ -31,6 +31,7 @@
 
     <div id="replyBox" style="display:none; margin-top:16px;">
       <textarea id="replyText" placeholder="Напиши відповідь..."></textarea>
+      <input type="file" id="replyAttachment" accept="image/*,.pdf" style="width:100%; margin-top:8px; background:rgba(255,255,255,0.04); border:1.5px solid var(--border); border-radius:12px; padding:10px 12px; color:var(--text-muted); font-size:12.5px;" />
       <button class="btn" id="replyBtn" style="margin-top:10px;" onclick="sendReply()">Надіслати</button>
     </div>
   </div>
@@ -42,6 +43,25 @@
     const ticketId = new URLSearchParams(window.location.search).get('id');
 
     const statusLabels = { open:'Відкритий', in_progress:'В роботі', waiting_customer:'Очікує вас', resolved:'Вирішено', closed:'Закрито' };
+
+    function renderAttachment(a){
+      if(!a) return '';
+      if(a.type && a.type.startsWith('image/')){
+        return `<img src="${a.dataUrl}" style="max-width:100%; border-radius:10px; margin-top:8px; display:block;" />`;
+      }
+      return `<a href="${a.dataUrl}" download="${a.name}" style="display:block; margin-top:8px; color:inherit; text-decoration:underline; font-size:12px;">📎 ${a.name}</a>`;
+    }
+
+    function fileToAttachment(file){
+      return new Promise((resolve, reject) => {
+        if(!file) return resolve(null);
+        if(file.size > 3.5 * 1024 * 1024){ reject(new Error('Файл завеликий')); return; }
+        const reader = new FileReader();
+        reader.onload = () => resolve({ name: file.name, type: file.type, dataUrl: reader.result });
+        reader.onerror = () => reject(new Error('Не вдалося прочитати файл'));
+        reader.readAsDataURL(file);
+      });
+    }
 
     async function load(){
       const loading = document.getElementById('loading');
@@ -60,6 +80,7 @@
             ${t.messages.map(m => `
               <div class="msg ${m.from}">
                 ${m.text.replace(/\n/g,'<br>')}
+                ${renderAttachment(m.attachment)}
                 <div class="msg-time">${new Date(m.createdAt).toLocaleString('uk-UA')}</div>
               </div>`).join('')}
           </div>`;
@@ -80,11 +101,13 @@
       const btn = document.getElementById('replyBtn');
       btn.classList.add('loading');
       try{
+        const attachment = await fileToAttachment(document.getElementById('replyAttachment').files[0]);
         await fetch(`${API_URL}/api/support/tickets/${ticketId}/reply`, {
           method:'POST', headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({ email, message: text })
+          body: JSON.stringify({ email, message: text, attachment })
         });
         document.getElementById('replyText').value = '';
+        document.getElementById('replyAttachment').value = '';
         btn.classList.remove('loading');
         load();
       }catch(e){

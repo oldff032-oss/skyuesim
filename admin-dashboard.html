@@ -16,12 +16,14 @@
         <a href="admin-dashboard.html" class="active">📊 Dashboard</a>
         <a href="admin-tickets.html">🎫 Support</a>
         <a href="admin-users.html">👥 Users</a>
+        <a href="admin-team.html" id="teamNavLink">🔑 Команда</a>
         <a href="#" onclick="logout()">⎋ Вийти</a>
       </nav>
     </aside>
     <main class="admin-main">
       <h1 style="font-size:22px;">Dashboard</h1>
-      <p class="lead">Загальний стан системи</p>
+      <p class="lead" id="whoami"></p>
+      <script>document.getElementById('whoami').textContent = localStorage.getItem('signal_admin_email') + ' · ' + localStorage.getItem('signal_admin_role');</script>
 
       <div id="loading" class="shimmer" style="height:100px; margin-top:20px;"></div>
       <div class="stat-grid" id="stats" style="display:none;"></div>

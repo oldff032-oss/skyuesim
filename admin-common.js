@@ -4,6 +4,9 @@
 function requireAdminAuth(){
   const token = localStorage.getItem('signal_admin_token');
   if(!token){ window.location.href = 'admin-login.html'; }
+  const role = localStorage.getItem('signal_admin_role');
+  const teamLink = document.getElementById('teamNavLink');
+  if(teamLink && role !== 'super_admin') teamLink.style.display = 'none';
 }
 
 async function adminFetch(path, options = {}){
@@ -26,5 +29,7 @@ async function adminFetch(path, options = {}){
 
 function logout(){
   localStorage.removeItem('signal_admin_token');
+  localStorage.removeItem('signal_admin_role');
+  localStorage.removeItem('signal_admin_email');
   window.location.href = 'admin-login.html';
 }

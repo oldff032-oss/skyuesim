@@ -85,10 +85,13 @@ app.get('/api/auth/me', (req, res) => {
 
 app.post('/api/support/tickets', async (req, res) => {
   try {
-    const { email, category, subject, message } = req.body;
+    const { email, category, subject, message, attachment } = req.body;
     if (!email || !subject || !message) return res.status(400).json({ error: 'Потрібні email, subject і message' });
+    if (attachment && attachment.dataUrl && attachment.dataUrl.length > 4_500_000) {
+      return res.status(400).json({ error: 'Файл завеликий (максимум ~3МБ)' });
+    }
 
-    const ticket = ticketStore.createTicket({ email, category: category || 'Інше', subject, message });
+    const ticket = ticketStore.createTicket({ email, category: category || 'Інше', subject, message, attachment });
     res.json(ticket);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -104,36 +107,62 @@ app.get('/api/support/tickets', (req, res) => {
 app.get('/api/support/tickets/:id', (req, res) => {
   const ticket = ticketStore.getTicket(req.params.id);
   if (!ticket) return res.status(404).json({ error: 'Тікет не знайдено' });
-  // Проста перевірка власності — email в query має збігатись з email тікета
   if (req.query.email && ticket.email !== req.query.email) {
     return res.status(403).json({ error: 'Немає доступу до цього тікета' });
   }
-  res.json(ticket);
+  // Внутрішні нотатки адмінів користувач бачити не повинен
+  res.json(ticketStore.stripNotesForUser(ticket));
 });
 
 app.post('/api/support/tickets/:id/reply', (req, res) => {
-  const { email, message } = req.body;
+  const { email, message, attachment } = req.body;
   const ticket = ticketStore.getTicket(req.params.id);
   if (!ticket) return res.status(404).json({ error: 'Тікет не знайдено' });
   if (ticket.email !== email) return res.status(403).json({ error: 'Немає доступу до цього тікета' });
+  if (attachment && attachment.dataUrl && attachment.dataUrl.length > 4_500_000) {
+    return res.status(400).json({ error: 'Файл завеликий (максимум ~3МБ)' });
+  }
 
-  const updated = ticketStore.addMessage(req.params.id, { from: 'user', text: message });
-  res.json(updated);
+  const updated = ticketStore.addMessage(req.params.id, { from: 'user', text: message, attachment });
+  res.json(ticketStore.stripNotesForUser(updated));
 });
 
 // =========================================================
-// АДМІН-ПАНЕЛЬ (базова версія: один пароль, без ролей поки що)
+// АДМІН-ПАНЕЛЬ: акаунти адмінів з ролями (Super Admin/Admin/Support/Viewer)
 // =========================================================
 
-app.post('/api/admin/login', (req, res) => {
+app.post('/api/admin/login', async (req, res) => {
   try {
-    const token = adminAuth.login(req.body.password);
-    res.json({ token });
+    const { email, password } = req.body;
+    const result = await adminAuth.login(email, password);
+    res.json(result);
   } catch (err) {
     res.status(401).json({ error: err.message, code: err.code });
   }
 });
 
+app.get('/api/admin/me', adminAuth.requireAdmin, (req, res) => {
+  res.json(req.admin);
+});
+
+// Керування командою — тільки Super Admin
+app.get('/api/admin/team', adminAuth.requireAdmin, adminAuth.requireRole('super_admin'), (req, res) => {
+  res.json(adminAuth.listAdmins());
+});
+
+app.post('/api/admin/team', adminAuth.requireAdmin, adminAuth.requireRole('super_admin'), async (req, res) => {
+  try {
+    const { email, password, role } = req.body;
+    if (!email || !password || !role) return res.status(400).json({ error: 'Потрібні email, password і role' });
+    if (password.length < 8) return res.status(400).json({ error: 'Пароль має бути не менше 8 символів' });
+    await adminAuth.createAdmin({ email, password, role });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({ error: err.message, code: err.code });
+  }
+});
+
+// Перегляд тікетів — доступний усім ролям, крім нічого (навіть Viewer читає)
 app.get('/api/admin/tickets', adminAuth.requireAdmin, (req, res) => {
   const { status, priority, search } = req.query;
   res.json(ticketStore.getAllTickets({ status, priority, search }));
@@ -142,12 +171,12 @@ app.get('/api/admin/tickets', adminAuth.requireAdmin, (req, res) => {
 app.get('/api/admin/tickets/:id', adminAuth.requireAdmin, (req, res) => {
   const ticket = ticketStore.getTicket(req.params.id);
   if (!ticket) return res.status(404).json({ error: 'Тікет не знайдено' });
-  // Прикладаємо картку користувача (підписка, eSIM) — зв'язок User → Ticket → Subscription
   const userSubscription = getUser(ticket.email);
   res.json({ ticket, userSubscription });
 });
 
-app.patch('/api/admin/tickets/:id', adminAuth.requireAdmin, (req, res) => {
+// Зміна статусу/пріоритету — заборонено для Viewer
+app.patch('/api/admin/tickets/:id', adminAuth.requireAdmin, adminAuth.requireRole('super_admin', 'admin', 'support'), (req, res) => {
   const { status, priority } = req.body;
   const updated = ticketStore.updateTicket(req.params.id, {
     ...(status && { status }),
@@ -157,15 +186,15 @@ app.patch('/api/admin/tickets/:id', adminAuth.requireAdmin, (req, res) => {
   res.json(updated);
 });
 
-app.post('/api/admin/tickets/:id/reply', adminAuth.requireAdmin, async (req, res) => {
+// Відповідь клієнту (реальний email) — заборонено для Viewer
+app.post('/api/admin/tickets/:id/reply', adminAuth.requireAdmin, adminAuth.requireRole('super_admin', 'admin', 'support'), async (req, res) => {
   try {
-    const { message } = req.body;
+    const { message, attachment } = req.body;
     const ticket = ticketStore.getTicket(req.params.id);
     if (!ticket) return res.status(404).json({ error: 'Тікет не знайдено' });
 
-    const updated = ticketStore.addMessage(req.params.id, { from: 'admin', text: message });
+    const updated = ticketStore.addMessage(req.params.id, { from: 'admin', text: message, attachment });
 
-    // Реальна відправка email користувачу з Ticket ID у темі
     try {
       await sendEmail({
         to: ticket.email,
@@ -187,7 +216,16 @@ app.post('/api/admin/tickets/:id/reply', adminAuth.requireAdmin, async (req, res
   }
 });
 
-// Список користувачів для адмінки (з'єднуємо дані підписки + auth-акаунт)
+// Внутрішня нотатка — видно ТІЛЬКИ адмінам, email не надсилається. Заборонено для Viewer
+app.post('/api/admin/tickets/:id/note', adminAuth.requireAdmin, adminAuth.requireRole('super_admin', 'admin', 'support'), (req, res) => {
+  const { text } = req.body;
+  const ticket = ticketStore.getTicket(req.params.id);
+  if (!ticket) return res.status(404).json({ error: 'Тікет не знайдено' });
+  const updated = ticketStore.addMessage(req.params.id, { from: 'note', text });
+  res.json(updated);
+});
+
+// Список користувачів для адмінки
 app.get('/api/admin/users', adminAuth.requireAdmin, (req, res) => {
   const { readAll: readAuth } = require('./authStore');
   const authData = readAuth();
@@ -348,6 +386,8 @@ app.post('/api/cancel', async (req, res) => {
 });
 
 const PORT = process.env.PORT || 4242;
-app.listen(PORT, () => {
-  console.log(`Signal backend running on http://localhost:${PORT}`);
+adminAuth.bootstrap().then(() => {
+  app.listen(PORT, () => {
+    console.log(`Signal backend running on http://localhost:${PORT}`);
+  });
 });
