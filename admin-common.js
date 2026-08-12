@@ -6,7 +6,11 @@ function requireAdminAuth(){
   if(!token){ window.location.href = 'admin-login.html'; }
   const role = localStorage.getItem('signal_admin_role');
   const teamLink = document.getElementById('teamNavLink');
-  if(teamLink && role !== 'super_admin') teamLink.style.display = 'none';
+  const auditLink = document.getElementById('auditNavLink');
+  if(role !== 'super_admin'){
+    if(teamLink) teamLink.style.display = 'none';
+    if(auditLink) auditLink.style.display = 'none';
+  }
 }
 
 async function adminFetch(path, options = {}){

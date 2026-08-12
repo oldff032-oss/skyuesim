@@ -12,8 +12,9 @@ const { provisionEsim, checkUsage } = require('./esimService');
 const { getUser, saveUser, getUserByStripeCustomerId } = require('./db');
 const authService = require('./authService');
 const ticketStore = require('./ticketStore');
+const auditStore = require('./auditStore');
 const adminAuth = require('./adminAuthService');
-const { sendEmail } = require('./emailService');
+const { sendEmail, getReceivedEmail, verifyInboundSignature } = require('./emailService');
 
 const app = express();
 app.use(cors());
@@ -21,6 +22,7 @@ app.use(cors());
 // ВАЖЛИВО: вебхук Stripe має отримати "сирий" (не розпарсений) body,
 // тому для цього одного маршруту JSON-парсер вимикаємо.
 app.use('/api/webhook', express.raw({ type: 'application/json' }));
+app.use('/api/inbound-email', express.raw({ type: 'application/json' }));
 app.use(express.json());
 
 // =========================================================
@@ -80,6 +82,49 @@ app.get('/api/auth/me', (req, res) => {
 });
 
 // =========================================================
+// ВХІДНА ПОШТА: реальні відповіді користувачів на email потрапляють сюди
+// =========================================================
+
+app.post('/api/inbound-email', async (req, res) => {
+  try {
+    verifyInboundSignature(req.body, req.headers);
+    const event = JSON.parse(req.body);
+
+    if (event.type !== 'email.received') {
+      return res.json({ received: true, skipped: true });
+    }
+
+    // Вебхук дає тільки метадані — забираємо повний текст листа окремо
+    const email = await getReceivedEmail(event.data.email_id);
+
+    // Витягуємо ID тікета з теми листа: "[Сигнал Підтримка #123] ..."
+    const match = (email.subject || '').match(/#(\d+)/);
+    if (!match) {
+      console.log('[inbound-email] Не вдалося знайти Ticket ID в темі:', email.subject);
+      return res.json({ received: true, matched: false });
+    }
+
+    const ticketId = match[1];
+    const ticket = ticketStore.getTicket(ticketId);
+    if (!ticket) {
+      console.log(`[inbound-email] Тікет #${ticketId} не знайдено`);
+      return res.json({ received: true, matched: false });
+    }
+
+    // Простий текст без HTML-розмітки, якщо є тільки html-версія
+    const text = email.text || (email.html || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+
+    ticketStore.addMessage(ticketId, { from: 'user', text });
+    console.log(`[inbound-email] Додано відповідь у тікет #${ticketId} від ${email.from}`);
+
+    res.json({ received: true, ticketId });
+  } catch (err) {
+    console.error('Помилка обробки вхідного листа:', err.message);
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// =========================================================
 // ПІДТРИМКА (SUPPORT): звернення користувачів
 // =========================================================
 
@@ -135,6 +180,7 @@ app.post('/api/admin/login', async (req, res) => {
   try {
     const { email, password } = req.body;
     const result = await adminAuth.login(email, password);
+    auditStore.log({ adminEmail: result.email, action: 'admin_login' });
     res.json(result);
   } catch (err) {
     res.status(401).json({ error: err.message, code: err.code });
@@ -156,6 +202,7 @@ app.post('/api/admin/team', adminAuth.requireAdmin, adminAuth.requireRole('super
     if (!email || !password || !role) return res.status(400).json({ error: 'Потрібні email, password і role' });
     if (password.length < 8) return res.status(400).json({ error: 'Пароль має бути не менше 8 символів' });
     await adminAuth.createAdmin({ email, password, role });
+    auditStore.log({ adminEmail: req.admin.email, action: 'admin_created', target: email, details: { role } });
     res.json({ ok: true });
   } catch (err) {
     res.status(400).json({ error: err.message, code: err.code });
@@ -183,6 +230,7 @@ app.patch('/api/admin/tickets/:id', adminAuth.requireAdmin, adminAuth.requireRol
     ...(priority && { priority }),
   });
   if (!updated) return res.status(404).json({ error: 'Тікет не знайдено' });
+  auditStore.log({ adminEmail: req.admin.email, action: 'ticket_updated', target: `#${req.params.id}`, details: { status, priority } });
   res.json(updated);
 });
 
@@ -194,6 +242,7 @@ app.post('/api/admin/tickets/:id/reply', adminAuth.requireAdmin, adminAuth.requi
     if (!ticket) return res.status(404).json({ error: 'Тікет не знайдено' });
 
     const updated = ticketStore.addMessage(req.params.id, { from: 'admin', text: message, attachment });
+    auditStore.log({ adminEmail: req.admin.email, action: 'ticket_reply_sent', target: `#${req.params.id}` });
 
     try {
       await sendEmail({
@@ -203,8 +252,9 @@ app.post('/api/admin/tickets/:id/reply', adminAuth.requireAdmin, adminAuth.requi
           <div style="font-family: sans-serif; max-width: 480px;">
             <p>${message.replace(/\n/g, '<br>')}</p>
             <hr style="border:none; border-top:1px solid #eee; margin:20px 0;">
-            <p style="color:#888; font-size:12px;">Ticket ID: #${ticket.id}. Щоб відповісти, зайди в застосунок Сигнал → Підтримка.</p>
+            <p style="color:#888; font-size:12px;">Ticket ID: #${ticket.id}. Можеш відповісти прямо на цей email — відповідь автоматично додасться в тікет.</p>
           </div>`,
+        replyTo: process.env.RESEND_INBOUND_ADDRESS || undefined,
       });
     } catch (emailErr) {
       console.error('Не вдалося надіслати email по тікету:', emailErr.message);
@@ -222,7 +272,13 @@ app.post('/api/admin/tickets/:id/note', adminAuth.requireAdmin, adminAuth.requir
   const ticket = ticketStore.getTicket(req.params.id);
   if (!ticket) return res.status(404).json({ error: 'Тікет не знайдено' });
   const updated = ticketStore.addMessage(req.params.id, { from: 'note', text });
+  auditStore.log({ adminEmail: req.admin.email, action: 'ticket_note_added', target: `#${req.params.id}` });
   res.json(updated);
+});
+
+// Audit Log — тільки Super Admin (це чутливі дані про дії всієї команди)
+app.get('/api/admin/audit-log', adminAuth.requireAdmin, adminAuth.requireRole('super_admin'), (req, res) => {
+  res.json(auditStore.getAll());
 });
 
 // Список користувачів для адмінки
