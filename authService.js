@@ -5,7 +5,7 @@
 
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
-const { readAll, writeAll } = require('../authStore');
+const { readAll, writeAll } = require('./authStore');
 const { sendVerificationCode } = require('./emailService');
 
 const CODE_TTL_MS = 10 * 60 * 1000; // 10 хвилин
