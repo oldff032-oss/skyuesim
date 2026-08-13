@@ -3,30 +3,63 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Сигнал — інтернет без кордонів</title>
+<title>Сигнал</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=Space+Mono&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
+<style>
+  .splash-wrap{
+    min-height:100vh; display:flex; flex-direction:column; align-items:center; justify-content:center;
+    position:relative; z-index:1;
+  }
+  .splash-mark{
+    width:84px; height:84px; border-radius:24px; font-size:38px;
+    background:linear-gradient(135deg, var(--blue), var(--violet));
+    display:flex; align-items:center; justify-content:center;
+    box-shadow: 0 0 0 0 rgba(59,130,246,0.5);
+    animation: markPulse 1.8s ease-in-out infinite, markIn .6s cubic-bezier(.4,0,.2,1);
+  }
+  @keyframes markIn{ from{ opacity:0; transform:scale(.7); } to{ opacity:1; transform:scale(1); } }
+  @keyframes markPulse{
+    0%{ box-shadow: 0 0 0 0 rgba(59,130,246,.45); }
+    70%{ box-shadow: 0 0 0 26px rgba(59,130,246,0); }
+    100%{ box-shadow: 0 0 0 0 rgba(59,130,246,0); }
+  }
+  .splash-name{
+    font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:24px; margin-top:20px;
+    opacity:0; animation: fadeUp .5s ease forwards .3s;
+  }
+  .splash-tagline{
+    color:var(--text-muted); font-size:13px; margin-top:6px;
+    opacity:0; animation: fadeUp .5s ease forwards .45s;
+  }
+  @keyframes fadeUp{ from{ opacity:0; transform:translateY(8px); } to{ opacity:1; transform:translateY(0); } }
+  .splash-track{
+    width:120px; height:3px; background:var(--border); border-radius:99px; margin-top:36px; overflow:hidden;
+    opacity:0; animation: fadeUp .5s ease forwards .6s;
+  }
+  .splash-fill{
+    height:100%; width:0%; border-radius:99px;
+    background:linear-gradient(90deg, var(--blue), var(--cyan));
+    animation: fillUp 1.3s cubic-bezier(.4,0,.2,1) forwards .65s;
+  }
+  @keyframes fillUp{ to{ width:100%; } }
+</style>
 </head>
 <body>
   <div class="starfield"></div>
-  <div class="earth-wrap">
-    <div class="earth-ring"></div>
-    <div class="earth-globe"></div>
+  <div class="splash-wrap">
+    <div class="splash-mark">📶</div>
+    <div class="splash-name">Сигнал</div>
+    <div class="splash-tagline">Інтернет без кордонів</div>
+    <div class="splash-track"><div class="splash-fill"></div></div>
   </div>
 
-  <div class="wrap" style="justify-content:flex-start; align-items:center; text-align:center; padding-top:14vh; min-height:100vh;">
-    <div class="brand" style="flex-direction:column; margin-bottom:20px;">
-      <div class="mark" style="width:60px; height:60px; border-radius:18px; font-size:28px; margin-bottom:14px;">📶</div>
-      <span style="font-size:24px;">Сигнал</span>
-    </div>
-
-    <h1 style="font-size:20px; max-width:280px;">Інтернет <em>без кордонів</em></h1>
-
-    <div style="width:100%; max-width:320px; margin-top:auto; padding-top:40vh;">
-      <a class="btn" href="register-email.html">Створити акаунт</a>
-      <a class="btn ghost" href="login.html" style="margin-top:10px; background:rgba(5,6,13,0.35);">Увійти</a>
-    </div>
-  </div>
+  <script>
+    setTimeout(() => {
+      const hasSession = localStorage.getItem('signal_session_token') && localStorage.getItem('signal_email');
+      window.location.href = hasSession ? 'dashboard.html' : 'welcome.html';
+    }, 1900);
+  </script>
 </body>
 </html>

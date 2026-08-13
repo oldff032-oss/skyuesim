@@ -5,7 +5,7 @@
 
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
-const { readAll, writeAll } = require('./authStore');
+const { readAll, writeAll } = require('../authStore');
 const { sendVerificationCode } = require('./emailService');
 
 const CODE_TTL_MS = 10 * 60 * 1000; // 10 хвилин
@@ -109,4 +109,72 @@ function getSessionEmail(sessionToken) {
   return session.email;
 }
 
-module.exports = { requestCode, verifyCode, setPassword, login, getSessionEmail };
+module.exports = { requestCode, verifyCode, setPassword, login, getSessionEmail, requestPasswordReset, verifyResetCode, resetPassword };
+
+// ---------- Забув(ла) пароль: запит коду ----------
+async function requestPasswordReset(email) {
+  const store = readAll();
+  store.resetCodes = store.resetCodes || {};
+  const existing = store.resetCodes[email];
+
+  if (existing && Date.now() - existing.sentAt < RESEND_COOLDOWN_MS) {
+    const waitSec = Math.ceil((RESEND_COOLDOWN_MS - (Date.now() - existing.sentAt)) / 1000);
+    throw Object.assign(new Error(`Зачекай ${waitSec} сек перед повторним надсиланням`), { code: 'COOLDOWN', waitSec });
+  }
+
+  // Навмисно НЕ повідомляємо, чи існує акаунт з таким email (захист від
+  // перебору email-адрес) — завжди повертаємо "sent: true", але лист
+  // реально шлемо тільки якщо акаунт справді є.
+  if (store.users[email]) {
+    const code = randomCode();
+    store.resetCodes[email] = { code, sentAt: Date.now(), attempts: 0 };
+    writeAll(store);
+    await sendVerificationCode(email, code);
+  }
+
+  return { sent: true };
+}
+
+// ---------- Забув(ла) пароль: перевірка коду ----------
+function verifyResetCode(email, code) {
+  const store = readAll();
+  store.resetCodes = store.resetCodes || {};
+  const entry = store.resetCodes[email];
+
+  if (!entry) throw Object.assign(new Error('Код не запитувався або вже використаний'), { code: 'NO_CODE' });
+  if (Date.now() - entry.sentAt > CODE_TTL_MS) throw Object.assign(new Error('Код прострочено'), { code: 'EXPIRED' });
+  if (entry.attempts >= MAX_ATTEMPTS) throw Object.assign(new Error('Забагато спроб, запроси новий код'), { code: 'TOO_MANY_ATTEMPTS' });
+
+  entry.attempts += 1;
+
+  if (entry.code !== code) {
+    writeAll(store);
+    throw Object.assign(new Error('Невірний код'), { code: 'WRONG_CODE' });
+  }
+
+  delete store.resetCodes[email];
+  store.resetTokens = store.resetTokens || {};
+  const resetToken = randomToken();
+  store.resetTokens[resetToken] = { email, createdAt: Date.now() };
+  writeAll(store);
+
+  return { resetToken };
+}
+
+// ---------- Забув(ла) пароль: встановлення нового пароля ----------
+async function resetPassword(resetToken, newPassword) {
+  const store = readAll();
+  store.resetTokens = store.resetTokens || {};
+  const entry = store.resetTokens[resetToken];
+
+  if (!entry) throw Object.assign(new Error('Недійсний або вже використаний токен'), { code: 'INVALID_TOKEN' });
+  if (Date.now() - entry.createdAt > VERIFY_TOKEN_TTL_MS) throw Object.assign(new Error('Токен прострочено, почни спочатку'), { code: 'TOKEN_EXPIRED' });
+  if (newPassword.length < 8) throw Object.assign(new Error('Пароль має бути не менше 8 символів'), { code: 'WEAK_PASSWORD' });
+  if (!store.users[entry.email]) throw Object.assign(new Error('Акаунт не знайдено'), { code: 'NO_USER' });
+
+  store.users[entry.email].passwordHash = await bcrypt.hash(newPassword, 10);
+  delete store.resetTokens[resetToken];
+  writeAll(store);
+
+  return { ok: true };
+}

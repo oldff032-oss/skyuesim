@@ -81,6 +81,41 @@ app.get('/api/auth/me', (req, res) => {
   res.json({ email });
 });
 
+// ---- Забув(ла) пароль ----
+app.post('/api/auth/forgot-password', async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email || !email.includes('@')) return res.status(400).json({ error: 'Введи коректний email' });
+    const result = await authService.requestPasswordReset(email);
+    res.json(result);
+  } catch (err) {
+    const status = err.code === 'COOLDOWN' ? 429 : 500;
+    res.status(status).json({ error: err.message, code: err.code, waitSec: err.waitSec });
+  }
+});
+
+app.post('/api/auth/verify-reset-code', (req, res) => {
+  try {
+    const { email, code } = req.body;
+    if (!email || !code) return res.status(400).json({ error: 'Потрібні email і code' });
+    const result = authService.verifyResetCode(email, code);
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message, code: err.code });
+  }
+});
+
+app.post('/api/auth/reset-password', async (req, res) => {
+  try {
+    const { resetToken, password } = req.body;
+    if (!resetToken || !password) return res.status(400).json({ error: 'Потрібні resetToken і password' });
+    const result = await authService.resetPassword(resetToken, password);
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message, code: err.code });
+  }
+});
+
 // =========================================================
 // ВХІДНА ПОШТА: реальні відповіді користувачів на email потрапляють сюди
 // =========================================================
