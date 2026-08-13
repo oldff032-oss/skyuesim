@@ -33,7 +33,7 @@ async function sendVerificationCode(email, code) {
       'Authorization': `Bearer ${process.env.RESEND_API_KEY}`,
     },
     body: JSON.stringify({
-      from: process.env.RESEND_FROM_EMAIL || 'Сигнал <onboarding@resend.dev>',
+      from: process.env.RESEND_FROM_EMAIL
       to: [email],
       subject: 'Код підтвердження — Сигнал',
       html: `
