@@ -4,26 +4,23 @@
 // - створення Checkout Session
 // - підписки
 // - скасування підписки
-// - отримання дати наступного списання
-// - перевірка Stripe Webhook
-//
-// Усі секретні значення беруться з .env / Render Environment Variables.
+// - перевірка webhook
+// - дата наступного списання
 
 require('dotenv').config();
 
 const Stripe = require('stripe');
 
 if (!process.env.STRIPE_SECRET_KEY) {
-  throw new Error('STRIPE_SECRET_KEY не заданий у Environment Variables');
+  throw new Error('STRIPE_SECRET_KEY не заданий у .env');
 }
 
 const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
 
-// Live Price ID повинні бути задані в Render.
-// Наприклад:
-// STRIPE_PRICE_BASIC=price_...
-// STRIPE_PRICE_STANDARD=price_...
-// STRIPE_PRICE_UNLIMITED=price_...
+
+// =========================================================
+// PRICE ID ДЛЯ ТАРИФІВ
+// =========================================================
 
 const PRICE_MAP = {
   basic: process.env.STRIPE_PRICE_BASIC,
@@ -31,143 +28,162 @@ const PRICE_MAP = {
   unlimited: process.env.STRIPE_PRICE_UNLIMITED,
 };
 
-// ---------------------------------------------------------
-// Створення Stripe Checkout Session
-// ---------------------------------------------------------
+
+// =========================================================
+// СТВОРЕННЯ CHECKOUT SESSION
+// =========================================================
 
 async function createCheckoutSession({ email, plan }) {
-  if (!email) {
-    throw new Error('Email користувача не заданий');
-  }
-
-  if (!plan) {
-    throw new Error('Тариф не заданий');
-  }
-
-  const normalizedPlan = String(plan).toLowerCase().trim();
-  const priceId = PRICE_MAP[normalizedPlan];
+  const priceId = PRICE_MAP[plan];
 
   if (!priceId) {
-    throw new Error(`Невідомий тариф: ${normalizedPlan}`);
+    throw new Error(`Невідомий тариф: ${plan}`);
   }
 
-  // Перевіряємо, що Price ID справді існує
-  // у поточному Stripe режимі (Live/Test визначається ключем).
-  const price = await stripe.prices.retrieve(priceId);
+  console.log('========================================');
+  console.log('💳 Створення Stripe Checkout Session');
+  console.log(`Email: ${email}`);
+  console.log(`Plan: ${plan}`);
+  console.log(`Price ID: ${priceId}`);
+  console.log('========================================');
 
-  if (!price || !price.active) {
-    throw new Error(`Stripe Price неактивний або не існує: ${priceId}`);
-  }
+  try {
+    // Перевіряємо Price напряму у Stripe.
+    // Це дозволяє одразу побачити, чи Price існує
+    // саме в цьому Stripe акаунті / режимі.
+    const price = await stripe.prices.retrieve(priceId);
 
-  // Для mode: subscription Price повинен бути recurring.
-  if (!price.recurring) {
-    throw new Error(
-      `Price ${priceId} не є recurring Price. ` +
-      `Для підписки Stripe Price повинен мати recurring billing.`
+    console.log('✅ Stripe Price знайдено');
+    console.log(`Price: ${price.id}`);
+    console.log(`Active: ${price.active}`);
+    console.log(`Currency: ${price.currency}`);
+    console.log(`Unit amount: ${price.unit_amount}`);
+    console.log(
+      `Recurring: ${price.recurring ? price.recurring.interval : 'NO'}`
     );
-  }
 
-  const frontendUrl = process.env.FRONTEND_URL;
+    if (!price.active) {
+      throw new Error(`Stripe Price ${priceId} неактивний`);
+    }
 
-  if (!frontendUrl) {
-    throw new Error('FRONTEND_URL не заданий у Environment Variables');
-  }
+    if (!price.recurring) {
+      throw new Error(
+        `Stripe Price ${priceId} не є recurring Price для підписки`
+      );
+    }
 
-  const session = await stripe.checkout.sessions.create({
-    mode: 'subscription',
+    // Створюємо Checkout.
+    //
+    // ВАЖЛИВО:
+    // payment_method_types: ['card']
+    //
+    // Це прибирає проблему, коли Stripe не знаходить
+    // жодного доступного автоматичного способу оплати.
+    const session = await stripe.checkout.sessions.create({
+      mode: 'subscription',
 
-    customer_email: email,
+      customer_email: email,
 
-    line_items: [
-      {
-        price: priceId,
-        quantity: 1,
-      },
-    ],
+      payment_method_types: ['card'],
 
-    // Примусово використовуємо банківські картки.
-    payment_method_types: ['card'],
+      line_items: [
+        {
+          price: priceId,
+          quantity: 1,
+        },
+      ],
 
-    success_url:
-      `${frontendUrl}/installing.html` +
-      `?email=${encodeURIComponent(email)}` +
-      `&session_id={CHECKOUT_SESSION_ID}`,
+      success_url:
+        `${process.env.FRONTEND_URL}` +
+        `/installing.html?email=${encodeURIComponent(email)}`,
 
-    cancel_url:
-      `${frontendUrl}/plans.html`,
+      cancel_url:
+        `${process.env.FRONTEND_URL}/plans.html`,
 
-    metadata: {
-      plan: normalizedPlan,
-      email,
-    },
-
-    subscription_data: {
       metadata: {
-        plan: normalizedPlan,
+        plan,
         email,
       },
-    },
-  });
 
-  return session;
+      subscription_data: {
+        metadata: {
+          plan,
+          email,
+        },
+      },
+    });
+
+    console.log('✅ Checkout Session створена');
+    console.log(`Session ID: ${session.id}`);
+    console.log(`Checkout URL: ${session.url}`);
+
+    return session;
+
+  } catch (err) {
+
+    console.error('========================================');
+    console.error('❌ ПОМИЛКА STRIPE');
+    console.error('========================================');
+    console.error('Message:', err.message);
+    console.error('Type:', err.type);
+    console.error('Code:', err.code);
+    console.error('Param:', err.param);
+    console.error('Request ID:', err.requestId);
+    console.error('========================================');
+
+    throw err;
+  }
 }
 
-// ---------------------------------------------------------
-// Скасування підписки
-// ---------------------------------------------------------
+
+// =========================================================
+// СКАСУВАННЯ ПІДПИСКИ
+// =========================================================
 
 async function cancelSubscription(subscriptionId) {
   if (!subscriptionId) {
-    throw new Error('subscriptionId не заданий');
+    throw new Error('Не передано subscriptionId');
   }
+
+  console.log(`🛑 Скасування підписки: ${subscriptionId}`);
 
   return stripe.subscriptions.cancel(subscriptionId);
 }
 
-// ---------------------------------------------------------
-// Отримання дати наступного списання
-// ---------------------------------------------------------
+
+// =========================================================
+// НАСТУПНА ДАТА СПИСАННЯ
+// =========================================================
 
 async function getNextBillingDate(subscriptionId) {
   if (!subscriptionId) {
-    throw new Error('subscriptionId не заданий');
+    throw new Error('Не передано subscriptionId');
   }
 
   const subscription =
     await stripe.subscriptions.retrieve(subscriptionId);
 
-  return subscription.current_period_end
-    ? new Date(
-        subscription.current_period_end * 1000
-      ).toISOString()
-    : null;
-}
-
-// ---------------------------------------------------------
-// Перевірка Stripe Webhook
-// ---------------------------------------------------------
-//
-// rawBody ОБОВ'ЯЗКОВО повинен бути оригінальним Buffer,
-// який прийшов від Stripe.
-//
-// ВАЖЛИВО:
-// Тут використовується стандартна перевірка Stripe.
-// Не залишаємо tolerance 24 години для production.
-//
-
-function constructWebhookEvent(rawBody, signature) {
-  if (!rawBody) {
-    throw new Error('Stripe webhook rawBody відсутній');
+  if (!subscription.current_period_end) {
+    return null;
   }
 
+  return new Date(
+    subscription.current_period_end * 1000
+  ).toISOString();
+}
+
+
+// =========================================================
+// STRIPE WEBHOOK
+// =========================================================
+
+function constructWebhookEvent(rawBody, signature) {
   if (!signature) {
-    throw new Error('Stripe webhook signature відсутній');
+    throw new Error('Відсутній stripe-signature');
   }
 
   if (!process.env.STRIPE_WEBHOOK_SECRET) {
-    throw new Error(
-      'STRIPE_WEBHOOK_SECRET не заданий у Environment Variables'
-    );
+    throw new Error('STRIPE_WEBHOOK_SECRET не заданий');
   }
 
   return stripe.webhooks.constructEvent(
@@ -177,9 +193,10 @@ function constructWebhookEvent(rawBody, signature) {
   );
 }
 
-// ---------------------------------------------------------
-// Експорт
-// ---------------------------------------------------------
+
+// =========================================================
+// EXPORT
+// =========================================================
 
 module.exports = {
   createCheckoutSession,
