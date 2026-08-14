@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Users — E7 Admin</title>
+<title>Користувачі — Signal Admin</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
@@ -11,66 +11,78 @@
 <body>
   <div class="admin-shell">
     <aside class="admin-sidebar">
-      <div class="brand"><div class="mark" style="width:32px;height:32px;font-size:15px;">🛠️</div><span style="font-size:15px;">E7 Admin</span></div>
+      <div class="brand"><div class="mark" style="width:32px;height:32px;font-size:15px;">🛡️</div><span style="font-size:15px;">Signal Admin</span></div>
       <nav class="admin-nav">
         <a href="admin-dashboard.html">📊 Dashboard</a>
-        <a href="admin-tickets.html">🎫 Support</a>
-        <a href="admin-users.html" class="active">👥 Users</a>
+        <a href="admin-tickets.html">🎫 Підтримка</a>
+        <a href="admin-users.html" class="active">👥 Користувачі</a>
         <a href="admin-team.html" id="teamNavLink">🔑 Команда</a>
-        <a href="admin-audit.html" id="auditNavLink">🛡️ Audit Log</a>
-        <a href="#" onclick="logout()">⎋ Вийти</a>
+        <a href="admin-audit.html" id="auditNavLink">🛡️ Журнал дій</a>
+        <a href="#" onclick="logout()">⏏ Вийти</a>
       </nav>
     </aside>
     <main class="admin-main">
       <h1 style="font-size:22px;">Користувачі</h1>
       <p class="lead">Усі зареєстровані акаунти</p>
-
-      <div class="filter-bar">
-        <input type="text" id="search" placeholder="Пошук за email..." style="min-width:260px;" />
-      </div>
-
+      <div class="filter-bar"><input type="text" id="search" placeholder="Пошук за email..." style="min-width:260px;"></div>
       <div id="loading" class="shimmer" style="height:200px; margin-top:16px;"></div>
       <table class="admin-table" id="table" style="display:none;">
-        <thead><tr><th>Email</th><th>Зареєстрований</th><th>Тариф</th><th>Статус</th><th>Використано</th></tr></thead>
+        <thead><tr><th>Email</th><th>Зареєстрований</th><th>Тариф</th><th>Статус</th><th>Використано</th><th>Дія</th></tr></thead>
         <tbody id="tbody"></tbody>
       </table>
     </main>
   </div>
-
   <script src="config.js"></script>
   <script src="admin-common.js"></script>
   <script>
     requireAdminAuth();
     let allUsers = [];
+    const escapeHtml = (value) => String(value || '').replace(/[&<>'"]/g, (char) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' }[char]));
 
-    async function load(){
-      try{
+    async function load() {
+      try {
         const res = await adminFetch('/api/admin/users');
+        if (!res.ok) throw new Error('Не вдалося отримати список користувачів');
         allUsers = await res.json();
-        document.getElementById('loading').style.display = 'none';
         document.getElementById('table').style.display = 'table';
         render(allUsers);
-      }catch(e){
+      } catch (error) {
+        alert(error.message || 'Помилка завантаження');
+      } finally {
         document.getElementById('loading').style.display = 'none';
       }
     }
 
-    function render(users){
-      document.getElementById('tbody').innerHTML = users.map(u => `
-        <tr>
-          <td>${u.email}</td>
-          <td>${u.createdAt ? new Date(u.createdAt).toLocaleDateString('uk-UA') : '—'}</td>
-          <td>${u.subscription?.plan || '—'}</td>
-          <td>${u.subscription?.status || 'немає підписки'}</td>
-          <td>${u.subscription?.esim ? (u.subscription.esim.usedGb ?? 0) + ' / ' + (u.subscription.esim.dataLimitGb ?? '∞') + ' ГБ' : '—'}</td>
-        </tr>`).join('') || '<tr><td colspan="5" class="muted">Немає користувачів</td></tr>';
+    function render(users) {
+      document.getElementById('tbody').innerHTML = users.map((user) => {
+        const subscription = user.subscription || {};
+        const encodedEmail = encodeURIComponent(user.email);
+        const retryButton = subscription.status === 'payment_ok_esim_failed'
+          ? `<button class="btn primary" style="padding:7px 10px;font-size:12px;" onclick="retryEsim('${encodedEmail}')">Видати eSIM</button>`
+          : '—';
+        const usage = subscription.esim ? `${subscription.esim.usedGb ?? 0} / ${subscription.esim.dataLimitGb ?? '∞'} ГБ` : '—';
+        return `<tr><td>${escapeHtml(user.email)}</td><td>${user.createdAt ? new Date(user.createdAt).toLocaleDateString('uk-UA') : '—'}</td><td>${escapeHtml(subscription.plan || '—')}</td><td>${escapeHtml(subscription.status || 'Немає підписки')}</td><td>${usage}</td><td>${retryButton}</td></tr>`;
+      }).join('') || '<tr><td colspan="6" class="muted">Немає користувачів</td></tr>';
     }
 
-    document.getElementById('search').addEventListener('input', (e) => {
-      const q = e.target.value.toLowerCase();
-      render(allUsers.filter(u => u.email.toLowerCase().includes(q)));
-    });
+    async function retryEsim(encodedEmail) {
+      const email = decodeURIComponent(encodedEmail);
+      if (!confirm(`Видати eSIM для ${email}? Оплата Stripe не буде повторена.`)) return;
+      try {
+        const res = await adminFetch(`/api/admin/users/${encodedEmail}/retry-esim`, { method: 'POST' });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Не вдалося видати eSIM');
+        alert('eSIM видано. Оновіть сторінку користувача — QR-код уже доступний.');
+        await load();
+      } catch (error) {
+        alert(error.message || 'Помилка повторної видачі eSIM');
+      }
+    }
 
+    document.getElementById('search').addEventListener('input', (event) => {
+      const query = event.target.value.toLowerCase();
+      render(allUsers.filter((user) => user.email.toLowerCase().includes(query)));
+    });
     load();
   </script>
 </body>
