@@ -8,7 +8,7 @@ const express = require('express');
 const cors = require('cors');
 
 const { createCheckoutSession, cancelSubscription, constructWebhookEvent, getNextBillingDate } = require('./stripeService');
-const { provisionEsim, checkUsage, recoverEsim } = require('./esimService');
+const { provisionEsim, checkUsage } = require('./esimService');
 const { getUser, saveUser, getUserByStripeCustomerId } = require('./db');
 const authService = require('./authService');
 const ticketStore = require('./ticketStore');
@@ -17,7 +17,6 @@ const adminAuth = require('./adminAuthService');
 const { sendEmail, getReceivedEmail, verifyInboundSignature } = require('./emailService');
 
 const app = express();
-const esimRetriesInProgress = new Set();
 app.use(cors());
 
 // ВАЖЛИВО: вебхук Stripe має отримати "сирий" (не розпарсений) body,
@@ -327,62 +326,6 @@ app.get('/api/admin/users', adminAuth.requireAdmin, (req, res) => {
     subscription: getUser(email) || null,
   }));
   res.json(users);
-});
-
-// Recover a paid order whose first eSIM allocation failed.  This endpoint is
-// restricted to the Super Admin: it never charges Stripe and only accepts the
-// explicit failed state, so it cannot be used to create a second eSIM for an
-// already active subscription.
-app.post('/api/admin/users/:email/retry-esim', adminAuth.requireAdmin, adminAuth.requireRole('super_admin'), async (req, res) => {
-  const email = req.params.email;
-  const user = getUser(email);
-
-  if (!user) return res.status(404).json({ error: 'Користувача не знайдено' });
-  if (user.status !== 'payment_ok_esim_failed') {
-    return res.status(409).json({ error: 'Повторна видача доступна лише для оплаченої eSIM зі статусом помилки' });
-  }
-  if (!user.plan) return res.status(400).json({ error: 'У користувача не знайдено тариф' });
-  if (esimRetriesInProgress.has(email)) {
-    return res.status(409).json({ error: 'Видача eSIM уже виконується. Зачекайте.' });
-  }
-
-  esimRetriesInProgress.add(email);
-  saveUser(email, { status: 'esim_retrying' });
-  try {
-    const esim = await provisionEsim({ email, plan: user.plan });
-    saveUser(email, { status: 'active', esim });
-    auditStore.log({ adminEmail: req.admin.email, action: 'esim_retry_succeeded', target: email, details: { orderNo: esim.orderNo } });
-    res.json({ ok: true, esim });
-  } catch (err) {
-    console.error(`[eSIM retry] ${email}:`, err.message);
-    saveUser(email, { status: 'payment_ok_esim_failed' });
-    auditStore.log({ adminEmail: req.admin.email, action: 'esim_retry_failed', target: email, details: { message: err.message } });
-    res.status(502).json({ error: 'eSIM не вдалося видати. Деталі є в Render Logs.' });
-  } finally {
-    esimRetriesInProgress.delete(email);
-  }
-});
-
-// Reconnect a profile that already exists at eSIM Access after local account
-// data was lost. This is read-only at the provider: it does not order or bill.
-app.post('/api/admin/users/:email/recover-esim', adminAuth.requireAdmin, adminAuth.requireRole('super_admin'), async (req, res) => {
-  const email = req.params.email;
-  const { iccid, plan } = req.body || {};
-  const user = getUser(email);
-
-  if (!user) return res.status(404).json({ error: 'Користувача не знайдено' });
-  if (user.esim?.orderNo) return res.status(409).json({ error: 'До цього акаунта вже прикріплено eSIM' });
-
-  try {
-    const esim = await recoverEsim({ iccid, plan });
-    saveUser(email, { status: 'active', plan, esim });
-    auditStore.log({ adminEmail: req.admin.email, action: 'esim_recovered', target: email, details: { orderNo: esim.orderNo } });
-    res.json({ ok: true, esim });
-  } catch (err) {
-    console.error(`[eSIM recovery] ${email}:`, err.message);
-    auditStore.log({ adminEmail: req.admin.email, action: 'esim_recovery_failed', target: email, details: { message: err.message } });
-    res.status(400).json({ error: err.message });
-  }
 });
 
 // =========================================================
