@@ -150,12 +150,16 @@ async function esimAccessRequest(path, body = {}) {
   return payload;
 }
 
-async function queryOrderProfiles(orderNo) {
+async function queryProfiles({ orderNo = '', iccid = '' }) {
   return esimAccessRequest('/api/v1/open/esim/query', {
     orderNo,
-    iccid: '',
+    iccid,
     pager: { pageNum: 1, pageSize: 50 },
   });
+}
+
+async function queryOrderProfiles(orderNo) {
+  return queryProfiles({ orderNo });
 }
 
 async function waitForEsim(orderNo) {
@@ -292,6 +296,33 @@ async function provisionEsim({ email, plan }) {
   return esim;
 }
 
+// Re-link an already issued profile to an account after a database recovery.
+// This only reads eSIM Access; it never creates a new order or charges Stripe.
+async function recoverEsim({ iccid, plan }) {
+  if (isConfiguredMockMode()) {
+    throw new EsimAccessError('Cannot recover a real eSIM while mock mode is enabled.', { code: 'MOCK_MODE' });
+  }
+  if (!/^\d{15,22}$/.test(String(iccid || '').trim())) {
+    throw new EsimAccessError('A valid ICCID is required.', { code: 'ICCID_REQUIRED' });
+  }
+  if (!Object.hasOwn(DEFAULT_PLAN_LIMITS_GB, plan)) {
+    throw new EsimAccessError('A valid plan is required.', { code: 'PLAN_REQUIRED' });
+  }
+
+  const response = await queryProfiles({ iccid: String(iccid).trim() });
+  const profile = response?.obj?.esimList?.[0];
+  if (!profile) {
+    throw new EsimAccessError('eSIM Access did not find this ICCID.', { code: 'PROFILE_NOT_FOUND' });
+  }
+  if (!profile.orderNo) {
+    throw new EsimAccessError('The provider returned no order number for this ICCID.', { code: 'ORDER_NUMBER_MISSING' });
+  }
+
+  const esim = profileToEsim(profile, profile.orderNo, plan);
+  log('profile_recovered', { orderNo: mask(esim.orderNo), iccid: mask(esim.iccid) });
+  return esim;
+}
+
 async function checkUsage(orderNo) {
   if (!orderNo || typeof orderNo !== 'string') {
     throw new EsimAccessError('An eSIM orderNo is required.', { code: 'ORDER_NUMBER_REQUIRED' });
@@ -317,7 +348,7 @@ async function checkUsage(orderNo) {
 
   try {
     const usageResponse = await esimAccessRequest('/api/v1/open/esim/usage/query', { esimTranNoList: [esimTranNo] });
-    const usage = usageResponse?.obj?.[0] || usageResponse?.obj?.esimList?.[0] || usageResponse?.obj?.list?.[0];
+    const usage = usageResponse?.obj?.[0] || usageResponse?.obj?.esimList?.[0] || usageResponse?.obj?.list?.[0] || usageResponse?.obj;
     if (!usage) throw new EsimAccessError('Usage endpoint returned no record.', { code: 'USAGE_NOT_FOUND' });
     return usageResult(bytes(usage.dataUsage) ?? fallbackUsage, bytes(usage.totalData) ?? fallbackTotal, profile);
   } catch (error) {
@@ -338,4 +369,4 @@ function usageResult(usedBytes, totalBytes, profile) {
   };
 }
 
-module.exports = { provisionEsim, checkUsage };
+module.exports = { provisionEsim, checkUsage, recoverEsim };
