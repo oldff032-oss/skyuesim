@@ -8,7 +8,7 @@ const express = require('express');
 const cors = require('cors');
 
 const { createCheckoutSession, cancelSubscription, constructWebhookEvent, getNextBillingDate } = require('./stripeService');
-const { provisionEsim, checkUsage } = require('./esimService');
+const { provisionEsim, checkUsage, recoverEsim } = require('./esimService');
 const { getUser, saveUser, getUserByStripeCustomerId } = require('./db');
 const authService = require('./authService');
 const ticketStore = require('./ticketStore');
@@ -360,6 +360,28 @@ app.post('/api/admin/users/:email/retry-esim', adminAuth.requireAdmin, adminAuth
     res.status(502).json({ error: 'eSIM не вдалося видати. Деталі є в Render Logs.' });
   } finally {
     esimRetriesInProgress.delete(email);
+  }
+});
+
+// Reconnect a profile that already exists at eSIM Access after local account
+// data was lost. This is read-only at the provider: it does not order or bill.
+app.post('/api/admin/users/:email/recover-esim', adminAuth.requireAdmin, adminAuth.requireRole('super_admin'), async (req, res) => {
+  const email = req.params.email;
+  const { iccid, plan } = req.body || {};
+  const user = getUser(email);
+
+  if (!user) return res.status(404).json({ error: 'Користувача не знайдено' });
+  if (user.esim?.orderNo) return res.status(409).json({ error: 'До цього акаунта вже прикріплено eSIM' });
+
+  try {
+    const esim = await recoverEsim({ iccid, plan });
+    saveUser(email, { status: 'active', plan, esim });
+    auditStore.log({ adminEmail: req.admin.email, action: 'esim_recovered', target: email, details: { orderNo: esim.orderNo } });
+    res.json({ ok: true, esim });
+  } catch (err) {
+    console.error(`[eSIM recovery] ${email}:`, err.message);
+    auditStore.log({ adminEmail: req.admin.email, action: 'esim_recovery_failed', target: email, details: { message: err.message } });
+    res.status(400).json({ error: err.message });
   }
 });
 
