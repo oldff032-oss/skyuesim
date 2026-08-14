@@ -59,9 +59,12 @@
         const encodedEmail = encodeURIComponent(user.email);
         const retryButton = subscription.status === 'payment_ok_esim_failed'
           ? `<button class="btn primary" style="padding:7px 10px;font-size:12px;" onclick="retryEsim('${encodedEmail}')">Видати eSIM</button>`
-          : '—';
+          : '';
+        const recoveryButton = !subscription.esim
+          ? `<button class="btn ghost" style="padding:7px 10px;font-size:12px;" onclick="recoverEsim('${encodedEmail}')">Відновити eSIM</button>`
+          : '';
         const usage = subscription.esim ? `${subscription.esim.usedGb ?? 0} / ${subscription.esim.dataLimitGb ?? '∞'} ГБ` : '—';
-        return `<tr><td>${escapeHtml(user.email)}</td><td>${user.createdAt ? new Date(user.createdAt).toLocaleDateString('uk-UA') : '—'}</td><td>${escapeHtml(subscription.plan || '—')}</td><td>${escapeHtml(subscription.status || 'Немає підписки')}</td><td>${usage}</td><td>${retryButton}</td></tr>`;
+        return `<tr><td>${escapeHtml(user.email)}</td><td>${user.createdAt ? new Date(user.createdAt).toLocaleDateString('uk-UA') : '—'}</td><td>${escapeHtml(subscription.plan || '—')}</td><td>${escapeHtml(subscription.status || 'Немає підписки')}</td><td>${usage}</td><td>${retryButton || recoveryButton || '—'}</td></tr>`;
       }).join('') || '<tr><td colspan="6" class="muted">Немає користувачів</td></tr>';
     }
 
@@ -76,6 +79,26 @@
         await load();
       } catch (error) {
         alert(error.message || 'Помилка повторної видачі eSIM');
+      }
+    }
+
+    async function recoverEsim(encodedEmail) {
+      const email = decodeURIComponent(encodedEmail);
+      const iccid = prompt('Введіть ICCID з налаштувань уже встановленої eSIM. Оплата не буде повторена.');
+      if (!iccid) return;
+      const plan = prompt('Введіть тариф: basic, standard або unlimited.', 'basic');
+      if (!plan) return;
+      try {
+        const res = await adminFetch(`/api/admin/users/${encodedEmail}/recover-esim`, {
+          method: 'POST',
+          body: JSON.stringify({ iccid: iccid.replace(/\s/g, ''), plan: plan.trim().toLowerCase() }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Не вдалося відновити eSIM');
+        alert('eSIM відновлено. Оплата не повторювалася.');
+        await load();
+      } catch (error) {
+        alert(error.message || 'Помилка відновлення eSIM');
       }
     }
 
