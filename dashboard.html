@@ -14,10 +14,8 @@
       <div class="brand"><div class="mark">📶</div><span>Сигнал</span></div>
       <button class="icon-btn" onclick="logout()" style="position:static; color:var(--text-muted);" title="Вийти">⎋</button>
     </div>
-
-    <div id="loading" class="shimmer" style="height:180px; margin-top:20px;"></div>
-
-    <div id="content" style="display:none;"></div>
+    <div id="loading" class="shimmer" style="height:240px; margin-top:20px;"></div>
+    <main id="content" style="display:none;"></main>
   </div>
 
   <nav class="bottomnav">
@@ -31,110 +29,143 @@
   <script>
     const sessionToken = localStorage.getItem('signal_session_token');
     const email = localStorage.getItem('signal_email');
-    if(!sessionToken || !email){ window.location.href = 'login.html'; }
+    if (!sessionToken || !email) window.location.href = 'login.html';
 
     let currentUser = null;
-    let connected = false;
+    let currentUsage = null;
+    const planNames = { basic: 'Базовий · 10 ГБ', standard: 'Стандарт · 20 ГБ', unlimited: 'Безліміт' };
 
-    async function load(){
-      try{
-        const res = await fetch(`${API_URL}/api/status?email=${encodeURIComponent(email)}`);
-        const data = await res.json();
-        if(!res.ok){
-          if(res.status === 404){ renderNoSubscription(); return; }
-          throw new Error(data.error);
+    const escapeHtml = (value) => String(value ?? '').replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]));
+    const number = (value) => Number.isFinite(Number(value)) ? Number(value) : 0;
+    const gigabytes = (value) => number(value).toFixed(2).replace(/\.00$/, '');
+    const dateText = (value) => value ? new Date(value).toLocaleDateString('uk-UA', { day: '2-digit', month: 'long', year: 'numeric' }) : 'Не вказано';
+    const shortIccid = (value) => value ? `${value.slice(0, 6)}••••${value.slice(-4)}` : 'Не вказано';
+
+    async function requestUsage() {
+      const response = await fetch(`${API_URL}/api/usage?email=${encodeURIComponent(email)}`);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Не вдалося оновити використання');
+      return data;
+    }
+
+    async function load() {
+      try {
+        const response = await fetch(`${API_URL}/api/status?email=${encodeURIComponent(email)}`);
+        const data = await response.json();
+        if (!response.ok) {
+          if (response.status === 404) return renderNoSubscription();
+          throw new Error(data.error || 'Помилка завантаження');
         }
         currentUser = data;
+        if (currentUser.status === 'active' && currentUser.esim) {
+          try { currentUsage = await requestUsage(); } catch { currentUsage = null; }
+        }
         render();
-      }catch(e){
-        renderNoSubscription();
+      } catch (error) {
+        renderError(error.message);
       }
     }
 
-    function renderNoSubscription(){
+    function render() {
       document.getElementById('loading').style.display = 'none';
       const content = document.getElementById('content');
       content.style.display = 'block';
+      if (currentUser.status === 'active' && currentUser.esim) return renderActive(content);
+      if (currentUser.status === 'pending_payment' || currentUser.status === 'esim_retrying') {
+        content.innerHTML = `<div class="card" style="margin-top:20px;"><span class="status-pill off"><span class="dot pulse"></span>Готуємо вашу eSIM…</span><p class="muted" style="margin-top:12px;">Оновіть сторінку за кілька хвилин.</p></div>`;
+        return;
+      }
+      if (currentUser.status === 'canceled') {
+        content.innerHTML = `<div class="card" style="margin-top:20px;"><span class="status-pill off"><span class="dot"></span>Підписку скасовано</span></div><a class="btn" href="plans.html" style="margin-top:16px;">Обрати тариф</a>`;
+        return;
+      }
+      content.innerHTML = `<div class="card" style="margin-top:20px;"><span class="status-pill off"><span class="dot"></span>Статус: ${escapeHtml(currentUser.status || 'невідомо')}</span></div>`;
+    }
+
+    function renderActive(content) {
+      const esim = currentUser.esim;
+      const limitGb = esim.dataLimitGb;
+      const usedGb = currentUsage ? number(currentUsage.usedGb) : number(esim.usedGb);
+      const totalGb = currentUsage?.totalGb ?? limitGb;
+      const remaining = totalGb == null ? null : Math.max(0, number(totalGb) - usedGb);
+      const percent = totalGb ? Math.min(100, Math.round((usedGb / totalGb) * 100)) : 0;
+      const expiry = currentUsage?.expiredTime || esim.expiredTime;
+      const apn = currentUsage?.apn || esim.apn;
+      const activationCode = esim.activationCode || '';
+
       content.innerHTML = `
-        <h1 style="margin-top:24px; font-size:22px;">Привіт! 👋</h1>
-        <p class="lead">У тебе ще немає активної підписки. Обери тариф, щоб отримати доступ до інтернету по всій Європі.</p>
-        <a class="btn" href="device-check.html" style="margin-top:20px;">Обрати тариф</a>`;
+        <section class="card" style="margin-top:20px; border-color:rgba(52,228,184,.38);">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;">
+            <div><p class="muted" style="font-size:12px;">ВАША eSIM</p><h1 style="font-size:24px;margin-top:5px;">${escapeHtml(planNames[currentUser.plan] || currentUser.plan)}</h1></div>
+            <span class="status-pill on"><span class="dot pulse"></span>Активна</span>
+          </div>
+          <p class="muted" style="margin-top:10px;">Профіль встановлений. Інтернет вмикається в налаштуваннях телефона, а не цією сторінкою.</p>
+        </section>
+
+        <section class="card">
+          <div class="usage-top"><span>Використано трафіку</span><b>${totalGb == null ? 'Безліміт' : `${gigabytes(usedGb)} / ${gigabytes(totalGb)} ГБ`}</b></div>
+          ${totalGb == null ? '<p class="muted" style="margin-top:13px;">У вашому тарифі немає фіксованого ліміту.</p>' : `<div class="usage-track" style="margin-top:13px;"><div class="usage-fill" style="width:${percent}%;"></div></div><div style="display:flex;justify-content:space-between;margin-top:9px;font-size:12px;color:var(--text-muted);"><span>${percent}% використано</span><span>Залишилось ${gigabytes(remaining)} ГБ</span></div>`}
+          <button class="btn ghost" onclick="refreshUsage()" style="margin-top:16px;width:100%;">↻ Оновити використання</button>
+          <p id="usageNote" class="muted" style="font-size:11px;margin-top:10px;">Дані оператора можуть оновлюватися із затримкою.</p>
+        </section>
+
+        <section class="card">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+            <div><p class="muted" style="font-size:11px;">ДІЄ ДО</p><b style="display:block;margin-top:5px;font-size:13px;">${dateText(expiry)}</b></div>
+            <div><p class="muted" style="font-size:11px;">APN</p><b style="display:block;margin-top:5px;font-size:13px;">${escapeHtml(apn || 'Автоматично')}</b></div>
+            <div style="grid-column:1/-1;"><p class="muted" style="font-size:11px;">ICCID</p><b style="display:block;margin-top:5px;font-size:13px;">${escapeHtml(shortIccid(esim.iccid))}</b></div>
+          </div>
+        </section>
+
+        <details class="card" style="cursor:pointer;">
+          <summary style="font-family:'Space Grotesk',sans-serif;font-weight:700;">Код встановлення eSIM</summary>
+          <p class="muted" style="margin-top:12px;">Використовуйте лише якщо потрібно встановити профіль на цей самий телефон. Не діліться кодом.</p>
+          ${esim.qrCodeUrl ? `<img src="${escapeHtml(esim.qrCodeUrl)}" alt="QR-код eSIM" style="width:150px;height:150px;border-radius:12px;margin-top:12px;background:#fff;padding:8px;">` : ''}
+          ${activationCode ? `<code class="qr" style="margin-top:12px;">${escapeHtml(activationCode)}</code><button class="btn ghost" onclick="copyActivationCode()" style="margin-top:10px;width:100%;">Скопіювати код</button>` : '<p class="muted" style="margin-top:12px;">Код наразі недоступний.</p>'}
+        </details>
+
+        <a class="btn ghost" href="usage.html" style="margin-top:16px;">Детальна статистика</a>`;
     }
 
-    async function render(){
-      document.getElementById('loading').style.display = 'none';
-      const content = document.getElementById('content');
-      content.style.display = 'block';
-
-      const planNames = { basic:'Базовий · 10 ГБ', standard:'Стандарт · 20 ГБ', unlimited:'Безліміт' };
-
-      if(currentUser.status === 'active' && currentUser.esim){
-        const limitGb = currentUser.esim.dataLimitGb;
-        let usedGb = currentUser.esim.usedGb || 0;
-        try{
-          const usageRes = await fetch(`${API_URL}/api/usage?email=${encodeURIComponent(email)}`);
-          const usageData = await usageRes.json();
-          if(usageRes.ok) usedGb = usageData.usedGb;
-        }catch(e){}
-        const pct = limitGb ? Math.min(100, Math.round((usedGb / limitGb) * 100)) : 0;
-
-        content.innerHTML = `
-          <div class="toggle" id="toggleBtn" onclick="toggleConnect()" style="margin-top:20px;">
-            <div><div class="toggle-icon" id="toggleIcon">📶</div><div class="toggle-label" id="toggleLabel">Підключити</div></div>
-          </div>
-
-          <div class="card">
-            <div style="display:flex; justify-content:space-between; align-items:center;">
-              <div>
-                <div style="font-family:'Space Grotesk',sans-serif; font-weight:700;">${planNames[currentUser.plan] || currentUser.plan}</div>
-                <div class="muted" style="margin-top:4px;">ICCID: ${currentUser.esim.iccid}</div>
-              </div>
-              <span class="status-pill on"><span class="dot pulse"></span>Активна</span>
-            </div>
-            <div style="margin-top:14px;">
-              <div class="usage-top"><span>Використано трафіку</span><b>${limitGb ? usedGb + ' / ' + limitGb + ' ГБ' : 'Безліміт'}</b></div>
-              ${limitGb ? `<div class="usage-track"><div class="usage-fill" style="width:${pct}%;"></div></div>` : ''}
-            </div>
-          </div>
-
-          <div id="qrWrap"></div>
-
-          <a class="btn ghost" href="plans.html" style="margin-top:16px;">Змінити тариф</a>`;
-
-        document.getElementById('qrWrap').innerHTML = `
-          <div class="card">
-            <p class="muted">Відскануй QR-код камерою телефону, щоб додати eSIM:</p>
-            ${currentUser.esim.qrCodeUrl ? `<img src="${currentUser.esim.qrCodeUrl}" alt="QR" style="width:150px; height:150px; border-radius:12px; margin-top:10px; background:#fff; padding:8px;" />` : ''}
-            <p class="muted" style="margin-top:12px;">Або введи вручну (Налаштування → Стільниковий зв'язок → Додати eSIM вручну):</p>
-            <code class="qr">${currentUser.esim.activationCode}</code>
-          </div>`;
-      } else if(currentUser.status === 'pending_payment'){
-        content.innerHTML = `<div class="card" style="margin-top:20px;"><span class="status-pill off"><span class="dot pulse"></span>Очікуємо підтвердження оплати...</span></div>`;
-      } else if(currentUser.status === 'canceled'){
-        content.innerHTML = `
-          <div class="card" style="margin-top:20px;"><span class="status-pill off"><span class="dot"></span>Підписку скасовано</span></div>
-          <a class="btn" href="plans.html" style="margin-top:16px;">Оформити нову підписку</a>`;
-      } else {
-        content.innerHTML = `<div class="card" style="margin-top:20px;"><span class="status-pill off"><span class="dot"></span>Статус: ${currentUser.status || 'невідомо'}</span></div>`;
+    async function refreshUsage() {
+      const note = document.getElementById('usageNote');
+      note.textContent = 'Оновлюємо…';
+      try {
+        currentUsage = await requestUsage();
+        render();
+      } catch (error) {
+        note.textContent = error.message || 'Не вдалося оновити дані.';
       }
     }
 
-    function toggleConnect(){
-      connected = !connected;
-      const btn = document.getElementById('toggleBtn');
-      const icon = document.getElementById('toggleIcon');
-      const label = document.getElementById('toggleLabel');
-      btn.classList.toggle('on', connected);
-      icon.textContent = connected ? '✅' : '📶';
-      label.textContent = connected ? 'Підключено' : 'Підключити';
+    async function copyActivationCode() {
+      const code = currentUser?.esim?.activationCode;
+      if (!code) return;
+      try {
+        await navigator.clipboard.writeText(code);
+        alert('Код скопійовано.');
+      } catch {
+        alert('Не вдалося скопіювати код. Скопіюйте його вручну з поля вище.');
+      }
     }
 
-    function logout(){
+    function renderNoSubscription() {
+      document.getElementById('loading').style.display = 'none';
+      document.getElementById('content').style.display = 'block';
+      document.getElementById('content').innerHTML = `<h1 style="margin-top:24px;font-size:22px;">Вітаємо! 👋</h1><p class="lead">Оберіть тариф, щоб отримати eSIM.</p><a class="btn" href="device-check.html" style="margin-top:20px;">Обрати тариф</a>`;
+    }
+
+    function renderError(message) {
+      document.getElementById('loading').style.display = 'none';
+      document.getElementById('content').style.display = 'block';
+      document.getElementById('content').innerHTML = `<div class="card" style="margin-top:20px;"><p>Не вдалося завантажити дані.</p><p class="muted" style="margin-top:8px;">${escapeHtml(message || '')}</p><button class="btn ghost" onclick="load()" style="margin-top:14px;">Спробувати ще раз</button></div>`;
+    }
+
+    function logout() {
       localStorage.removeItem('signal_session_token');
       localStorage.removeItem('signal_email');
       window.location.href = 'login.html';
     }
-
     load();
   </script>
 </body>
