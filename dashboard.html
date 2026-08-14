@@ -3,109 +3,138 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Користувачі — Signal Admin</title>
+<title>Головна — Сигнал</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=Space+Mono&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
 </head>
-<body>
-  <div class="admin-shell">
-    <aside class="admin-sidebar">
-      <div class="brand"><div class="mark" style="width:32px;height:32px;font-size:15px;">🛡️</div><span style="font-size:15px;">Signal Admin</span></div>
-      <nav class="admin-nav">
-        <a href="admin-dashboard.html">📊 Dashboard</a>
-        <a href="admin-tickets.html">🎫 Підтримка</a>
-        <a href="admin-users.html" class="active">👥 Користувачі</a>
-        <a href="admin-team.html" id="teamNavLink">🔑 Команда</a>
-        <a href="admin-audit.html" id="auditNavLink">🛡️ Журнал дій</a>
-        <a href="#" onclick="logout()">⏏ Вийти</a>
-      </nav>
-    </aside>
-    <main class="admin-main">
-      <h1 style="font-size:22px;">Користувачі</h1>
-      <p class="lead">Усі зареєстровані акаунти</p>
-      <div class="filter-bar"><input type="text" id="search" placeholder="Пошук за email..." style="min-width:260px;"></div>
-      <div id="loading" class="shimmer" style="height:200px; margin-top:16px;"></div>
-      <table class="admin-table" id="table" style="display:none;">
-        <thead><tr><th>Email</th><th>Зареєстрований</th><th>Тариф</th><th>Статус</th><th>Використано</th><th>Дія</th></tr></thead>
-        <tbody id="tbody"></tbody>
-      </table>
-    </main>
+<body class="has-bottomnav">
+  <div class="wrap">
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+      <div class="brand"><div class="mark">📶</div><span>Сигнал</span></div>
+      <button class="icon-btn" onclick="logout()" style="position:static; color:var(--text-muted);" title="Вийти">⎋</button>
+    </div>
+
+    <div id="loading" class="shimmer" style="height:180px; margin-top:20px;"></div>
+
+    <div id="content" style="display:none;"></div>
   </div>
+
+  <nav class="bottomnav">
+    <a href="dashboard.html" class="active"><span class="ic">🏠</span>Головна</a>
+    <a href="plans.html"><span class="ic">📶</span>Тариф</a>
+    <a href="usage.html"><span class="ic">📊</span>Витрати</a>
+    <a href="profile.html"><span class="ic">👤</span>Профіль</a>
+  </nav>
+
   <script src="config.js"></script>
-  <script src="admin-common.js"></script>
   <script>
-    requireAdminAuth();
-    let allUsers = [];
-    const escapeHtml = (value) => String(value || '').replace(/[&<>'"]/g, (char) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' }[char]));
+    const sessionToken = localStorage.getItem('signal_session_token');
+    const email = localStorage.getItem('signal_email');
+    if(!sessionToken || !email){ window.location.href = 'login.html'; }
 
-    async function load() {
-      try {
-        const res = await adminFetch('/api/admin/users');
-        if (!res.ok) throw new Error('Не вдалося отримати список користувачів');
-        allUsers = await res.json();
-        document.getElementById('table').style.display = 'table';
-        render(allUsers);
-      } catch (error) {
-        alert(error.message || 'Помилка завантаження');
-      } finally {
-        document.getElementById('loading').style.display = 'none';
-      }
-    }
+    let currentUser = null;
+    let connected = false;
 
-    function render(users) {
-      document.getElementById('tbody').innerHTML = users.map((user) => {
-        const subscription = user.subscription || {};
-        const encodedEmail = encodeURIComponent(user.email);
-        const retryButton = subscription.status === 'payment_ok_esim_failed'
-          ? `<button class="btn primary" style="padding:7px 10px;font-size:12px;" onclick="retryEsim('${encodedEmail}')">Видати eSIM</button>`
-          : '';
-        const recoveryButton = !subscription.esim
-          ? `<button class="btn ghost" style="padding:7px 10px;font-size:12px;" onclick="recoverEsim('${encodedEmail}')">Відновити eSIM</button>`
-          : '';
-        const usage = subscription.esim ? `${subscription.esim.usedGb ?? 0} / ${subscription.esim.dataLimitGb ?? '∞'} ГБ` : '—';
-        return `<tr><td>${escapeHtml(user.email)}</td><td>${user.createdAt ? new Date(user.createdAt).toLocaleDateString('uk-UA') : '—'}</td><td>${escapeHtml(subscription.plan || '—')}</td><td>${escapeHtml(subscription.status || 'Немає підписки')}</td><td>${usage}</td><td>${retryButton || recoveryButton || '—'}</td></tr>`;
-      }).join('') || '<tr><td colspan="6" class="muted">Немає користувачів</td></tr>';
-    }
-
-    async function retryEsim(encodedEmail) {
-      const email = decodeURIComponent(encodedEmail);
-      if (!confirm(`Видати eSIM для ${email}? Оплата Stripe не буде повторена.`)) return;
-      try {
-        const res = await adminFetch(`/api/admin/users/${encodedEmail}/retry-esim`, { method: 'POST' });
+    async function load(){
+      try{
+        const res = await fetch(`${API_URL}/api/status?email=${encodeURIComponent(email)}`);
         const data = await res.json();
-        if (!res.ok) throw new Error(data.error || 'Не вдалося видати eSIM');
-        alert('eSIM видано. Оновіть сторінку користувача — QR-код уже доступний.');
-        await load();
-      } catch (error) {
-        alert(error.message || 'Помилка повторної видачі eSIM');
+        if(!res.ok){
+          if(res.status === 404){ renderNoSubscription(); return; }
+          throw new Error(data.error);
+        }
+        currentUser = data;
+        render();
+      }catch(e){
+        renderNoSubscription();
       }
     }
 
-    async function recoverEsim(encodedEmail) {
-      const email = decodeURIComponent(encodedEmail);
-      const iccid = prompt('Введіть ICCID з налаштувань уже встановленої eSIM. Оплата не буде повторена.');
-      if (!iccid) return;
-      const plan = prompt('Введіть тариф: basic, standard або unlimited.', 'basic');
-      if (!plan) return;
-      try {
-        const res = await adminFetch(`/api/admin/users/${encodedEmail}/recover-esim`, {
-          method: 'POST',
-          body: JSON.stringify({ iccid: iccid.replace(/\s/g, ''), plan: plan.trim().toLowerCase() }),
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || 'Не вдалося відновити eSIM');
-        alert('eSIM відновлено. Оплата не повторювалася.');
-        await load();
-      } catch (error) {
-        alert(error.message || 'Помилка відновлення eSIM');
+    function renderNoSubscription(){
+      document.getElementById('loading').style.display = 'none';
+      const content = document.getElementById('content');
+      content.style.display = 'block';
+      content.innerHTML = `
+        <h1 style="margin-top:24px; font-size:22px;">Привіт! 👋</h1>
+        <p class="lead">У тебе ще немає активної підписки. Обери тариф, щоб отримати доступ до інтернету по всій Європі.</p>
+        <a class="btn" href="device-check.html" style="margin-top:20px;">Обрати тариф</a>`;
+    }
+
+    async function render(){
+      document.getElementById('loading').style.display = 'none';
+      const content = document.getElementById('content');
+      content.style.display = 'block';
+
+      const planNames = { basic:'Базовий · 10 ГБ', standard:'Стандарт · 20 ГБ', unlimited:'Безліміт' };
+
+      if(currentUser.status === 'active' && currentUser.esim){
+        const limitGb = currentUser.esim.dataLimitGb;
+        let usedGb = currentUser.esim.usedGb || 0;
+        try{
+          const usageRes = await fetch(`${API_URL}/api/usage?email=${encodeURIComponent(email)}`);
+          const usageData = await usageRes.json();
+          if(usageRes.ok) usedGb = usageData.usedGb;
+        }catch(e){}
+        const pct = limitGb ? Math.min(100, Math.round((usedGb / limitGb) * 100)) : 0;
+
+        content.innerHTML = `
+          <div class="toggle" id="toggleBtn" onclick="toggleConnect()" style="margin-top:20px;">
+            <div><div class="toggle-icon" id="toggleIcon">📶</div><div class="toggle-label" id="toggleLabel">Підключити</div></div>
+          </div>
+
+          <div class="card">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <div>
+                <div style="font-family:'Space Grotesk',sans-serif; font-weight:700;">${planNames[currentUser.plan] || currentUser.plan}</div>
+                <div class="muted" style="margin-top:4px;">ICCID: ${currentUser.esim.iccid}</div>
+              </div>
+              <span class="status-pill on"><span class="dot pulse"></span>Активна</span>
+            </div>
+            <div style="margin-top:14px;">
+              <div class="usage-top"><span>Використано трафіку</span><b>${limitGb ? usedGb + ' / ' + limitGb + ' ГБ' : 'Безліміт'}</b></div>
+              ${limitGb ? `<div class="usage-track"><div class="usage-fill" style="width:${pct}%;"></div></div>` : ''}
+            </div>
+          </div>
+
+          <div id="qrWrap"></div>
+
+          <a class="btn ghost" href="plans.html" style="margin-top:16px;">Змінити тариф</a>`;
+
+        document.getElementById('qrWrap').innerHTML = `
+          <div class="card">
+            <p class="muted">Відскануй QR-код камерою телефону, щоб додати eSIM:</p>
+            ${currentUser.esim.qrCodeUrl ? `<img src="${currentUser.esim.qrCodeUrl}" alt="QR" style="width:150px; height:150px; border-radius:12px; margin-top:10px; background:#fff; padding:8px;" />` : ''}
+            <p class="muted" style="margin-top:12px;">Або введи вручну (Налаштування → Стільниковий зв'язок → Додати eSIM вручну):</p>
+            <code class="qr">${currentUser.esim.activationCode}</code>
+          </div>`;
+      } else if(currentUser.status === 'pending_payment'){
+        content.innerHTML = `<div class="card" style="margin-top:20px;"><span class="status-pill off"><span class="dot pulse"></span>Очікуємо підтвердження оплати...</span></div>`;
+      } else if(currentUser.status === 'canceled'){
+        content.innerHTML = `
+          <div class="card" style="margin-top:20px;"><span class="status-pill off"><span class="dot"></span>Підписку скасовано</span></div>
+          <a class="btn" href="plans.html" style="margin-top:16px;">Оформити нову підписку</a>`;
+      } else {
+        content.innerHTML = `<div class="card" style="margin-top:20px;"><span class="status-pill off"><span class="dot"></span>Статус: ${currentUser.status || 'невідомо'}</span></div>`;
       }
     }
 
-    document.getElementById('search').addEventListener('input', (event) => {
-      const query = event.target.value.toLowerCase();
-      render(allUsers.filter((user) => user.email.toLowerCase().includes(query)));
-    });
+    function toggleConnect(){
+      connected = !connected;
+      const btn = document.getElementById('toggleBtn');
+      const icon = document.getElementById('toggleIcon');
+      const label = document.getElementById('toggleLabel');
+      btn.classList.toggle('on', connected);
+      icon.textContent = connected ? '✅' : '📶';
+      label.textContent = connected ? 'Підключено' : 'Підключити';
+    }
+
+    function logout(){
+      localStorage.removeItem('signal_session_token');
+      localStorage.removeItem('signal_email');
+      window.location.href = 'login.html';
+    }
+
     load();
   </script>
 </body>
