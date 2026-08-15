@@ -37,6 +37,20 @@
     const email = localStorage.getItem('signal_email');
     if(!email){ window.location.href = 'login.html'; }
 
+    function providerDate(value){
+      if(value == null || value === '') return null;
+      const numeric = Number(value);
+      const date = Number.isFinite(numeric) && String(value).trim() !== ''
+        ? new Date(numeric < 1e11 ? numeric * 1000 : numeric)
+        : new Date(value);
+      return Number.isNaN(date.getTime()) ? null : date;
+    }
+
+    function formatGb(value){
+      const number = Number(value);
+      return Number.isFinite(number) ? `${number.toLocaleString('uk-UA', { maximumFractionDigits: 2 })} ГБ` : '—';
+    }
+
     async function load(){
       const loading = document.getElementById('loading');
       const content = document.getElementById('content');
@@ -56,6 +70,8 @@
         let apn = data.esim.apn;
         let expiredTime = data.esim.expiredTime;
         let activateTime = data.esim.activateTime;
+        let remainingGb = data.esim.remainingGb ?? (limitGb == null ? null : Math.max(0, limitGb - usedGb));
+        let lastUpdateTime = data.esim.lastUpdateTime;
 
         // Тягнемо СВІЖІ дані використання з eSIM Access (не з кешу)
         try{
@@ -63,9 +79,11 @@
           const usageData = await usageRes.json();
           if(usageRes.ok){
             usedGb = usageData.usedGb;
+            remainingGb = usageData.remainingGb;
             apn = usageData.apn || apn;
             expiredTime = usageData.expiredTime || expiredTime;
             activateTime = usageData.activateTime || activateTime;
+            lastUpdateTime = usageData.lastUpdateTime || lastUpdateTime;
           }
         }catch(e){ /* якщо не вдалось оновити — показуємо останнє відоме значення */ }
 
@@ -74,9 +92,12 @@
 
         // Дні до закінчення eSIM
         let daysLeftHtml = '';
-        if(expiredTime){
-          const daysLeft = Math.max(0, Math.ceil((new Date(expiredTime) - new Date()) / 86400000));
-          daysLeftHtml = `<div class="card"><div style="display:flex; justify-content:space-between; align-items:center;"><span class="muted">Днів до закінчення eSIM</span><b style="font-family:'Space Mono',monospace;">${daysLeft}</b></div></div>`;
+        const expiresAt = providerDate(expiredTime);
+        if(expiresAt){
+          const daysLeft = Math.ceil((expiresAt - new Date()) / 86400000);
+          daysLeftHtml = daysLeft >= 0
+            ? `<div class="card"><div style="display:flex; justify-content:space-between; align-items:center;"><span class="muted">Днів до закінчення eSIM</span><b style="font-family:'Space Mono',monospace;">${daysLeft}</b></div></div>`
+            : `<div class="card"><span class="status-pill off"><span class="dot"></span>Термін дії eSIM завершився</span></div>`;
         }
 
         // Прогноз закінчення трафіку за поточним темпом
@@ -99,9 +120,11 @@
           ${isLow ? `<div class="card" style="border-color:var(--danger);"><p style="color:var(--danger); font-size:13px; display:flex; align-items:center; gap:8px;">⚠️ Використано понад 80% трафіку тарифу</p></div>` : ''}
 
           <div class="card">
-            <div class="usage-top"><span>Використано</span><b>${limitGb ? usedGb + ' / ' + limitGb + ' ГБ' : 'Безліміт'}</b></div>
+            <div class="usage-top"><span>Використано</span><b>${limitGb ? `${formatGb(usedGb)} / ${formatGb(limitGb)}` : 'Безліміт'}</b></div>
             ${limitGb ? `<div class="usage-track"><div class="usage-fill" style="width:${pct}%; ${isLow ? 'background:linear-gradient(90deg,#f5a623,var(--danger));' : ''}"></div></div>` : ''}
+            ${remainingGb != null ? `<p class="muted" style="margin-top:12px;">Залишилось: <b style="color:var(--text);">${formatGb(remainingGb)}</b></p>` : ''}
             ${apn ? `<p class="muted" style="margin-top:14px;">📡 Мережа: <span style="color:var(--text);">${apn}</span></p>` : ''}
+            <p class="muted" style="margin-top:8px;font-size:11px;">${lastUpdateTime ? `Дані оновлено: ${providerDate(lastUpdateTime)?.toLocaleString('uk-UA') || '—'}` : 'Дані оновлюються провайдером протягом кількох годин.'}</p>
           </div>
 
           ${daysLeftHtml}

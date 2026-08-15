@@ -34,6 +34,20 @@
     if(!sessionToken || !email){ window.location.href = 'login.html'; }
 
     let currentUser = null;
+    const isAppleMobile = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+
+    function formatGb(value){
+      const number = Number(value);
+      return Number.isFinite(number) ? `${number.toLocaleString('uk-UA', { maximumFractionDigits: 2 })} ГБ` : '—';
+    }
+
+    function copyActivationCode(){
+      const code = currentUser?.esim?.activationCode;
+      if(!code) return;
+      navigator.clipboard?.writeText(code).then(() => {
+        alert('Код eSIM скопійовано. Відкрий Налаштування → Мобільні дані → Додати eSIM → Ввести дані вручну.');
+      }).catch(() => alert(`Скопіюй цей код вручну:\n${code}`));
+    }
 
     async function load(){
       try{
@@ -75,12 +89,26 @@
       if(currentUser.status === 'active' && currentUser.esim){
         const limitGb = currentUser.esim.dataLimitGb;
         let usedGb = currentUser.esim.usedGb || 0;
+        let remainingGb = currentUser.esim.remainingGb ?? (limitGb == null ? null : Math.max(0, limitGb - usedGb));
+        let lastUpdateTime = currentUser.esim.lastUpdateTime;
         try{
           const usageRes = await fetch(`${API_URL}/api/usage?email=${encodeURIComponent(email)}`);
           const usageData = await usageRes.json();
-          if(usageRes.ok) usedGb = usageData.usedGb;
+          if(usageRes.ok){
+            usedGb = usageData.usedGb;
+            remainingGb = usageData.remainingGb;
+            lastUpdateTime = usageData.lastUpdateTime || lastUpdateTime;
+          }
         }catch(e){}
         const pct = limitGb ? Math.min(100, Math.round((usedGb / limitGb) * 100)) : 0;
+        const activationCode = currentUser.esim.activationCode || '';
+        const appleInstallUrl = activationCode
+          ? `https://esimsetup.apple.com/esim_qrcode_provisioning?carddata=${encodeURIComponent(activationCode)}`
+          : '';
+        const installAction = !activationCode ? '' : isAppleMobile
+          ? `<a class="btn" href="${appleInstallUrl}" style="margin-top:16px;">Встановити eSIM</a>`
+          : `<button class="btn" type="button" onclick="copyActivationCode()" style="margin-top:16px;">Скопіювати код eSIM</button>`;
+        const updateText = lastUpdateTime ? `Дані оновлено: ${new Date(lastUpdateTime).toLocaleString('uk-UA')}` : 'Дані оновлюються провайдером протягом кількох годин.';
 
         content.innerHTML = `
           <div class="card" style="margin-top:20px;">
@@ -92,8 +120,10 @@
               <span class="status-pill on"><span class="dot"></span>Активовано</span>
             </div>
             <div style="margin-top:14px;">
-              <div class="usage-top"><span>Використано трафіку</span><b>${limitGb ? usedGb + ' / ' + limitGb + ' ГБ' : 'Безліміт'}</b></div>
+              <div class="usage-top"><span>Використано трафіку</span><b>${limitGb ? `${formatGb(usedGb)} / ${formatGb(limitGb)}` : 'Безліміт'}</b></div>
               ${limitGb ? `<div class="usage-track"><div class="usage-fill" style="width:${pct}%;"></div></div>` : ''}
+              ${remainingGb != null ? `<p class="muted" style="margin-top:10px;">Залишилось: <b style="color:var(--text);">${formatGb(remainingGb)}</b></p>` : ''}
+              <p class="muted" style="margin-top:8px;font-size:11px;">${updateText}</p>
             </div>
           </div>
 
@@ -105,6 +135,7 @@
           <div class="card">
             <p class="muted">Відскануй QR-код камерою телефону, щоб додати eSIM:</p>
             ${currentUser.esim.qrCodeUrl ? `<img src="${currentUser.esim.qrCodeUrl}" alt="QR" style="width:150px; height:150px; border-radius:12px; margin-top:10px; background:#fff; padding:8px;" />` : ''}
+            ${installAction}
             <p class="muted" style="margin-top:12px;">Або введи вручну (Налаштування → Стільниковий зв'язок → Додати eSIM вручну):</p>
             <code class="qr">${currentUser.esim.activationCode}</code>
           </div>`;

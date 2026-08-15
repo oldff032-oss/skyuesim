@@ -501,8 +501,9 @@ app.get('/api/usage', async (req, res) => {
     if (user.status === 'blocked') return res.status(403).json({ error: 'Акаунт заблоковано' });
 
     const usage = await checkUsage(user.esim.orderNo);
-    const usedGb = +(usage.usedBytes / 1e9).toFixed(2);
-    const totalGb = usage.totalBytes ? Math.round(usage.totalBytes / 1e9) : user.esim.dataLimitGb;
+    const usedGb = +(usage.usedBytes / (1024 ** 3)).toFixed(2);
+    const totalGb = usage.totalBytes ? +(usage.totalBytes / (1024 ** 3)).toFixed(2) : user.esim.dataLimitGb;
+    const remainingGb = totalGb == null ? null : Math.max(0, +(totalGb - usedGb).toFixed(2));
 
     // Зберігаємо оновлені дані, щоб дашборд теж їх бачив без повторного запиту
     saveUser(email, {
@@ -513,10 +514,12 @@ app.get('/api/usage', async (req, res) => {
         apn: usage.apn ?? user.esim.apn,
         expiredTime: usage.expiredTime ?? user.esim.expiredTime,
         activateTime: usage.activateTime ?? user.esim.activateTime,
+        lastUpdateTime: usage.lastUpdateTime ?? user.esim.lastUpdateTime,
+        remainingGb,
       },
     });
 
-    res.json({ usedGb, totalGb, esimStatus: usage.esimStatus, apn: usage.apn, expiredTime: usage.expiredTime, activateTime: usage.activateTime });
+    res.json({ usedGb, totalGb, remainingGb, esimStatus: usage.esimStatus, apn: usage.apn, expiredTime: usage.expiredTime, activateTime: usage.activateTime, lastUpdateTime: usage.lastUpdateTime });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message });

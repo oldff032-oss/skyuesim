@@ -235,10 +235,17 @@ function bytes(value) {
   return Number.isFinite(number) && number >= 0 ? number : null;
 }
 
+function bytesToGb(value) {
+  const valueInBytes = bytes(value);
+  return valueInBytes == null ? null : +(valueInBytes / (1024 ** 3)).toFixed(2);
+}
+
 function profileToEsim(profile, orderNo, plan) {
   const packageInfo = Array.isArray(profile.packageList) ? profile.packageList[0] : null;
   const volume = bytes(profile.totalVolume) ?? bytes(packageInfo?.volume);
-  const limitGb = volume == null ? DEFAULT_PLAN_LIMITS_GB[plan] ?? null : Math.round(volume / 1e9);
+  // eSIM Access reports bytes.  A 20 GiB package is 21,474,836,480 bytes;
+  // dividing by 1e9 incorrectly displayed it as 21 GB.
+  const limitGb = volume == null ? DEFAULT_PLAN_LIMITS_GB[plan] ?? null : bytesToGb(volume);
   return {
     status: 'active',
     orderNo,
@@ -350,7 +357,7 @@ async function checkUsage(orderNo) {
     const usageResponse = await esimAccessRequest('/api/v1/open/esim/usage/query', { esimTranNoList: [esimTranNo] });
     const usage = usageResponse?.obj?.[0] || usageResponse?.obj?.esimList?.[0] || usageResponse?.obj?.list?.[0] || usageResponse?.obj;
     if (!usage) throw new EsimAccessError('Usage endpoint returned no record.', { code: 'USAGE_NOT_FOUND' });
-    return usageResult(bytes(usage.dataUsage) ?? fallbackUsage, bytes(usage.totalData) ?? fallbackTotal, profile);
+    return usageResult(bytes(usage.dataUsage) ?? fallbackUsage, bytes(usage.totalData) ?? fallbackTotal, profile, usage);
   } catch (error) {
     // Usage is delayed by the carrier and should not make the dashboard unavailable.
     log('usage_endpoint_failed_using_profile_fallback', { orderNo: mask(orderNo), code: error.code, message: error.message });
@@ -358,7 +365,7 @@ async function checkUsage(orderNo) {
   }
 }
 
-function usageResult(usedBytes, totalBytes, profile) {
+function usageResult(usedBytes, totalBytes, profile, usageDetails = null) {
   return {
     usedBytes: usedBytes ?? 0,
     totalBytes: totalBytes ?? null,
@@ -366,6 +373,7 @@ function usageResult(usedBytes, totalBytes, profile) {
     apn: profile.apn || null,
     expiredTime: profile.expiredTime || null,
     activateTime: profile.activateTime || null,
+    lastUpdateTime: usageDetails?.lastUpdateTime || profile.lastUpdateTime || null,
   };
 }
 
