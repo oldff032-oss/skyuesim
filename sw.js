@@ -3,7 +3,7 @@
 // Кешує тільки статичну "оболонку" — самі дані (підписка, тікети) завжди
 // тягнуться наживо з бекенду, ніколи не кешуються.
 
-const CACHE_NAME = 'signal-shell-v1';
+const CACHE_NAME = 'signal-shell-v2';
 const SHELL_FILES = [
   '/index.html',
   '/style.css',
@@ -11,6 +11,7 @@ const SHELL_FILES = [
   '/icon-192.png',
   '/icon-512.png',
   '/manifest.json',
+  '/pwa.js',
 ];
 
 self.addEventListener('install', (event) => {
