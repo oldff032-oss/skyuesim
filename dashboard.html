@@ -95,7 +95,7 @@
       const planNames = { basic:'Базовий · 10 ГБ', standard:'Стандарт · 20 ГБ', unlimited:'Безліміт' };
 
       if(currentUser.status === 'active' && currentUser.esim){
-        const limitGb = currentUser.esim.dataLimitGb;
+        let limitGb = currentUser.esim.dataLimitGb;
         let usedGb = currentUser.esim.usedGb || 0;
         let remainingGb = currentUser.esim.remainingGb ?? (limitGb == null ? null : Math.max(0, limitGb - usedGb));
         let lastUpdateTime = currentUser.esim.lastUpdateTime;
@@ -104,11 +104,15 @@
           const usageData = await usageRes.json();
           if(usageRes.ok){
             usedGb = usageData.usedGb;
+            limitGb = usageData.totalGb ?? limitGb;
             remainingGb = usageData.remainingGb;
             lastUpdateTime = usageData.lastUpdateTime || lastUpdateTime;
           }
         }catch(e){}
         const pct = limitGb ? Math.min(100, Math.round((usedGb / limitGb) * 100)) : 0;
+        const planLabel = limitGb != null
+          ? `${(planNames[currentUser.plan] || currentUser.plan).split(' · ')[0]} · ${formatGb(limitGb)}`
+          : (planNames[currentUser.plan] || currentUser.plan);
         const activationCode = currentUser.esim.activationCode || '';
         const appleInstallUrl = activationCode
           ? `https://esimsetup.apple.com/esim_qrcode_provisioning?carddata=${encodeURIComponent(activationCode)}`
@@ -122,7 +126,7 @@
           <div class="card" style="margin-top:20px;">
             <div style="display:flex; justify-content:space-between; align-items:center;">
               <div>
-                <div style="font-family:'Space Grotesk',sans-serif; font-weight:700;">${planNames[currentUser.plan] || currentUser.plan}</div>
+                <div style="font-family:'Space Grotesk',sans-serif; font-weight:700;">${planLabel}</div>
                 <div class="muted" style="margin-top:4px;">ICCID: ${currentUser.esim.iccid}</div>
               </div>
               <span class="status-pill on"><span class="dot"></span>Активовано</span>

@@ -66,7 +66,7 @@
           return;
         }
 
-        const limitGb = data.esim.dataLimitGb;
+        let limitGb = data.esim.dataLimitGb;
         let usedGb = data.esim.usedGb || 0;
         let apn = data.esim.apn;
         let expiredTime = data.esim.expiredTime;
@@ -80,6 +80,7 @@
           const usageData = await usageRes.json();
           if(usageRes.ok){
             usedGb = usageData.usedGb;
+            limitGb = usageData.totalGb ?? limitGb;
             remainingGb = usageData.remainingGb;
             apn = usageData.apn || apn;
             expiredTime = usageData.expiredTime || expiredTime;
