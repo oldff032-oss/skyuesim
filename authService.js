@@ -100,6 +100,7 @@ async function login(email, password) {
   if (!ok) throw Object.assign(new Error('Невірний email або пароль'), { code: 'INVALID_CREDENTIALS' });
 
   const sessionToken = randomToken();
+  user.lastLoginAt = new Date().toISOString();
   store.sessions[sessionToken] = { email, createdAt: Date.now() };
   writeAll(store);
 

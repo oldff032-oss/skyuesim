@@ -26,11 +26,13 @@ async function login(email, password) {
   const store = readAll();
   const admin = store.admins[email];
   if (!admin) throw Object.assign(new Error('Невірний email або пароль'), { code: 'INVALID' });
+  if (admin.blocked) throw Object.assign(new Error('Обліковий запис адміністратора заблоковано'), { code: 'BLOCKED' });
 
   const ok = await bcrypt.compare(password, admin.passwordHash);
   if (!ok) throw Object.assign(new Error('Невірний email або пароль'), { code: 'INVALID' });
 
   const token = crypto.randomBytes(32).toString('hex');
+  admin.lastLoginAt = new Date().toISOString();
   store.sessions[token] = { email, role: admin.role, createdAt: Date.now() };
   writeAll(store);
   return { token, role: admin.role, email };
@@ -77,7 +79,44 @@ async function createAdmin({ email, password, role }) {
 
 function listAdmins() {
   const store = readAll();
-  return Object.entries(store.admins).map(([email, a]) => ({ email, role: a.role, createdAt: a.createdAt }));
+  return Object.entries(store.admins).map(([email, a]) => ({
+    email,
+    role: a.role,
+    createdAt: a.createdAt,
+    lastLoginAt: a.lastLoginAt || null,
+    blocked: Boolean(a.blocked),
+    blockedAt: a.blockedAt || null,
+  }));
 }
 
-module.exports = { bootstrap, login, requireAdmin, requireRole, createAdmin, listAdmins };
+function revokeSessions(store, email) {
+  for (const [token, session] of Object.entries(store.sessions)) {
+    if (session.email === email) delete store.sessions[token];
+  }
+}
+
+function setAdminBlocked({ email, blocked, actorEmail }) {
+  const store = readAll();
+  const admin = store.admins[email];
+  if (!admin) throw Object.assign(new Error('Адміністратора не знайдено'), { code: 'NOT_FOUND' });
+  if (email === actorEmail) throw Object.assign(new Error('Не можна заблокувати власний обліковий запис'), { code: 'SELF_ACTION' });
+  if (admin.role === 'super_admin') throw Object.assign(new Error('Super Admin не можна блокувати'), { code: 'PROTECTED_ADMIN' });
+  admin.blocked = Boolean(blocked);
+  admin.blockedAt = blocked ? new Date().toISOString() : null;
+  if (blocked) revokeSessions(store, email);
+  writeAll(store);
+  return { email, blocked: admin.blocked };
+}
+
+function deleteAdmin({ email, actorEmail }) {
+  const store = readAll();
+  const admin = store.admins[email];
+  if (!admin) throw Object.assign(new Error('Адміністратора не знайдено'), { code: 'NOT_FOUND' });
+  if (email === actorEmail) throw Object.assign(new Error('Не можна видалити власний обліковий запис'), { code: 'SELF_ACTION' });
+  if (admin.role === 'super_admin') throw Object.assign(new Error('Super Admin не можна видалити'), { code: 'PROTECTED_ADMIN' });
+  delete store.admins[email];
+  revokeSessions(store, email);
+  writeAll(store);
+}
+
+module.exports = { bootstrap, login, requireAdmin, requireRole, createAdmin, listAdmins, setAdminBlocked, deleteAdmin };

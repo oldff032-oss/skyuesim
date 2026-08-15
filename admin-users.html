@@ -34,6 +34,13 @@
         </thead>
         <tbody id="tbody"></tbody>
       </table>
+      <div id="userDetailsModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:50;padding:20px;overflow:auto;">
+        <div class="card" style="max-width:680px;margin:5vh auto;position:relative;">
+          <button class="icon-btn" type="button" onclick="closeUserDetails()" style="position:absolute;right:12px;top:12px;">×</button>
+          <h2 style="font-size:18px;margin-right:36px;">Дані користувача</h2>
+          <pre id="userDetailsContent" style="margin-top:16px;white-space:pre-wrap;word-break:break-word;font-family:'Space Mono',monospace;font-size:12px;color:var(--text-muted);"></pre>
+        </div>
+      </div>
     </main>
   </div>
 
@@ -85,6 +92,8 @@
           ${subscription.status === 'blocked' ? 'Розблокувати' : 'Заблокувати'}
         </button>`;
 
+        const detailsButton = `<button class="btn ghost" style="padding:7px 10px;font-size:12px;" onclick="showUserDetails('${encodedEmail}')">Деталі</button>`;
+
         const usage = subscription.esim
           ? `${subscription.esim.usedGb ?? 0} / ${subscription.esim.dataLimitGb ?? '∞'} ГБ`
           : '—';
@@ -95,7 +104,7 @@
           <td>${escapeHtml(subscription.plan || '—')}</td>
           <td>${escapeHtml(subscription.status || 'Немає підписки')}</td>
           <td>${usage}</td>
-          <td style="display:flex;gap:6px;flex-wrap:wrap;">${recoveryButton}${blockButton}</td>
+          <td style="display:flex;gap:6px;flex-wrap:wrap;">${detailsButton}${recoveryButton}${blockButton}</td>
         </tr>`;
       }).join('') || '<tr><td colspan="6" class="muted">Немає користувачів</td></tr>';
     }
@@ -149,6 +158,45 @@
       } catch (error) {
         alert(error.message || 'Помилка зміни статусу користувача');
       }
+    }
+
+    async function showUserDetails(encodedEmail) {
+      try {
+        const res = await adminFetch(`/api/admin/users/${encodedEmail}`);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Не вдалося отримати дані користувача');
+        const subscription = data.subscription || {};
+        const esim = subscription.esim || {};
+        const lines = [
+          `Email: ${data.email}`,
+          `Зареєстрований: ${data.account?.createdAt ? new Date(data.account.createdAt).toLocaleString('uk-UA') : '—'}`,
+          `Останній вхід: ${data.account?.lastLoginAt ? new Date(data.account.lastLoginAt).toLocaleString('uk-UA') : '—'}`,
+          `Тариф: ${subscription.plan || '—'}`,
+          `Статус: ${subscription.status || '—'}`,
+          `Оновлено: ${subscription.updatedAt ? new Date(subscription.updatedAt).toLocaleString('uk-UA') : '—'}`,
+          '',
+          'eSIM',
+          `ICCID: ${esim.iccid || '—'}`,
+          `Номер замовлення: ${esim.orderNo || '—'}`,
+          `eSIM UID: ${esim.esimTranNo || '—'}`,
+          `Статус eSIM: ${esim.status || '—'}`,
+          `Використано: ${esim.usedGb ?? '—'} ГБ`,
+          `Залишилось: ${esim.remainingGb ?? '—'} ГБ`,
+          `Ліміт: ${esim.dataLimitGb ?? '—'} ГБ`,
+          `Активація: ${esim.activateTime || '—'}`,
+          `Завершення: ${esim.expiredTime || '—'}`,
+          `APN: ${esim.apn || '—'}`,
+          `Код активації: ${esim.activationCode || '—'}`,
+        ];
+        document.getElementById('userDetailsContent').textContent = lines.join('\n');
+        document.getElementById('userDetailsModal').style.display = 'block';
+      } catch (error) {
+        alert(error.message || 'Помилка завантаження даних користувача');
+      }
+    }
+
+    function closeUserDetails() {
+      document.getElementById('userDetailsModal').style.display = 'none';
     }
 
     document.getElementById('search').addEventListener('input', (event) => {

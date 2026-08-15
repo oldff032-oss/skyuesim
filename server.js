@@ -251,6 +251,31 @@ app.post('/api/admin/team', adminAuth.requireAdmin, adminAuth.requireRole('super
   }
 });
 
+app.patch('/api/admin/team/:email/block', adminAuth.requireAdmin, adminAuth.requireRole('super_admin'), (req, res) => {
+  try {
+    const result = adminAuth.setAdminBlocked({
+      email: req.params.email,
+      blocked: Boolean(req.body?.blocked),
+      actorEmail: req.admin.email,
+    });
+    auditStore.log({ adminEmail: req.admin.email, action: result.blocked ? 'admin_blocked' : 'admin_unblocked', target: result.email });
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    res.status(400).json({ error: err.message, code: err.code });
+  }
+});
+
+app.delete('/api/admin/team/:email', adminAuth.requireAdmin, adminAuth.requireRole('super_admin'), (req, res) => {
+  try {
+    const email = req.params.email;
+    adminAuth.deleteAdmin({ email, actorEmail: req.admin.email });
+    auditStore.log({ adminEmail: req.admin.email, action: 'admin_deleted', target: email });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({ error: err.message, code: err.code });
+  }
+});
+
 // Перегляд тікетів — доступний усім ролям, крім нічого (навіть Viewer читає)
 app.get('/api/admin/tickets', adminAuth.requireAdmin, (req, res) => {
   const { status, priority, search } = req.query;
@@ -333,6 +358,21 @@ app.get('/api/admin/users', adminAuth.requireAdmin, (req, res) => {
     subscription: getUser(email) || null,
   }));
   res.json(users);
+});
+
+app.get('/api/admin/users/:email', adminAuth.requireAdmin, (req, res) => {
+  const email = req.params.email;
+  const authUser = authStore.readAll().users?.[email];
+  const subscription = getUser(email);
+  if (!authUser && !subscription) return res.status(404).json({ error: 'Користувача не знайдено' });
+  res.json({
+    email,
+    account: authUser ? {
+      createdAt: authUser.createdAt || null,
+      lastLoginAt: authUser.lastLoginAt || null,
+    } : null,
+    subscription: subscription || null,
+  });
 });
 
 // Blocked users cannot sign in. Unblocking restores the exact status they had.

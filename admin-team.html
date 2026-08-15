@@ -54,7 +54,7 @@
 
       <div id="loading" class="shimmer" style="height:150px; margin-top:16px;"></div>
       <table class="admin-table" id="table" style="display:none;">
-        <thead><tr><th>Email</th><th>Роль</th><th>Створено</th></tr></thead>
+        <thead><tr><th>Email</th><th>Роль</th><th>Статус</th><th>Останній вхід</th><th>Дії</th></tr></thead>
         <tbody id="tbody"></tbody>
       </table>
     </main>
@@ -64,6 +64,8 @@
   <script src="admin-common.js"></script>
   <script>
     requireAdminAuth();
+    const currentAdminEmail = localStorage.getItem('signal_admin_email');
+    const escapeHtml = (value) => String(value || '').replace(/[&<>'"]/g, (char) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' }[char]));
     if(localStorage.getItem('signal_admin_role') !== 'super_admin'){
       document.querySelector('.admin-main').innerHTML = '<div class="card"><p class="err-text">Цей розділ доступний лише Super Admin.</p></div>';
     } else {
@@ -76,9 +78,20 @@
         const admins = await res.json();
         document.getElementById('loading').style.display = 'none';
         document.getElementById('table').style.display = 'table';
-        document.getElementById('tbody').innerHTML = admins.map(a => `
-          <tr><td>${a.email}</td><td><span class="role-badge ${a.role}">${a.role}</span></td><td class="muted">${new Date(a.createdAt).toLocaleDateString('uk-UA')}</td></tr>
-        `).join('');
+        document.getElementById('tbody').innerHTML = admins.map(a => {
+          const protectedAdmin = a.role === 'super_admin' || a.email === currentAdminEmail;
+          const status = a.blocked ? '<span class="status-pill off"><span class="dot"></span>Заблокований</span>' : '<span class="status-pill on"><span class="dot"></span>Активний</span>';
+          const actions = protectedAdmin ? '<span class="muted">—</span>' : `
+            <button class="btn ghost" style="padding:7px 10px;font-size:12px;" onclick="setAdminBlocked('${encodeURIComponent(a.email)}', ${a.blocked})">${a.blocked ? 'Розблокувати' : 'Заблокувати'}</button>
+            <button class="btn ghost" style="padding:7px 10px;font-size:12px;color:var(--danger);" onclick="deleteAdmin('${encodeURIComponent(a.email)}')">Видалити</button>`;
+          return `<tr>
+            <td>${escapeHtml(a.email)}</td>
+            <td><span class="role-badge ${a.role}">${escapeHtml(a.role)}</span></td>
+            <td>${status}</td>
+            <td class="muted">${a.lastLoginAt ? new Date(a.lastLoginAt).toLocaleString('uk-UA') : 'Ще не входив'}</td>
+            <td style="display:flex;gap:6px;flex-wrap:wrap;">${actions}</td>
+          </tr>`;
+        }).join('') || '<tr><td colspan="5" class="muted">Немає адміністраторів</td></tr>';
       }catch(e){ document.getElementById('loading').style.display = 'none'; }
     }
 
@@ -100,6 +113,29 @@
         err.textContent = e.message;
         err.style.display = 'flex';
       }
+    }
+
+    async function setAdminBlocked(encodedEmail, isBlocked){
+      const email = decodeURIComponent(encodedEmail);
+      const action = isBlocked ? 'розблокувати' : 'заблокувати';
+      if(!confirm(`${action.charAt(0).toUpperCase() + action.slice(1)} адміністратора ${email}?`)) return;
+      try{
+        const res = await adminFetch(`/api/admin/team/${encodedEmail}/block`, { method:'PATCH', body: JSON.stringify({ blocked: !isBlocked }) });
+        const data = await res.json();
+        if(!res.ok) throw new Error(data.error || 'Не вдалося змінити статус адміністратора');
+        load();
+      }catch(e){ alert(e.message || 'Помилка зміни статусу адміністратора'); }
+    }
+
+    async function deleteAdmin(encodedEmail){
+      const email = decodeURIComponent(encodedEmail);
+      if(!confirm(`Видалити адміністратора ${email}? Доступ буде втрачено назавжди.`)) return;
+      try{
+        const res = await adminFetch(`/api/admin/team/${encodedEmail}`, { method:'DELETE' });
+        const data = await res.json();
+        if(!res.ok) throw new Error(data.error || 'Не вдалося видалити адміністратора');
+        load();
+      }catch(e){ alert(e.message || 'Помилка видалення адміністратора'); }
     }
   </script>
 </body>
