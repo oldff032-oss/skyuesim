@@ -34,7 +34,6 @@
     if(!sessionToken || !email){ window.location.href = 'login.html'; }
 
     let currentUser = null;
-    let connected = false;
 
     async function load(){
       try{
@@ -66,6 +65,11 @@
       const content = document.getElementById('content');
       content.style.display = 'block';
 
+      if(currentUser.status === 'registered'){
+        renderNoSubscription();
+        return;
+      }
+
       const planNames = { basic:'Базовий · 10 ГБ', standard:'Стандарт · 20 ГБ', unlimited:'Безліміт' };
 
       if(currentUser.status === 'active' && currentUser.esim){
@@ -79,17 +83,13 @@
         const pct = limitGb ? Math.min(100, Math.round((usedGb / limitGb) * 100)) : 0;
 
         content.innerHTML = `
-          <div class="toggle" id="toggleBtn" onclick="toggleConnect()" style="margin-top:20px;">
-            <div><div class="toggle-icon" id="toggleIcon">📶</div><div class="toggle-label" id="toggleLabel">Підключити</div></div>
-          </div>
-
-          <div class="card">
+          <div class="card" style="margin-top:20px;">
             <div style="display:flex; justify-content:space-between; align-items:center;">
               <div>
                 <div style="font-family:'Space Grotesk',sans-serif; font-weight:700;">${planNames[currentUser.plan] || currentUser.plan}</div>
                 <div class="muted" style="margin-top:4px;">ICCID: ${currentUser.esim.iccid}</div>
               </div>
-              <span class="status-pill on"><span class="dot pulse"></span>Активна</span>
+              <span class="status-pill on"><span class="dot"></span>Активовано</span>
             </div>
             <div style="margin-top:14px;">
               <div class="usage-top"><span>Використано трафіку</span><b>${limitGb ? usedGb + ' / ' + limitGb + ' ГБ' : 'Безліміт'}</b></div>
@@ -117,16 +117,6 @@
       } else {
         content.innerHTML = `<div class="card" style="margin-top:20px;"><span class="status-pill off"><span class="dot"></span>Статус: ${currentUser.status || 'невідомо'}</span></div>`;
       }
-    }
-
-    function toggleConnect(){
-      connected = !connected;
-      const btn = document.getElementById('toggleBtn');
-      const icon = document.getElementById('toggleIcon');
-      const label = document.getElementById('toggleLabel');
-      btn.classList.toggle('on', connected);
-      icon.textContent = connected ? '✅' : '📶';
-      label.textContent = connected ? 'Підключено' : 'Підключити';
     }
 
     function logout(){

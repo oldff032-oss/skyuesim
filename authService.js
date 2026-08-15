@@ -6,6 +6,7 @@
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const { readAll, writeAll } = require('./authStore');
+const { saveUser } = require('./db');
 const { sendVerificationCode } = require('./emailService');
 
 const CODE_TTL_MS = 10 * 60 * 1000; // 10 хвилин
@@ -75,6 +76,9 @@ async function setPassword(verifyToken, password) {
 
   const passwordHash = await bcrypt.hash(password, 10);
   store.users[entry.email] = { email: entry.email, passwordHash, createdAt: Date.now() };
+  // Keep the account visible in the subscription/admin data immediately after
+  // registration, even before the user has selected a paid plan.
+  saveUser(entry.email, { email: entry.email, status: 'registered', createdAt: new Date().toISOString() });
   delete store.verifyTokens[verifyToken];
 
   const sessionToken = randomToken();

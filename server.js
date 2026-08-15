@@ -9,7 +9,10 @@ const cors = require('cors');
 
 const { createCheckoutSession, cancelSubscription, constructWebhookEvent, getNextBillingDate } = require('./stripeService');
 const { provisionEsim, checkUsage, recoverEsim } = require('./esimService');
-const { getUser, saveUser, getUserByStripeCustomerId } = require('./db');
+const { bootstrap: bootstrapUsers, getUser, saveUser, getUserByStripeCustomerId, getAllUsers } = require('./db');
+const storage = require('./persistentState');
+const authStore = require('./authStore');
+const adminStore = require('./adminStore');
 const authService = require('./authService');
 const ticketStore = require('./ticketStore');
 const auditStore = require('./auditStore');
@@ -69,6 +72,9 @@ app.post('/api/auth/login', async (req, res) => {
     const { email, password } = req.body;
     if (!email || !password) return res.status(400).json({ error: 'Потрібні email і password' });
     const result = await authService.login(email, password);
+    if (getUser(result.email)?.status === 'blocked') {
+      return res.status(403).json({ error: 'Акаунт заблоковано. Зверніться до підтримки.' });
+    }
     res.json(result);
   } catch (err) {
     res.status(401).json({ error: err.message, code: err.code });
@@ -319,14 +325,32 @@ app.get('/api/admin/audit-log', adminAuth.requireAdmin, adminAuth.requireRole('s
 
 // Список користувачів для адмінки
 app.get('/api/admin/users', adminAuth.requireAdmin, (req, res) => {
-  const { readAll: readAuth } = require('./authStore');
-  const authData = readAuth();
-  const users = Object.keys(authData.users || {}).map(email => ({
+  const authData = authStore.readAll();
+  const allEmails = new Set([...Object.keys(authData.users || {}), ...Object.keys(getAllUsers())]);
+  const users = [...allEmails].map(email => ({
     email,
-    createdAt: authData.users[email].createdAt,
+    createdAt: authData.users[email]?.createdAt || getUser(email)?.createdAt,
     subscription: getUser(email) || null,
   }));
   res.json(users);
+});
+
+// Blocked users cannot sign in. Unblocking restores the exact status they had.
+app.patch('/api/admin/users/:email/block', adminAuth.requireAdmin, adminAuth.requireRole('super_admin', 'admin'), (req, res) => {
+  const email = req.params.email;
+  const { blocked } = req.body || {};
+  const authUser = authStore.readAll().users?.[email];
+  const user = getUser(email);
+  if (!authUser && !user) return res.status(404).json({ error: 'Користувача не знайдено' });
+
+  if (blocked) {
+    saveUser(email, { email, status: 'blocked', statusBeforeBlock: user?.status || null, blockedAt: new Date().toISOString() });
+    auditStore.log({ adminEmail: req.admin.email, action: 'user_blocked', target: email });
+  } else {
+    saveUser(email, { email, status: user?.statusBeforeBlock || 'active', statusBeforeBlock: null, blockedAt: null });
+    auditStore.log({ adminEmail: req.admin.email, action: 'user_unblocked', target: email });
+  }
+  res.json({ ok: true, user: getUser(email) });
 });
 
 // Recover a paid order whose first eSIM allocation failed.  This endpoint is
@@ -459,6 +483,7 @@ app.get('/api/status', (req, res) => {
 
   const user = getUser(email);
   if (!user) return res.status(404).json({ error: 'Користувача не знайдено' });
+  if (user.status === 'blocked') return res.status(403).json({ error: 'Акаунт заблоковано' });
 
   res.json(user);
 });
@@ -473,6 +498,7 @@ app.get('/api/usage', async (req, res) => {
     if (!user || !user.esim?.orderNo) {
       return res.status(404).json({ error: 'Немає активної eSIM для цього користувача' });
     }
+    if (user.status === 'blocked') return res.status(403).json({ error: 'Акаунт заблоковано' });
 
     const usage = await checkUsage(user.esim.orderNo);
     const usedGb = +(usage.usedBytes / 1e9).toFixed(2);
@@ -534,8 +560,17 @@ app.post('/api/cancel', async (req, res) => {
 });
 
 const PORT = process.env.PORT || 4242;
-adminAuth.bootstrap().then(() => {
+storage.init().then(() => Promise.all([
+  bootstrapUsers(),
+  authStore.bootstrap(),
+  adminStore.bootstrap(),
+  ticketStore.bootstrap(),
+  auditStore.bootstrap(),
+])).then(() => adminAuth.bootstrap()).then(() => {
   app.listen(PORT, () => {
     console.log(`Signal backend running on http://localhost:${PORT}`);
   });
+}).catch((error) => {
+  console.error('Failed to start persistent storage:', error);
+  process.exit(1);
 });

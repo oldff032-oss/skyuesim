@@ -71,13 +71,19 @@
         const subscription = user.subscription || {};
         const encodedEmail = encodeURIComponent(user.email);
 
-        const recoveryButton = !subscription.esim
+        const recoveryButton = !subscription.esim && subscription.status !== 'blocked'
           ? `<button class="btn ${subscription.status === 'payment_ok_esim_failed' ? 'primary' : 'ghost'}"
                style="padding:7px 10px;font-size:12px;"
                onclick="recoverEsim('${encodedEmail}')">
                Відновити eSIM
              </button>`
           : '';
+
+        const blockButton = `<button class="btn ghost"
+          style="padding:7px 10px;font-size:12px;${subscription.status === 'blocked' ? 'color:var(--cyan);' : 'color:var(--danger);'}"
+          onclick="setUserBlocked('${encodedEmail}', ${subscription.status === 'blocked'})">
+          ${subscription.status === 'blocked' ? 'Розблокувати' : 'Заблокувати'}
+        </button>`;
 
         const usage = subscription.esim
           ? `${subscription.esim.usedGb ?? 0} / ${subscription.esim.dataLimitGb ?? '∞'} ГБ`
@@ -89,7 +95,7 @@
           <td>${escapeHtml(subscription.plan || '—')}</td>
           <td>${escapeHtml(subscription.status || 'Немає підписки')}</td>
           <td>${usage}</td>
-          <td>${recoveryButton || '—'}</td>
+          <td style="display:flex;gap:6px;flex-wrap:wrap;">${recoveryButton}${blockButton}</td>
         </tr>`;
       }).join('') || '<tr><td colspan="6" class="muted">Немає користувачів</td></tr>';
     }
@@ -97,7 +103,7 @@
     async function recoverEsim(encodedEmail) {
       const email = decodeURIComponent(encodedEmail);
       const iccid = prompt(
-        `Введіть ICCID уже виданої або встановленої eSIM для ${email}. Оплата Stripe не повторюється.`
+        `Введіть ICCID / UID уже виданої або встановленої eSIM для ${email}. Оплата Stripe не повторюється.`
       );
 
       if (!iccid) return;
@@ -124,6 +130,24 @@
         await load();
       } catch (error) {
         alert(error.message || 'Помилка відновлення eSIM');
+      }
+    }
+
+    async function setUserBlocked(encodedEmail, isBlocked) {
+      const email = decodeURIComponent(encodedEmail);
+      const action = isBlocked ? 'розблокувати' : 'заблокувати';
+      if (!confirm(`${action.charAt(0).toUpperCase() + action.slice(1)} ${email}?`)) return;
+
+      try {
+        const res = await adminFetch(`/api/admin/users/${encodedEmail}/block`, {
+          method: 'PATCH',
+          body: JSON.stringify({ blocked: !isBlocked })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Не вдалося змінити статус користувача');
+        await load();
+      } catch (error) {
+        alert(error.message || 'Помилка зміни статусу користувача');
       }
     }
 
