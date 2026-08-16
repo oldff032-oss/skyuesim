@@ -28,7 +28,7 @@
         if (!response.ok) throw new Error(data.error);
         const packages = data.packages || [];
         if (!packages.length) { output.textContent = `${country}: доступних пакетів не знайдено.`; return; }
-        output.innerHTML = `<b>${country}: доступно ${packages.length} пакетів</b><br>${packages.slice(0, 4).map((item) => `${item.name || item.packageCode} · код: <b>${item.packageCode}</b> · ${item.speed || 'мережа уточнюється'} · ${item.duration || '—'} ${item.durationUnit || ''}`).join('<br>')}<br><span class="muted">Дані отримано безпосередньо з eSIM Access.</span>`;
+        output.innerHTML = `<b>${country}: доступно ${packages.length} пакетів</b><div style="display:grid;gap:8px;margin-top:12px;">${packages.map((item) => `<div style="padding:10px;border:1px solid var(--glass-border);border-radius:9px;"><b>${item.name || item.packageCode}</b><br><span class="muted">Код: <b style="color:var(--text);">${item.packageCode}</b> · ${item.speed || 'мережа уточнюється'} · ${item.duration || '—'} ${item.durationUnit || ''}</span></div>`).join('')}</div><span class="muted" style="display:block;margin-top:10px;">Дані отримано безпосередньо з eSIM Access.</span>`;
       } catch (error) {
         output.textContent = error.message || 'Не вдалося отримати покриття.';
       }
