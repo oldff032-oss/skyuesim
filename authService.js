@@ -170,6 +170,21 @@ function revokeAllSessions(email) {
   return revoked;
 }
 
+function deleteAccountAuth(email) {
+  const store = readAll();
+  const normalized = String(email || '').trim().toLowerCase();
+  let sessions = 0;
+  delete store.users[normalized];
+  delete store.codes?.[normalized];
+  delete store.resetCodes?.[normalized];
+  for (const [token, entry] of Object.entries(store.sessions || {})) if (entry.email === normalized) { delete store.sessions[token]; sessions += 1; }
+  for (const [token, entry] of Object.entries(store.verifyTokens || {})) if (entry.email === normalized) delete store.verifyTokens[token];
+  for (const [token, entry] of Object.entries(store.resetTokens || {})) if (entry.email === normalized) delete store.resetTokens[token];
+  for (const [token, entry] of Object.entries(store.adminRecoveryTokens || {})) if (entry.accountEmail === normalized) delete store.adminRecoveryTokens[token];
+  writeAll(store);
+  return { sessions };
+}
+
 async function updateAccount(email, changes = {}) {
   const store = readAll();
   const authUser = store.users[email];
@@ -291,7 +306,7 @@ async function completeAdminRecovery(token, newEmail, newPassword, pin) {
   return { ok: true, email, sessionToken, ticketId: entry.ticketId };
 }
 
-module.exports = { requestCode, verifyCode, setPassword, login, getSessionEmail, listSessions, revokeOtherSessions, revokeAllSessions, updateAccount, requestPasswordReset, verifyResetCode, resetPassword, createAdminRecoveryToken, inspectAdminRecoveryToken, completeAdminRecovery };
+module.exports = { requestCode, verifyCode, setPassword, login, getSessionEmail, listSessions, revokeOtherSessions, revokeAllSessions, deleteAccountAuth, updateAccount, requestPasswordReset, verifyResetCode, resetPassword, createAdminRecoveryToken, inspectAdminRecoveryToken, completeAdminRecovery };
 
 // ---------- Забув(ла) пароль: запит коду ----------
 async function requestPasswordReset(email) {

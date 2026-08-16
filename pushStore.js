@@ -31,5 +31,13 @@ function removeSubscription(endpoint, email = null) {
   return true;
 }
 
-module.exports = { bootstrap, subscriptionsFor, saveSubscription, removeSubscription };
+function removeAllForEmail(email) {
+  let removed = 0;
+  for (const [endpoint, subscription] of Object.entries(store.subscriptions)) {
+    if (subscription.email === email) { delete store.subscriptions[endpoint]; removed += 1; }
+  }
+  if (removed) storage.save('push-subscriptions.json', store);
+  return removed;
+}
 
+module.exports = { bootstrap, subscriptionsFor, saveSubscription, removeSubscription, removeAllForEmail };

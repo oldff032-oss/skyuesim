@@ -37,6 +37,11 @@ async function cancelSubscription(subscriptionId) {
   return stripe.subscriptions.cancel(subscriptionId);
 }
 
+async function deleteStripeCustomer(customerId) {
+  if (!customerId) return null;
+  return stripe.customers.del(customerId);
+}
+
 // Дата наступного списання — реальні дані напряму зі Stripe (не розрахунок,
 // а те, що Stripe сам планує списати наступного разу).
 async function getNextBillingDate(subscriptionId) {
@@ -111,4 +116,4 @@ function constructWebhookEvent(rawBody, signature) {
   );
 }
 
-module.exports = { createCheckoutSession, createCustomPackageCheckout, cancelSubscription, constructWebhookEvent, getNextBillingDate, getBillingHistory, getRecoveryPaymentEvidence };
+module.exports = { createCheckoutSession, createCustomPackageCheckout, cancelSubscription, deleteStripeCustomer, constructWebhookEvent, getNextBillingDate, getBillingHistory, getRecoveryPaymentEvidence };

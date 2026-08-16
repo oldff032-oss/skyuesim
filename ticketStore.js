@@ -30,6 +30,13 @@ function deleteTicket(id) {
   writeAll(store);
   return deleted;
 }
+function deleteTicketsByEmail(email) {
+  const before = store.tickets.length;
+  store.tickets = store.tickets.filter(ticket => ticket.email !== email);
+  const removed = before - store.tickets.length;
+  if (removed) writeAll(store);
+  return removed;
+}
 function stripNotesForUser(ticket) { return ticket ? { ...ticket, messages: ticket.messages.filter(message => message.from !== 'note') } : ticket; }
 
-module.exports = { bootstrap, createTicket, getTicketsByEmail, getAllTickets, getTicket, addMessage, updateTicket, deleteTicket, stripNotesForUser };
+module.exports = { bootstrap, createTicket, getTicketsByEmail, getAllTickets, getTicket, addMessage, updateTicket, deleteTicket, deleteTicketsByEmail, stripNotesForUser };

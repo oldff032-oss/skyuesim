@@ -9,7 +9,7 @@ const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const { generateRegistrationOptions, verifyRegistrationResponse } = require('@simplewebauthn/server');
 
-const { createCheckoutSession, createCustomPackageCheckout, cancelSubscription, constructWebhookEvent, getNextBillingDate, getBillingHistory, getRecoveryPaymentEvidence } = require('./stripeService');
+const { createCheckoutSession, createCustomPackageCheckout, cancelSubscription, deleteStripeCustomer, constructWebhookEvent, getNextBillingDate, getBillingHistory, getRecoveryPaymentEvidence } = require('./stripeService');
 const crypto = require('crypto');
 const { provisionEsim, checkUsage, recoverEsim, topupEsim, listPackages } = require('./esimService');
 const { bootstrap: bootstrapUsers, getUser, saveUser, deleteUser, getUserByStripeCustomerId, getAllUsers } = require('./db');
@@ -732,7 +732,6 @@ app.delete('/api/admin/blacklist/:type/:value', adminAuth.requireAdmin, adminAut
 app.post('/api/admin/templates', adminAuth.requireAdmin, adminAuth.requireRole('super_admin','admin','support'), (req,res)=>{ const {title,text}=req.body||{}; if(!title||!text) return res.status(400).json({error:'Вкажіть назву і текст'}); const template={id:Date.now().toString(36),title:String(title).slice(0,100),text:String(text).slice(0,2000),by:req.admin.email}; operationsStore.store().templates.unshift(template); operationsStore.save(); res.json(template); });
 app.delete('/api/admin/templates/:id', adminAuth.requireAdmin, adminAuth.requireRole('super_admin','admin','support'), (req,res)=>{ const s=operationsStore.store(); s.templates=s.templates.filter(t=>t.id!==req.params.id); operationsStore.save(); res.json({ok:true}); });
 app.get('/api/admin/backup', adminAuth.requireAdmin, adminAuth.requireRole('super_admin'), (req,res)=>{ auditStore.log({adminEmail:req.admin.email,action:'backup_exported'}); res.attachment(`signal-backup-${new Date().toISOString().slice(0,10)}.json`).json({ exportedAt:new Date().toISOString(), users:getAllUsers(), auth:authStore.readAll(), tickets:ticketStore.getAllTickets(), operations:operationsStore.store(), audit:auditStore.getAll({limit:10000}) }); });
-app.delete('/api/admin/users/:email/anonymize', adminAuth.requireAdmin, adminAuth.requireRole('super_admin'), (req,res)=>{ const email=req.params.email; if(req.body?.confirmEmail!==email) return res.status(400).json({error:'Підтвердіть email користувача'}); if(!getUser(email)) return res.status(404).json({error:'Користувача не знайдено'}); deleteUser(email); const auth=authStore.readAll(); delete auth.users[email]; for(const [token,session] of Object.entries(auth.sessions)) if(session.email===email) delete auth.sessions[token]; authStore.writeAll(auth); auditStore.log({adminEmail:req.admin.email,action:'user_anonymized',target:'anonymized'}); res.json({ok:true}); });
 app.get('/api/admin/system-status', adminAuth.requireAdmin, (req,res)=>res.json({ server:'ok', database:Boolean(process.env.DATABASE_URL), push:isPushConfigured(), esimProvider:Boolean(process.env.ESIM_PROVIDER_API_KEY), stripe:Boolean(process.env.STRIPE_SECRET_KEY), checkedAt:new Date().toISOString() }));
 
 // Список користувачів для адмінки
@@ -770,6 +769,77 @@ app.get('/api/admin/users/:email', adminAuth.requireAdmin, (req, res) => {
     notes: operationsStore.store().notes[email] || [],
     tickets: ticketStore.getTicketsByEmail(email),
   });
+});
+
+// Permanently remove the application account so the same email can register
+// again. Billing is stopped before local identity data is erased. Historical
+// financial/audit records may still be retained by Stripe or the audit log.
+app.delete('/api/admin/users/:email', adminAuth.requireAdmin, adminAuth.requireRole('super_admin'), async (req, res) => {
+  const email = String(req.params.email || '').trim().toLowerCase();
+  const confirmationEmail = String(req.body?.confirmationEmail || '').trim().toLowerCase();
+  if (confirmationEmail !== email) return res.status(400).json({ error: 'Для підтвердження введіть точний email користувача' });
+
+  const authUser = authStore.readAll().users?.[email];
+  const user = getUser(email);
+  if (!authUser && !user) return res.status(404).json({ error: 'Користувача не знайдено' });
+
+  try {
+    let stripeSubscriptionCanceled = false;
+    let stripeCustomerDeleted = false;
+    if (user?.stripeSubscriptionId && user.status !== 'canceled') {
+      try {
+        await cancelSubscription(user.stripeSubscriptionId);
+        stripeSubscriptionCanceled = true;
+      } catch (error) {
+        if (error?.code !== 'resource_missing') throw error;
+      }
+    }
+    if (user?.stripeCustomerId) {
+      try {
+        await deleteStripeCustomer(user.stripeCustomerId);
+        stripeCustomerDeleted = true;
+      } catch (error) {
+        if (error?.code !== 'resource_missing') throw error;
+        stripeCustomerDeleted = true;
+      }
+    }
+
+    const authRemoval = authService.deleteAccountAuth(email);
+    const pushSubscriptions = pushStore.removeAllForEmail(email);
+    const tickets = ticketStore.deleteTicketsByEmail(email);
+
+    const operations = operationsStore.store();
+    delete operations.notes?.[email];
+    if (Array.isArray(operations.feedback)) operations.feedback = operations.feedback.filter(item => item.email !== email);
+    if (Array.isArray(operations.blacklist?.emails)) operations.blacklist.emails = operations.blacklist.emails.filter(item => String(item).toLowerCase() !== email);
+    operationsStore.save();
+
+    deleteUser(email);
+    for (const related of Object.values(getAllUsers())) {
+      const patch = {};
+      if (related.referredBy === email) patch.referredBy = null;
+      if (Array.isArray(related.referrals)) patch.referrals = related.referrals.filter(item => item.email !== email);
+      if (Object.keys(patch).length) saveUser(related.email, patch);
+    }
+
+    auditStore.log({
+      adminEmail: req.admin.email,
+      action: 'user_account_permanently_deleted',
+      target: email,
+      details: { stripeSubscriptionCanceled, stripeCustomerDeleted, sessions: authRemoval.sessions, pushSubscriptions, tickets },
+    });
+    res.json({
+      ok: true,
+      emailReusable: true,
+      stripeSubscriptionCanceled,
+      stripeCustomerDeleted,
+      removed: { sessions: authRemoval.sessions, pushSubscriptions, tickets },
+      providerEsimNote: user?.esim ? 'Виданий профіль eSIM відв’язано від застосунку; у провайдера він може зберігатися до завершення строку дії.' : null,
+    });
+  } catch (error) {
+    console.error(`[admin delete user] ${email}:`, error.message);
+    res.status(502).json({ error: `Видалення зупинено: ${error.message}. Локальний акаунт не видалено.` });
+  }
 });
 
 app.post('/api/admin/users/:email/revoke-sessions', adminAuth.requireAdmin, adminAuth.requireRole('super_admin', 'admin'), (req, res) => {
