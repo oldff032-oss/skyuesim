@@ -91,6 +91,18 @@
 
         const pct = limitGb ? Math.min(100, Math.round((usedGb / limitGb) * 100)) : 0;
         const isLow = limitGb && pct >= 80;
+        let trafficAlertHtml = '';
+        if(limitGb){
+          try{
+            const sessionToken = localStorage.getItem('signal_session_token');
+            const preferencesRes = await fetch(`${API_URL}/api/account/preferences`, { headers: { 'x-session-token': sessionToken } });
+            const preferences = await preferencesRes.json();
+            const reached = (preferences.trafficAlertThresholds || []).filter(threshold => pct >= threshold).pop();
+            if(reached){
+              trafficAlertHtml = `<div class="card" style="border-color:var(--danger);"><p style="color:var(--danger);font-size:13px;display:flex;align-items:center;gap:8px;">⚠️ Використано ${pct}% трафіку. Досягнуто поріг попередження ${reached}%.</p><a href="traffic-alerts.html" class="muted" style="display:block;margin-top:8px;color:var(--cyan);font-size:12px;">Змінити сповіщення</a></div>`;
+            }
+          }catch(e){ /* settings are optional; usage must remain available */ }
+        }
 
         // Дні до закінчення eSIM
         let daysLeftHtml = '';
@@ -119,7 +131,7 @@
         }
 
         content.innerHTML = `
-          ${isLow ? `<div class="card" style="border-color:var(--danger);"><p style="color:var(--danger); font-size:13px; display:flex; align-items:center; gap:8px;">⚠️ Використано понад 80% трафіку тарифу</p></div>` : ''}
+          ${trafficAlertHtml || (isLow ? `<div class="card" style="border-color:var(--danger);"><p style="color:var(--danger); font-size:13px; display:flex; align-items:center; gap:8px;">⚠️ Використано понад 80% трафіку тарифу</p></div>` : '')}
 
           <div class="card">
             <div class="usage-top"><span>Використано</span><b>${limitGb ? `${formatGb(usedGb)} / ${formatGb(limitGb)}` : 'Безліміт'}</b></div>

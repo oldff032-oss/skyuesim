@@ -22,6 +22,16 @@ function randomToken() {
   return crypto.randomBytes(32).toString('hex');
 }
 
+function createSession(store, email, deviceName) {
+  const sessionToken = randomToken();
+  store.sessions[sessionToken] = {
+    email,
+    createdAt: Date.now(),
+    deviceName: String(deviceName || 'Цей пристрій').slice(0, 120),
+  };
+  return sessionToken;
+}
+
 // ---------- Крок 1: запит коду ----------
 async function requestCode(email) {
   const store = readAll();
@@ -66,7 +76,7 @@ function verifyCode(email, code) {
 }
 
 // ---------- Крок 3: встановлення пароля / створення акаунта ----------
-async function setPassword(verifyToken, password) {
+async function setPassword(verifyToken, password, deviceName) {
   const store = readAll();
   const entry = store.verifyTokens[verifyToken];
 
@@ -83,15 +93,14 @@ async function setPassword(verifyToken, password) {
   }
   delete store.verifyTokens[verifyToken];
 
-  const sessionToken = randomToken();
-  store.sessions[sessionToken] = { email: entry.email, createdAt: Date.now() };
+  const sessionToken = createSession(store, entry.email, deviceName);
   writeAll(store);
 
   return { sessionToken, email: entry.email };
 }
 
 // ---------- Логін ----------
-async function login(email, password) {
+async function login(email, password, deviceName) {
   const store = readAll();
   const user = store.users[email];
   if (!user) throw Object.assign(new Error('Невірний email або пароль'), { code: 'INVALID_CREDENTIALS' });
@@ -99,9 +108,8 @@ async function login(email, password) {
   const ok = await bcrypt.compare(password, user.passwordHash);
   if (!ok) throw Object.assign(new Error('Невірний email або пароль'), { code: 'INVALID_CREDENTIALS' });
 
-  const sessionToken = randomToken();
+  const sessionToken = createSession(store, email, deviceName);
   user.lastLoginAt = new Date().toISOString();
-  store.sessions[sessionToken] = { email, createdAt: Date.now() };
   writeAll(store);
 
   return { sessionToken, email };
@@ -116,7 +124,33 @@ function getSessionEmail(sessionToken) {
   return session.email;
 }
 
-module.exports = { requestCode, verifyCode, setPassword, login, getSessionEmail, requestPasswordReset, verifyResetCode, resetPassword };
+function listSessions(email, currentToken) {
+  const store = readAll();
+  return Object.entries(store.sessions)
+    .filter(([, session]) => session.email === email && Date.now() - session.createdAt <= SESSION_TTL_MS)
+    .map(([token, session]) => ({
+      id: token === currentToken ? 'current' : token.slice(-8),
+      current: token === currentToken,
+      deviceName: session.deviceName || 'Пристрій',
+      createdAt: new Date(session.createdAt).toISOString(),
+    }))
+    .sort((a, b) => Number(b.current) - Number(a.current) || new Date(b.createdAt) - new Date(a.createdAt));
+}
+
+function revokeOtherSessions(email, currentToken) {
+  const store = readAll();
+  let revoked = 0;
+  for (const [token, session] of Object.entries(store.sessions)) {
+    if (token !== currentToken && session.email === email) {
+      delete store.sessions[token];
+      revoked += 1;
+    }
+  }
+  writeAll(store);
+  return revoked;
+}
+
+module.exports = { requestCode, verifyCode, setPassword, login, getSessionEmail, listSessions, revokeOtherSessions, requestPasswordReset, verifyResetCode, resetPassword };
 
 // ---------- Забув(ла) пароль: запит коду ----------
 async function requestPasswordReset(email) {

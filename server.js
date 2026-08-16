@@ -9,11 +9,10 @@ const cors = require('cors');
 
 const { createCheckoutSession, cancelSubscription, constructWebhookEvent, getNextBillingDate } = require('./stripeService');
 const { provisionEsim, checkUsage, recoverEsim } = require('./esimService');
-const { bootstrap: bootstrapUsers, getUser, saveUser, getUserByStripeCustomerId, getAllUsers, ensureSignalId, getUserBySignalId } = require('./db');
+const { bootstrap: bootstrapUsers, getUser, saveUser, getUserByStripeCustomerId, getAllUsers } = require('./db');
 const storage = require('./persistentState');
 const authStore = require('./authStore');
 const adminStore = require('./adminStore');
-const chatStore = require('./chatStore');
 const authService = require('./authService');
 const ticketStore = require('./ticketStore');
 const auditStore = require('./auditStore');
@@ -61,7 +60,7 @@ app.post('/api/auth/set-password', async (req, res) => {
   try {
     const { verifyToken, password } = req.body;
     if (!verifyToken || !password) return res.status(400).json({ error: 'Потрібні verifyToken і password' });
-    const result = await authService.setPassword(verifyToken, password);
+    const result = await authService.setPassword(verifyToken, password, req.headers['x-device-name'] || req.headers['user-agent']);
     res.json(result);
   } catch (err) {
     res.status(400).json({ error: err.message, code: err.code });
@@ -72,7 +71,7 @@ app.post('/api/auth/login', async (req, res) => {
   try {
     const { email, password } = req.body;
     if (!email || !password) return res.status(400).json({ error: 'Потрібні email і password' });
-    const result = await authService.login(email, password);
+    const result = await authService.login(email, password, req.headers['x-device-name'] || req.headers['user-agent']);
     if (getUser(result.email)?.status === 'blocked') {
       return res.status(403).json({ error: 'Акаунт заблоковано. Зверніться до підтримки.' });
     }
@@ -87,6 +86,42 @@ app.get('/api/auth/me', (req, res) => {
   const email = authService.getSessionEmail(sessionToken);
   if (!email) return res.status(401).json({ error: 'Сесія недійсна, увійди знову' });
   res.json({ email });
+});
+
+function requireUserSession(req, res, next) {
+  const sessionToken = req.headers['x-session-token'];
+  const email = authService.getSessionEmail(sessionToken);
+  if (!email) return res.status(401).json({ error: 'Сесія недійсна, увійди знову' });
+  req.userEmail = email;
+  req.sessionToken = sessionToken;
+  next();
+}
+
+// Security Center: show only the current account's sessions and let the user
+// invalidate every other login in one action.
+app.get('/api/account/sessions', requireUserSession, (req, res) => {
+  res.json({ sessions: authService.listSessions(req.userEmail, req.sessionToken) });
+});
+
+app.post('/api/account/sessions/revoke-others', requireUserSession, (req, res) => {
+  const revoked = authService.revokeOtherSessions(req.userEmail, req.sessionToken);
+  res.json({ ok: true, revoked });
+});
+
+app.get('/api/account/preferences', requireUserSession, (req, res) => {
+  const preferences = getUser(req.userEmail)?.preferences || {};
+  res.json({ trafficAlertThresholds: preferences.trafficAlertThresholds || [50, 80, 95] });
+});
+
+app.put('/api/account/preferences', requireUserSession, (req, res) => {
+  const raw = req.body?.trafficAlertThresholds;
+  if (!Array.isArray(raw) || raw.some((value) => !Number.isInteger(value) || value < 1 || value > 100)) {
+    return res.status(400).json({ error: 'Вкажи коректні пороги від 1 до 100' });
+  }
+  const trafficAlertThresholds = [...new Set(raw)].sort((a, b) => a - b);
+  const user = getUser(req.userEmail);
+  saveUser(req.userEmail, { preferences: { ...(user?.preferences || {}), trafficAlertThresholds } });
+  res.json({ ok: true, trafficAlertThresholds });
 });
 
 // ---- Забув(ла) пароль ----
@@ -250,67 +285,6 @@ app.post('/api/admin/team', adminAuth.requireAdmin, adminAuth.requireRole('super
   } catch (err) {
     res.status(400).json({ error: err.message, code: err.code });
   }
-});
-
-function requireUser(req, res, next) {
-  const email = authService.getSessionEmail(req.headers['x-session-token']);
-  if (!email) return res.status(401).json({ error: 'Потрібен вхід у застосунок' });
-  if (getUser(email)?.status === 'blocked') return res.status(403).json({ error: 'Акаунт заблоковано' });
-  req.user = { email };
-  next();
-}
-
-function chatProfile(email) {
-  const user = getUser(email);
-  if (!user) return null;
-  return { signalId: ensureSignalId(email), plan: user.plan || null };
-}
-
-// Private Signal ID, chat and WebRTC signalling. The actual media stream stays
-// peer-to-peer in the users' devices; this server never records call audio.
-app.get('/api/chat/me', requireUser, (req, res) => {
-  res.json({ signalId: ensureSignalId(req.user.email) });
-});
-
-app.get('/api/chat/conversations', requireUser, (req, res) => {
-  res.json(chatStore.listConversations(req.user.email, chatProfile));
-});
-
-app.post('/api/chat/conversations', requireUser, (req, res) => {
-  const signalId = String(req.body?.signalId || '').trim();
-  const contact = getUserBySignalId(signalId);
-  if (!contact) return res.status(404).json({ error: 'Користувача з таким Signal ID не знайдено' });
-  if (contact.email === req.user.email) return res.status(400).json({ error: 'Не можна створити чат із собою' });
-  const conversation = chatStore.getOrCreateDirectConversation(req.user.email, contact.email);
-  res.json({ id: conversation.id, contact: chatProfile(contact.email) });
-});
-
-app.get('/api/chat/conversations/:id/messages', requireUser, (req, res) => {
-  const messages = chatStore.messages(req.user.email, req.params.id);
-  if (!messages) return res.status(404).json({ error: 'Чат не знайдено' });
-  res.json(messages);
-});
-
-app.post('/api/chat/conversations/:id/messages', requireUser, (req, res) => {
-  const text = String(req.body?.text || '').trim();
-  if (!text || text.length > 2000) return res.status(400).json({ error: 'Повідомлення має містити від 1 до 2000 символів' });
-  const message = chatStore.addMessage(req.user.email, req.params.id, text);
-  if (!message) return res.status(404).json({ error: 'Чат не знайдено' });
-  res.json(message);
-});
-
-app.get('/api/chat/conversations/:id/signals', requireUser, (req, res) => {
-  const signals = chatStore.signals(req.user.email, req.params.id, Number(req.query.after) || 0);
-  if (!signals) return res.status(404).json({ error: 'Чат не знайдено' });
-  res.json(signals);
-});
-
-app.post('/api/chat/conversations/:id/signals', requireUser, (req, res) => {
-  const { type, payload } = req.body || {};
-  if (!['offer', 'answer', 'candidate', 'end'].includes(type)) return res.status(400).json({ error: 'Невідомий сигнал дзвінка' });
-  const signal = chatStore.addSignal(req.user.email, req.params.id, type, payload || null);
-  if (!signal) return res.status(404).json({ error: 'Чат не знайдено' });
-  res.json({ ok: true, id: signal.id });
 });
 
 app.patch('/api/admin/team/:email/block', adminAuth.requireAdmin, adminAuth.requireRole('super_admin'), (req, res) => {
@@ -671,7 +645,6 @@ storage.init().then(() => Promise.all([
   adminStore.bootstrap(),
   ticketStore.bootstrap(),
   auditStore.bootstrap(),
-  chatStore.bootstrap(),
 ])).then(() => adminAuth.bootstrap()).then(() => {
   app.listen(PORT, () => {
     console.log(`Signal backend running on http://localhost:${PORT}`);

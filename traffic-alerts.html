@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Сповіщення — Сигнал</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<script src="pwa.js"></script>
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#05060d">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<style>.choice{display:flex;align-items:center;justify-content:space-between;padding:16px 0;border-top:1px solid var(--glass-border);font-size:14px}.choice input{accent-color:var(--blue);width:20px;height:20px}</style>
+</head>
+<body class="has-bottomnav">
+  <div class="wrap">
+    <div class="brand"><div class="mark">🔔</div><span>Сигнал</span></div>
+    <h1 style="margin-top:20px;">Сповіщення про <em>трафік</em></h1>
+    <p class="lead">Обери, коли застосунок має попередити, що пакет даних закінчується.</p>
+
+    <div class="glass glass-card" style="margin-top:22px;">
+      <p style="font-family:'Space Grotesk',sans-serif;font-weight:700;">Надсилати попередження</p>
+      <label class="choice"><span>Використано 50%</span><input type="checkbox" value="50"></label>
+      <label class="choice"><span>Використано 80%</span><input type="checkbox" value="80"></label>
+      <label class="choice"><span>Використано 95%</span><input type="checkbox" value="95"></label>
+    </div>
+    <p class="muted" style="margin-top:12px;line-height:1.55;">Попередження відображаються у застосунку, коли він оновлює дані трафіку. Для системних push-сповіщень потрібне окреме підключення сервісу повідомлень.</p>
+    <button class="btn" id="saveBtn" style="margin-top:22px;" onclick="save()">Зберегти</button>
+    <p id="message" class="muted" style="text-align:center;margin-top:12px;"></p>
+  </div>
+
+  <nav class="bottomnav">
+    <a href="dashboard.html"><span class="ic">🏠</span>Головна</a><a href="plans.html"><span class="ic">📶</span>Тариф</a><a href="usage.html"><span class="ic">📊</span>Витрати</a><a href="profile.html" class="active"><span class="ic">👤</span>Профіль</a>
+  </nav>
+  <script src="config.js"></script>
+  <script>
+    const token = localStorage.getItem('signal_session_token');
+    if(!token) window.location.href = 'login.html';
+    const headers = {'Content-Type':'application/json','x-session-token':token};
+    async function load(){
+      const res = await fetch(`${API_URL}/api/account/preferences`, { headers });
+      const data = await res.json();
+      if(!res.ok){ window.location.href = 'login.html'; return; }
+      document.querySelectorAll('input[type=checkbox]').forEach(input => input.checked = data.trafficAlertThresholds.includes(Number(input.value)));
+    }
+    async function save(){
+      const values = [...document.querySelectorAll('input:checked')].map(input => Number(input.value));
+      const button = document.getElementById('saveBtn'); button.disabled = true; button.textContent = 'Зберігаємо…';
+      try{
+        const res = await fetch(`${API_URL}/api/account/preferences`, {method:'PUT',headers,body:JSON.stringify({trafficAlertThresholds:values})});
+        const data = await res.json(); if(!res.ok) throw new Error(data.error || 'Помилка збереження');
+        document.getElementById('message').textContent = 'Налаштування збережено.';
+      }catch(error){ document.getElementById('message').textContent = error.message; }
+      finally { button.disabled = false; button.textContent = 'Зберегти'; }
+    }
+    load();
+  </script>
+</body>
+</html>
