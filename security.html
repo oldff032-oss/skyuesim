@@ -27,6 +27,7 @@
 
     <button id="revokeBtn" class="btn danger" style="margin-top:16px;" onclick="revokeOthers()">Вийти з інших пристроїв</button>
     <button id="faceIdBtn" class="btn" style="margin-top:12px;">Увімкнути Face ID</button>
+    <div class="glass" style="margin-top:16px;padding:16px;"><b>Резервний PIN</b><p class="muted" style="margin-top:6px;">Встанови 6 цифр для розблокування, якщо Face ID недоступний.</p><input id="lockPin" inputmode="numeric" maxlength="6" type="password" placeholder="6 цифр" style="margin-top:12px;"><button id="pinBtn" class="btn ghost" style="margin-top:10px;">Зберегти PIN</button></div>
     <p id="message" class="muted" style="text-align:center;margin-top:12px;"></p>
 
     <a class="btn ghost" href="forgot-password.html" style="margin-top:18px;">Змінити пароль</a>
@@ -77,5 +78,6 @@
       button.onclick=async()=>{const token=localStorage.getItem('signal_session_token');try{button.disabled=true;button.textContent='Підтвердь Face ID…';let r=await fetch(`${API_URL}/api/account/passkeys/register/options`,{method:'POST',headers:{'x-session-token':token}});let options=await r.json();if(!r.ok)throw new Error(options.error);const response=await startRegistration({optionsJSON:options});r=await fetch(`${API_URL}/api/account/passkeys/register/verify`,{method:'POST',headers:{'Content-Type':'application/json','x-session-token':token},body:JSON.stringify(response)});const data=await r.json();if(!r.ok)throw new Error(data.error);button.textContent='Face ID увімкнено';alert('Face ID успішно увімкнено');}catch(e){alert(`Face ID не увімкнено: ${e.message}`)}finally{button.disabled=false}};
     }).catch(()=>{button.onclick=()=>alert('Не вдалося завантажити модуль Face ID. Перевір інтернет і онови сторінку.');});
   </script>
+  <script>document.getElementById('pinBtn').onclick=async()=>{const pin=document.getElementById('lockPin').value;if(!/^\d{6}$/.test(pin))return alert('PIN має містити рівно 6 цифр');const r=await fetch(`${API_URL}/api/account/lock`,{method:'PUT',headers:{'Content-Type':'application/json','x-session-token':localStorage.getItem('signal_session_token')},body:JSON.stringify({pin})});const d=await r.json();alert(r.ok?'PIN збережено':d.error)};</script>
 </body>
 </html>

@@ -78,13 +78,14 @@ function verifyCode(email, code) {
 }
 
 // ---------- Крок 3: встановлення пароля / створення акаунта ----------
-async function setPassword(verifyToken, password, deviceName) {
+async function setPassword(verifyToken, password, deviceName, pin) {
   const store = readAll();
   const entry = store.verifyTokens[verifyToken];
 
   if (!entry) throw Object.assign(new Error('Недійсний або вже використаний токен'), { code: 'INVALID_TOKEN' });
   if (Date.now() - entry.createdAt > VERIFY_TOKEN_TTL_MS) throw Object.assign(new Error('Токен прострочено, почни реєстрацію заново'), { code: 'TOKEN_EXPIRED' });
   if (password.length < 8) throw Object.assign(new Error('Пароль має бути не менше 8 символів'), { code: 'WEAK_PASSWORD' });
+  if (!/^\d{6}$/.test(String(pin || ''))) throw Object.assign(new Error('PIN має містити рівно 6 цифр'), { code: 'INVALID_PIN' });
 
   const passwordHash = await bcrypt.hash(password, 10);
   store.users[entry.email] = { email: entry.email, passwordHash, createdAt: Date.now() };
@@ -92,7 +93,7 @@ async function setPassword(verifyToken, password, deviceName) {
   // an existing subscription/eSIM when an account is restored with the same email.
   if (!getUser(entry.email)) {
     const inviter = Object.values(getAllUsers()).find((user) => user.referralCode && user.referralCode === entry.referralCode && user.email !== entry.email);
-    saveUser(entry.email, { email: entry.email, status: 'registered', language: entry.language || 'uk', displayName: entry.displayName || '', avatarDataUrl: entry.avatarDataUrl || null, createdAt: new Date().toISOString(), ...(inviter ? { referredBy: inviter.email, referralRewardStatus: 'pending_first_payment' } : {}) });
+    saveUser(entry.email, { email: entry.email, status: 'registered', language: entry.language || 'uk', displayName: entry.displayName || '', avatarDataUrl: entry.avatarDataUrl || null, appLock: { enabled: true, pinHash: await bcrypt.hash(String(pin), 10) }, createdAt: new Date().toISOString(), ...(inviter ? { referredBy: inviter.email, referralRewardStatus: 'pending_first_payment' } : {}) });
     if (inviter) saveUser(inviter.email, { referrals: [...(inviter.referrals || []), { email: entry.email, createdAt: new Date().toISOString(), status: 'pending_first_payment' }] });
   } else {
     saveUser(entry.email, { language: entry.language || 'uk' });

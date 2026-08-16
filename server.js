@@ -6,6 +6,7 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const bcrypt = require('bcryptjs');
 const { generateRegistrationOptions, verifyRegistrationResponse } = require('@simplewebauthn/server');
 
 const { createCheckoutSession, createCustomPackageCheckout, cancelSubscription, constructWebhookEvent, getNextBillingDate, getBillingHistory } = require('./stripeService');
@@ -68,7 +69,7 @@ app.post('/api/auth/set-password', async (req, res) => {
   try {
     const { verifyToken, password } = req.body;
     if (!verifyToken || !password) return res.status(400).json({ error: 'Потрібні verifyToken і password' });
-    const result = await authService.setPassword(verifyToken, password, req.headers['x-device-name'] || req.headers['user-agent']);
+    const result = await authService.setPassword(verifyToken, password, req.headers['x-device-name'] || req.headers['user-agent'], req.body?.pin);
     res.json(result);
   } catch (err) {
     res.status(400).json({ error: err.message, code: err.code });
@@ -126,6 +127,9 @@ app.post('/api/account/passkeys/register/options', requireUserSession, async (re
 app.post('/api/account/passkeys/register/verify', requireUserSession, async (req,res) => {
   try { const user=getUser(req.userEmail); const verification=await verifyRegistrationResponse({response:req.body,expectedChallenge:user?.passkeyChallenge,expectedOrigin:PASSKEY_ORIGIN,expectedRPID:PASSKEY_RP_ID,requireUserVerification:true}); if(!verification.verified||!verification.registrationInfo) throw new Error('Face ID не підтверджено'); const c=verification.registrationInfo.credential; saveUser(req.userEmail,{passkeys:[...(user.passkeys||[]),{id:c.id,publicKey:Buffer.from(c.publicKey).toString('base64url'),counter:c.counter,transports:c.transports||[],createdAt:new Date().toISOString()}],passkeyChallenge:null}); res.json({ok:true}); } catch(e){res.status(400).json({error:e.message});}
 });
+app.get('/api/account/lock', requireUserSession, (req,res)=>{const u=getUser(req.userEmail);res.json({enabled:Boolean(u?.appLock?.enabled),hasPin:Boolean(u?.appLock?.pinHash),hasPasskey:Boolean(u?.passkeys?.length)});});
+app.put('/api/account/lock', requireUserSession, async (req,res)=>{const pin=String(req.body?.pin||''); if(!/^\d{6}$/.test(pin))return res.status(400).json({error:'PIN має містити рівно 6 цифр'}); saveUser(req.userEmail,{appLock:{enabled:true,pinHash:await bcrypt.hash(pin,10)}});res.json({ok:true});});
+app.post('/api/account/lock/pin', requireUserSession, async (req,res)=>{const hash=getUser(req.userEmail)?.appLock?.pinHash; if(!hash||!await bcrypt.compare(String(req.body?.pin||''),hash))return res.status(401).json({error:'Невірний PIN'});res.json({ok:true});});
 
 app.put('/api/account/profile', requireUserSession, async (req, res) => {
   try {
