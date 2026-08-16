@@ -22,6 +22,8 @@
       <button class="icon-btn" onclick="logout()" style="position:static; color:var(--text-muted);" title="Вийти">⎋</button>
     </div>
 
+    <div id="announcements" style="margin-top:14px;"></div>
+
     <div id="loading" class="shimmer" style="height:180px; margin-top:20px;"></div>
 
     <div id="content" style="display:none;"></div>
@@ -55,6 +57,19 @@
       navigator.clipboard?.writeText(code).then(() => {
         alert('Код eSIM скопійовано. Відкрий Налаштування → Мобільні дані → Додати eSIM → Ввести дані вручну.');
       }).catch(() => alert(`Скопіюй цей код вручну:\n${code}`));
+    }
+
+    async function loadAnnouncements(){
+      try{
+        const res = await fetch(`${API_URL}/api/announcements?email=${encodeURIComponent(email)}`);
+        const data = await res.json(); if(!res.ok) return;
+        const maintenance = (data.announcements || []).find(item => item.type === 'maintenance');
+        if(maintenance){
+          document.body.innerHTML = `<main style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;background:#05060d;color:#f5f7ff;font-family:Inter,-apple-system,sans-serif;text-align:center;"><div style="max-width:460px;"><div style="font-size:54px;">🛠️</div><h1 style="font-family:'Space Grotesk',sans-serif;font-size:30px;margin-top:20px;">Технічні роботи</h1><p style="color:#aeb6c9;line-height:1.65;margin-top:14px;">${String(maintenance.message).replace(/[&<>]/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[char])).replace(/\n/g,'<br>')}</p><p style="color:#7f8aa3;font-size:12px;margin-top:20px;">Спробуй ще раз пізніше.</p></div></main>`;
+          return;
+        }
+        document.getElementById('announcements').innerHTML = (data.announcements || []).map(item => `<div class="glass" style="padding:13px 15px;border-color:rgba(59,130,246,.45);margin-top:8px;"><div style="font-weight:700;font-size:13px;">📢 ${String(item.title).replace(/[&<>]/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[char]))}</div><p class="muted" style="margin-top:5px;line-height:1.45;">${String(item.message).replace(/[&<>]/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[char])).replace(/\n/g,'<br>')}</p></div>`).join('');
+      }catch(e){}
     }
 
     async function load(){
@@ -168,7 +183,7 @@
       window.location.href = 'login.html';
     }
 
-    load();
+    load(); loadAnnouncements();
   </script>
 </body>
 </html>

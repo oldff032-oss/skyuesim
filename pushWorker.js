@@ -16,6 +16,14 @@ async function run() {
   for (const [email, user] of Object.entries(getAllUsers())) {
     if (user.status !== 'active' || !user.esim?.orderNo) continue;
     try {
+      // A profile issued over a day ago but not activated often means the
+      // customer needs installation instructions, not a new eSIM purchase.
+      const issuedAt = new Date(user.esim.createdAt || user.createdAt || 0).getTime();
+      if (!user.esim.activateTime && issuedAt && Date.now() - issuedAt > 24 * 3600000 && !user.esim.installReminderSentAt) {
+        await sendToEmail(email, { title: 'Встанови свою eSIM', body: 'Твоя eSIM готова. Відкрий Керування eSIM для QR-коду та інструкції.', url: '/esim-management.html', tag: 'esim-install-reminder' });
+        saveUser(email, { esim: { ...user.esim, installReminderSentAt: new Date().toISOString() } });
+        user.esim.installReminderSentAt = new Date().toISOString();
+      }
       const usage = await checkUsage(user.esim.orderNo);
       const total = usage.totalBytes || Math.round((user.esim.dataLimitGb || 0) * 1024 ** 3);
       if (!total) continue;

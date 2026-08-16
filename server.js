@@ -9,7 +9,7 @@ const cors = require('cors');
 
 const { createCheckoutSession, cancelSubscription, constructWebhookEvent, getNextBillingDate } = require('./stripeService');
 const { provisionEsim, checkUsage, recoverEsim } = require('./esimService');
-const { bootstrap: bootstrapUsers, getUser, saveUser, getUserByStripeCustomerId, getAllUsers } = require('./db');
+const { bootstrap: bootstrapUsers, getUser, saveUser, deleteUser, getUserByStripeCustomerId, getAllUsers } = require('./db');
 const storage = require('./persistentState');
 const authStore = require('./authStore');
 const adminStore = require('./adminStore');
@@ -118,6 +118,9 @@ app.get('/api/account/preferences', requireUserSession, (req, res) => {
 });
 
 app.get('/api/account/announcements', requireUserSession, (req, res) => res.json({ announcements: operationsStore.activeAnnouncements(req.userEmail) }));
+// General announcements are public by design so the app can show maintenance
+// notices before a saved login session has been restored.
+app.get('/api/announcements', (req, res) => res.json({ announcements: operationsStore.activeAnnouncements(req.query.email || null) }));
 
 app.put('/api/account/preferences', requireUserSession, (req, res) => {
   const raw = req.body?.trafficAlertThresholds;
@@ -481,17 +484,31 @@ app.get('/api/admin/dashboard', adminAuth.requireAdmin, (req, res) => {
 
 app.get('/api/admin/operations', adminAuth.requireAdmin, (req, res) => res.json(operationsStore.store()));
 app.post('/api/admin/announcements', adminAuth.requireAdmin, adminAuth.requireRole('super_admin','admin'), async (req,res) => {
-  const { title, message, audience='all', expiresAt=null, sendPush=false } = req.body || {};
+  const { title, message, audience='all', expiresAt=null, sendPush=false, type='notice' } = req.body || {};
   if(!title || !message) return res.status(400).json({error:'Вкажіть заголовок і текст'});
-  const announcement={ id:Date.now().toString(36), title:String(title).slice(0,100), message:String(message).slice(0,500), audience, startsAt:new Date().toISOString(), expiresAt:expiresAt||null, createdBy:req.admin.email };
+  const isMaintenance = type === 'maintenance' || /^\s*\[maintenance\]/i.test(String(title));
+  const announcement={ id:Date.now().toString(36), title:String(title).replace(/^\s*\[maintenance\]\s*/i,'').slice(0,100), message:String(message).slice(0,500), audience, type:isMaintenance?'maintenance':'notice', startsAt:new Date().toISOString(), expiresAt:expiresAt||null, createdBy:req.admin.email };
   operationsStore.store().announcements.unshift(announcement); operationsStore.save();
   if(sendPush && audience !== 'all') sendToEmail(audience,{title:announcement.title,body:announcement.message,url:'/dashboard.html',tag:`announcement-${announcement.id}`}).catch(()=>{});
   auditStore.log({adminEmail:req.admin.email,action:'announcement_created',target:audience,details:{id:announcement.id}}); res.json(announcement);
+});
+app.post('/api/admin/notify-bulk', adminAuth.requireAdmin, adminAuth.requireRole('super_admin','admin'), async (req,res) => {
+  const { channel, title, message, status, plan, minUsage } = req.body || {};
+  if(!['push','email'].includes(channel) || !message) return res.status(400).json({error:'Оберіть канал і введіть текст'});
+  const users=Object.values(getAllUsers()).filter(user => (!status || user.status===status) && (!plan || user.plan===plan) && (!minUsage || (user.esim?.dataLimitGb && (user.esim.usedGb||0)/user.esim.dataLimitGb*100>=Number(minUsage))));
+  if(users.length>200) return res.status(400).json({error:'Занадто багато отримувачів; звузьте фільтр до 200'});
+  let delivered=0;
+  for(const user of users){ try { if(channel==='push') delivered += await sendToEmail(user.email,{title:title||'Сигнал',body:String(message),url:'/dashboard.html',tag:'bulk-message'}); else { await sendEmail({to:user.email,subject:title||'Сигнал',html:`<p>${String(message).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])).replace(/\n/g,'<br>')}</p>`}); delivered++; } } catch(e){} }
+  auditStore.log({adminEmail:req.admin.email,action:'bulk_notification_sent',target:`${users.length} users`,details:{channel,status,plan,minUsage,delivered}}); res.json({ok:true,recipients:users.length,delivered});
 });
 app.delete('/api/admin/announcements/:id', adminAuth.requireAdmin, adminAuth.requireRole('super_admin','admin'), (req,res)=>{ const s=operationsStore.store(); s.announcements=s.announcements.filter(a=>a.id!==req.params.id); operationsStore.save(); auditStore.log({adminEmail:req.admin.email,action:'announcement_deleted',target:req.params.id}); res.json({ok:true}); });
 app.post('/api/admin/users/:email/note', adminAuth.requireAdmin, adminAuth.requireRole('super_admin','admin','support'), (req,res)=>{ const text=String(req.body?.text||'').trim(); if(!text) return res.status(400).json({error:'Введіть нотатку'}); const s=operationsStore.store(); (s.notes[req.params.email] ||= []).push({text:text.slice(0,1000),by:req.admin.email,createdAt:new Date().toISOString()}); operationsStore.save(); auditStore.log({adminEmail:req.admin.email,action:'user_note_added',target:req.params.email}); res.json({ok:true}); });
 app.post('/api/admin/blacklist', adminAuth.requireAdmin, adminAuth.requireRole('super_admin','admin'), (req,res)=>{ const {type,value}=req.body||{}; if(!['emails','iccids'].includes(type)||!value) return res.status(400).json({error:'Некоректні дані'}); const list=operationsStore.store().blacklist[type]; if(!list.includes(value)) list.push(value); operationsStore.save(); auditStore.log({adminEmail:req.admin.email,action:'blacklist_added',target:value}); res.json({ok:true}); });
 app.delete('/api/admin/blacklist/:type/:value', adminAuth.requireAdmin, adminAuth.requireRole('super_admin','admin'), (req,res)=>{ const list=operationsStore.store().blacklist[req.params.type]; if(!list) return res.status(400).json({error:'Некоректний список'}); operationsStore.store().blacklist[req.params.type]=list.filter(v=>v!==req.params.value); operationsStore.save(); res.json({ok:true}); });
+app.post('/api/admin/templates', adminAuth.requireAdmin, adminAuth.requireRole('super_admin','admin','support'), (req,res)=>{ const {title,text}=req.body||{}; if(!title||!text) return res.status(400).json({error:'Вкажіть назву і текст'}); const template={id:Date.now().toString(36),title:String(title).slice(0,100),text:String(text).slice(0,2000),by:req.admin.email}; operationsStore.store().templates.unshift(template); operationsStore.save(); res.json(template); });
+app.delete('/api/admin/templates/:id', adminAuth.requireAdmin, adminAuth.requireRole('super_admin','admin','support'), (req,res)=>{ const s=operationsStore.store(); s.templates=s.templates.filter(t=>t.id!==req.params.id); operationsStore.save(); res.json({ok:true}); });
+app.get('/api/admin/backup', adminAuth.requireAdmin, adminAuth.requireRole('super_admin'), (req,res)=>{ auditStore.log({adminEmail:req.admin.email,action:'backup_exported'}); res.attachment(`signal-backup-${new Date().toISOString().slice(0,10)}.json`).json({ exportedAt:new Date().toISOString(), users:getAllUsers(), auth:authStore.readAll(), tickets:ticketStore.getAllTickets(), operations:operationsStore.store(), audit:auditStore.getAll({limit:10000}) }); });
+app.delete('/api/admin/users/:email/anonymize', adminAuth.requireAdmin, adminAuth.requireRole('super_admin'), (req,res)=>{ const email=req.params.email; if(req.body?.confirmEmail!==email) return res.status(400).json({error:'Підтвердіть email користувача'}); if(!getUser(email)) return res.status(404).json({error:'Користувача не знайдено'}); deleteUser(email); const auth=authStore.readAll(); delete auth.users[email]; for(const [token,session] of Object.entries(auth.sessions)) if(session.email===email) delete auth.sessions[token]; authStore.writeAll(auth); auditStore.log({adminEmail:req.admin.email,action:'user_anonymized',target:'anonymized'}); res.json({ok:true}); });
 app.get('/api/admin/system-status', adminAuth.requireAdmin, (req,res)=>res.json({ server:'ok', database:Boolean(process.env.DATABASE_URL), push:isPushConfigured(), esimProvider:Boolean(process.env.ESIM_PROVIDER_API_KEY), stripe:Boolean(process.env.STRIPE_SECRET_KEY), checkedAt:new Date().toISOString() }));
 
 // Список користувачів для адмінки
@@ -526,6 +543,7 @@ app.get('/api/admin/users/:email', adminAuth.requireAdmin, (req, res) => {
     } : null,
     subscription: safeSubscription,
     security: { activeSessions: sessions, pushDevices },
+    notes: operationsStore.store().notes[email] || [],
     tickets: ticketStore.getTicketsByEmail(email),
   });
 });
