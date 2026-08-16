@@ -66,6 +66,8 @@
     const ticketId = new URLSearchParams(window.location.search).get('id');
     const statusLabels = { open:'Відкритий', in_progress:'В роботі', waiting_customer:'Очікує клієнта', resolved:'Вирішено', closed:'Закрито' };
     let currentTab = 'reply';
+    let currentRecoveryRequest = null;
+    let currentRecoveryVerification = null;
     const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[char]));
 
     function renderAttachment(a){
@@ -101,7 +103,9 @@
     async function load(){
       try{
         const res = await adminFetch(`/api/admin/tickets/${ticketId}`);
-        const { ticket, userSubscription } = await res.json();
+        const { ticket, userSubscription, recoveryVerification } = await res.json();
+        currentRecoveryRequest = ticket.recoveryRequest || null;
+        currentRecoveryVerification = recoveryVerification || null;
         document.getElementById('loading').style.display = 'none';
         const content = document.getElementById('content');
         content.style.display = 'block';
@@ -178,9 +182,23 @@
                 <div style="font-weight:700;">🔐 Відновлення доступу</div>
                 <div class="side-row"><div class="k">Ім’я</div><div class="v">${escapeHtml(ticket.recoveryRequest?.name || '—')}</div></div>
                 <div class="side-row"><div class="k">Можливий email</div><div class="v">${escapeHtml(ticket.recoveryRequest?.possibleEmail || '—')}</div></div>
+                <div class="side-row"><div class="k">Email для отримання</div><div class="v">${escapeHtml(ticket.recoveryRequest?.contactEmail || '—')}</div></div>
                 <div class="side-row"><div class="k">ICCID / UID</div><div class="v" style="word-break:break-all;">${escapeHtml(ticket.recoveryRequest?.esimId || '—')}</div></div>
-                <p class="muted" style="font-size:12px;line-height:1.5;margin-top:12px;">Спочатку звір ICCID/UID та платіжні дані. Посилання діє 1 годину й використовується один раз.</p>
-                ${localStorage.getItem('signal_admin_role') === 'super_admin' ? `<button class="btn primary" style="margin-top:12px;" onclick="createRecoveryLink('${escapeHtml(ticket.recoveryRequest?.possibleEmail || '')}')">Створити безпечне посилання</button>` : '<p class="muted" style="margin-top:12px;">Посилання може створити лише Super Admin.</p>'}
+                <div class="side-row"><div class="k">Зі слів користувача про покупку</div><div class="v">${escapeHtml(ticket.recoveryRequest?.purchaseHint || '—')}</div></div>
+                ${recoveryVerification ? `
+                  <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border);font-weight:700;">Дані знайденого акаунта</div>
+                  <div class="side-row"><div class="k">Акаунт знайдено</div><div class="v">${recoveryVerification.accountFound ? '✅ Так' : '❌ Ні'}</div></div>
+                  <div class="side-row"><div class="k">Ім’я в акаунті</div><div class="v">${escapeHtml(recoveryVerification.displayName || '—')}</div></div>
+                  <div class="side-row"><div class="k">Реєстрація</div><div class="v">${recoveryVerification.registeredAt ? new Date(recoveryVerification.registeredAt).toLocaleString('uk-UA') : '—'}</div></div>
+                  <div class="side-row"><div class="k">Тариф / статус</div><div class="v">${escapeHtml(recoveryVerification.plan || '—')} / ${escapeHtml(recoveryVerification.status || '—')}</div></div>
+                  <div class="side-row"><div class="k">eSIM</div><div class="v">${recoveryVerification.hasEsim ? `Є, ICCID закінчується на ${escapeHtml(recoveryVerification.iccidLast4 || '—')}` : 'Немає'}</div></div>
+                  ${(recoveryVerification.payment?.cards || []).map(card => `<div class="side-row"><div class="k">Картка Stripe</div><div class="v">${escapeHtml(card.brand || 'card')} •••• ${escapeHtml(card.last4 || '—')}${card.billingName ? ` · ${escapeHtml(card.billingName)}` : ''}</div></div>`).join('')}
+                  ${(recoveryVerification.payment?.recentPayments || []).map(payment => `<div class="side-row"><div class="k">Оплата</div><div class="v">${new Date(payment.date).toLocaleDateString('uk-UA')} · ${Number(payment.amount).toFixed(2)} ${escapeHtml(String(payment.currency || '').toUpperCase())} · ${escapeHtml(payment.status)}</div></div>`).join('')}
+                  ${recoveryVerification.paymentError ? `<p class="err-text" style="display:flex;margin-top:10px;">${escapeHtml(recoveryVerification.paymentError)}</p>` : ''}
+                ` : ''}
+                <p class="muted" style="font-size:12px;line-height:1.5;margin-top:12px;">Ім’я та email самі по собі не є доказом. Звір щонайменше дві незалежні ознаки: платіж, останні 4 цифри картки, дату покупки, тариф або ICCID.</p>
+                ${localStorage.getItem('signal_admin_role') === 'super_admin' ? `<label style="display:flex;gap:9px;align-items:flex-start;margin-top:12px;font-size:12px;line-height:1.4;"><input id="recoveryVerified" type="checkbox" style="width:auto;margin-top:2px;"><span>Я вручну перевірив(ла) щонайменше дві незалежні ознаки та підтверджую власника.</span></label>` : ''}
+                ${localStorage.getItem('signal_admin_role') === 'super_admin' ? `<button class="btn primary" style="margin-top:12px;" onclick="createRecoveryLink()">Створити й надіслати безпечне посилання</button>` : '<p class="muted" style="margin-top:12px;">Посилання може створити лише Super Admin.</p>'}
               </div>` : ''}
             </div>
           </div>`;
@@ -201,19 +219,24 @@
       load();
     }
 
-    async function createRecoveryLink(suggestedEmail){
+    async function createRecoveryLink(){
+      if(!currentRecoveryVerification?.accountFound) return alert('Акаунт за старим email не знайдено. Посилання створювати не можна.');
+      if(!document.getElementById('recoveryVerified')?.checked) return alert('Спочатку підтвердь перевірку щонайменше двох незалежних ознак.');
+      const suggestedEmail = currentRecoveryRequest?.possibleEmail || '';
+      const suggestedDeliveryEmail = currentRecoveryRequest?.contactEmail || '';
       const accountEmail = prompt('Після перевірки власника введи точний email акаунта, який потрібно відновити:', suggestedEmail || '');
       if(!accountEmail) return;
-      if(!confirm(`Створити одноразове посилання на 1 годину для акаунта ${accountEmail}?`)) return;
+      const deliveryEmail = prompt('На який доступний email надіслати безпечне посилання?', suggestedDeliveryEmail || '');
+      if(!deliveryEmail) return;
+      if(!confirm(`Створити посилання для акаунта ${accountEmail} і надіслати його на ${deliveryEmail}?`)) return;
       try{
         const response = await adminFetch(`/api/admin/tickets/${ticketId}/create-recovery-link`, {
           method:'POST',
-          body:JSON.stringify({ accountEmail: accountEmail.trim().toLowerCase() })
+          body:JSON.stringify({ accountEmail: accountEmail.trim().toLowerCase(), deliveryEmail: deliveryEmail.trim().toLowerCase(), verificationConfirmed:true })
         });
         const data = await response.json();
         if(!response.ok) throw new Error(data.error || 'Не вдалося створити посилання');
-        try{ await navigator.clipboard.writeText(data.url); }catch{}
-        prompt('Безпечне посилання створено та, якщо дозволено браузером, скопійовано:', data.url);
+        alert(`Безпечне посилання надіслано на ${data.sentTo}. Воно діє 1 годину.`);
         await load();
       }catch(error){ alert(error.message); }
     }

@@ -13,8 +13,10 @@
     <p class="lead">Створи запит у підтримку. Ми попросимо адміністратора вручну перевірити, що акаунт належить тобі.</p>
     <form id="form" class="glass glass-card" style="margin-top:20px;">
       <div class="field-group"><label class="field-label" for="name">Ім’я</label><input id="name" maxlength="80" required autocomplete="name"></div>
-      <div class="field-group"><label class="field-label" for="possibleEmail">Старий або можливий email</label><input id="possibleEmail" type="email" maxlength="254" autocomplete="email" placeholder="Необов’язково"></div>
-      <div class="field-group"><label class="field-label" for="esimId">ICCID або UID eSIM</label><input id="esimId" maxlength="80" required autocomplete="off" placeholder="Дані твоєї eSIM"></div>
+      <div class="field-group"><label class="field-label" for="possibleEmail">Старий email акаунта</label><input id="possibleEmail" type="email" maxlength="254" required autocomplete="email" placeholder="Email, з яким реєструвався"></div>
+      <div class="field-group"><label class="field-label" for="contactEmail">Email, до якого зараз є доступ</label><input id="contactEmail" type="email" maxlength="254" required autocomplete="email" placeholder="Сюди прийде безпечне посилання"><p class="muted" style="font-size:12px;margin-top:7px;">Це може бути новий email. Підтримка використає його лише після перевірки власника акаунта.</p></div>
+      <div class="field-group"><label class="field-label" for="esimId">ICCID або UID eSIM</label><input id="esimId" maxlength="80" autocomplete="off" placeholder="Необов’язково, якщо знаєш"><p class="muted" style="font-size:12px;margin-top:7px;">Не знаєш номер — залиш поле порожнім.</p></div>
+      <div class="field-group"><label class="field-label" for="purchaseHint">Що пам’ятаєш про останню покупку?</label><input id="purchaseHint" maxlength="200" autocomplete="off" placeholder="Необов’язково: тариф, сума або приблизна дата"></div>
       <div class="field-group"><label class="field-label" for="description">Що сталося?</label><textarea id="description" minlength="10" maxlength="2000" required placeholder="Опиши втрату доступу та, якщо можеш, дані покупки"></textarea></div>
       <div id="message" class="err-text" style="display:none;"></div>
       <button id="submit" class="btn" type="submit">Надіслати запит</button>
@@ -34,7 +36,9 @@
           body:JSON.stringify({
             name:document.getElementById('name').value.trim(),
             possibleEmail:document.getElementById('possibleEmail').value.trim(),
+            contactEmail:document.getElementById('contactEmail').value.trim(),
             esimId:document.getElementById('esimId').value.trim(),
+            purchaseHint:document.getElementById('purchaseHint').value.trim(),
             description:document.getElementById('description').value.trim(),
           })
         });

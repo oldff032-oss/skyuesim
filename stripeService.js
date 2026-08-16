@@ -69,6 +69,31 @@ async function getBillingHistory(customerId) {
   }));
 }
 
+// Read-only evidence for a Super Admin reviewing an account recovery request.
+// Only non-sensitive card metadata is returned; full card data never reaches us.
+async function getRecoveryPaymentEvidence(customerId) {
+  if (!customerId) return null;
+  const [invoices, paymentMethods] = await Promise.all([
+    stripe.invoices.list({ customer: customerId, limit: 3 }),
+    stripe.paymentMethods.list({ customer: customerId, type: 'card', limit: 3 }),
+  ]);
+  return {
+    recentPayments: invoices.data.map(invoice => ({
+      date: new Date(invoice.created * 1000).toISOString(),
+      amount: invoice.amount_paid / 100,
+      currency: invoice.currency,
+      status: invoice.status,
+    })),
+    cards: paymentMethods.data.map(method => ({
+      brand: method.card?.brand || null,
+      last4: method.card?.last4 || null,
+      expMonth: method.card?.exp_month || null,
+      expYear: method.card?.exp_year || null,
+      billingName: method.billing_details?.name || null,
+    })),
+  };
+}
+
 // Перевіряє, що вебхук справді прийшов від Stripe (а не від когось,
 // хто намагається підробити "оплату успішна").
 //
@@ -86,5 +111,4 @@ function constructWebhookEvent(rawBody, signature) {
   );
 }
 
-module.exports = { createCheckoutSession, createCustomPackageCheckout, cancelSubscription, constructWebhookEvent, getNextBillingDate, getBillingHistory };
-
+module.exports = { createCheckoutSession, createCustomPackageCheckout, cancelSubscription, constructWebhookEvent, getNextBillingDate, getBillingHistory, getRecoveryPaymentEvidence };

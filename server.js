@@ -9,7 +9,7 @@ const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const { generateRegistrationOptions, verifyRegistrationResponse } = require('@simplewebauthn/server');
 
-const { createCheckoutSession, createCustomPackageCheckout, cancelSubscription, constructWebhookEvent, getNextBillingDate, getBillingHistory } = require('./stripeService');
+const { createCheckoutSession, createCustomPackageCheckout, cancelSubscription, constructWebhookEvent, getNextBillingDate, getBillingHistory, getRecoveryPaymentEvidence } = require('./stripeService');
 const crypto = require('crypto');
 const { provisionEsim, checkUsage, recoverEsim, topupEsim, listPackages } = require('./esimService');
 const { bootstrap: bootstrapUsers, getUser, saveUser, deleteUser, getUserByStripeCustomerId, getAllUsers } = require('./db');
@@ -384,19 +384,22 @@ app.post('/api/auth/access-recovery', (req, res) => {
   accessRecoveryRateLimit.set(rateKey, recent);
   const name = String(req.body?.name || '').trim().slice(0, 80);
   const possibleEmail = String(req.body?.possibleEmail || '').trim().toLowerCase().slice(0, 254);
+  const contactEmail = String(req.body?.contactEmail || '').trim().toLowerCase().slice(0, 254);
   const esimId = String(req.body?.esimId || '').replace(/\s/g, '').slice(0, 80);
+  const purchaseHint = String(req.body?.purchaseHint || '').trim().slice(0, 200);
   const description = String(req.body?.description || '').trim().slice(0, 2000);
-  if (!name || !esimId || description.length < 10) {
-    return res.status(400).json({ error: 'Вкажи ім’я, ICCID/UID eSIM та коротко опиши проблему' });
+  if (!name || !possibleEmail || !contactEmail || description.length < 10) {
+    return res.status(400).json({ error: 'Вкажи ім’я, старий email, доступний контактний email та коротко опиши проблему' });
   }
   if (possibleEmail && !possibleEmail.includes('@')) return res.status(400).json({ error: 'Можливий email має бути коректним' });
+  if (!contactEmail.includes('@')) return res.status(400).json({ error: 'Контактний email має бути коректним' });
 
   const ticket = ticketStore.createTicket({
     email: possibleEmail || `recovery-${Date.now()}@no-email.invalid`,
     category: 'access_recovery',
     subject: 'Відновлення доступу без email',
-    message: `Ім’я: ${name}\nМожливий старий email: ${possibleEmail || 'не вказано'}\nICCID / UID eSIM: ${esimId}\n\n${description}`,
-    recoveryRequest: { name, possibleEmail: possibleEmail || null, esimId, description },
+    message: `Ім’я: ${name}\nСтарий email: ${possibleEmail}\nДоступний контактний email: ${contactEmail}\nICCID / UID eSIM: ${esimId || 'не вказано'}\nДані про покупку: ${purchaseHint || 'не вказано'}\n\n${description}`,
+    recoveryRequest: { name, possibleEmail, contactEmail, esimId: esimId || null, purchaseHint: purchaseHint || null, description },
   });
   auditStore.log({ action: 'access_recovery_requested', target: `#${ticket.id}` });
   res.status(201).json({ ok: true, ticketId: ticket.id });
@@ -543,25 +546,62 @@ app.get('/api/admin/tickets', adminAuth.requireAdmin, (req, res) => {
   res.json(ticketStore.getAllTickets({ status, priority, search }));
 });
 
-app.get('/api/admin/tickets/:id', adminAuth.requireAdmin, (req, res) => {
+app.get('/api/admin/tickets/:id', adminAuth.requireAdmin, async (req, res) => {
   const ticket = ticketStore.getTicket(req.params.id);
   if (!ticket) return res.status(404).json({ error: 'Тікет не знайдено' });
   const userSubscription = getUser(ticket.email);
-  res.json({ ticket, userSubscription });
+  let recoveryVerification = null;
+  if (ticket.category === 'access_recovery' && req.admin.role === 'super_admin') {
+    const authUser = authStore.readAll().users?.[ticket.email] || null;
+    let payment = null;
+    let paymentError = null;
+    try {
+      payment = await getRecoveryPaymentEvidence(userSubscription?.stripeCustomerId);
+    } catch (error) {
+      paymentError = 'Stripe-дані тимчасово недоступні';
+      console.error(`[access recovery] Stripe evidence for #${ticket.id}:`, error.message);
+    }
+    recoveryVerification = {
+      accountFound: Boolean(authUser && userSubscription),
+      accountEmail: authUser?.email || userSubscription?.email || null,
+      registeredAt: authUser?.createdAt || userSubscription?.createdAt || null,
+      lastLoginAt: authUser?.lastLoginAt || null,
+      displayName: userSubscription?.displayName || null,
+      plan: userSubscription?.plan || null,
+      status: userSubscription?.status || null,
+      hasEsim: Boolean(userSubscription?.esim),
+      iccidLast4: userSubscription?.esim?.iccid ? String(userSubscription.esim.iccid).slice(-4) : null,
+      payment,
+      paymentError,
+    };
+  }
+  res.json({ ticket, userSubscription, recoveryVerification });
 });
 
-app.post('/api/admin/tickets/:id/create-recovery-link', adminAuth.requireAdmin, adminAuth.requireRole('super_admin'), (req, res) => {
+app.post('/api/admin/tickets/:id/create-recovery-link', adminAuth.requireAdmin, adminAuth.requireRole('super_admin'), async (req, res) => {
   try {
     const ticket = ticketStore.getTicket(req.params.id);
     if (!ticket || ticket.category !== 'access_recovery') return res.status(404).json({ error: 'Запит відновлення не знайдено' });
+    if (req.body?.verificationConfirmed !== true) return res.status(400).json({ error: 'Підтвердіть перевірку щонайменше двох незалежних ознак власника' });
     const accountEmail = String(req.body?.accountEmail || '').trim().toLowerCase();
+    if (accountEmail !== String(ticket.recoveryRequest?.possibleEmail || '').trim().toLowerCase()) {
+      return res.status(409).json({ error: 'Email підтвердженого акаунта не збігається зі старим email у запиті' });
+    }
+    const deliveryEmail = String(req.body?.deliveryEmail || ticket.recoveryRequest?.contactEmail || '').trim().toLowerCase();
+    if (!deliveryEmail.includes('@') || deliveryEmail.length > 254) return res.status(400).json({ error: 'Вкажіть коректний email для отримання посилання' });
     const result = authService.createAdminRecoveryToken(accountEmail, ticket.id);
     const frontendUrl = String(process.env.FRONTEND_URL || '').replace(/\/$/, '');
     if (!frontendUrl) return res.status(500).json({ error: 'FRONTEND_URL не налаштовано' });
     const url = `${frontendUrl}/access-recovery-complete.html?token=${encodeURIComponent(result.token)}`;
-    ticketStore.updateTicket(ticket.id, { status: 'waiting_customer', verifiedAccountEmail: accountEmail, recoveryLinkCreatedAt: new Date().toISOString(), recoveryLinkExpiresAt: result.expiresAt });
-    auditStore.log({ adminEmail: req.admin.email, action: 'access_recovery_link_created', target: accountEmail, details: { ticketId: ticket.id, expiresAt: result.expiresAt } });
-    res.json({ ok: true, url, expiresAt: result.expiresAt });
+    const delivery = await sendEmail({
+      to: deliveryEmail,
+      subject: 'Безпечне відновлення доступу — Сигнал',
+      html: `<div style="font-family:Arial,sans-serif;max-width:520px;margin:auto"><h2>Відновлення доступу</h2><p>Підтримка Сигнал підтвердила запит на відновлення акаунта.</p><p><a href="${url}" style="display:inline-block;padding:12px 18px;background:#2563eb;color:#fff;text-decoration:none;border-radius:9px;font-weight:bold">Задати нові дані входу</a></p><p>Посилання одноразове та діє до ${new Date(result.expiresAt).toLocaleString('uk-UA')}.</p><p style="color:#666;font-size:12px">Якщо ви не подавали цей запит, не відкривайте посилання.</p></div>`,
+    });
+    if (delivery?.mocked) throw new Error('Лист не надіслано: RESEND_API_KEY не налаштований на сервері');
+    ticketStore.updateTicket(ticket.id, { status: 'waiting_customer', verifiedAccountEmail: accountEmail, recoveryDeliveryEmail: deliveryEmail, recoveryLinkCreatedAt: new Date().toISOString(), recoveryLinkExpiresAt: result.expiresAt });
+    auditStore.log({ adminEmail: req.admin.email, action: 'access_recovery_link_sent', target: accountEmail, details: { ticketId: ticket.id, deliveryEmail, expiresAt: result.expiresAt } });
+    res.json({ ok: true, sent: true, sentTo: deliveryEmail, expiresAt: result.expiresAt });
   } catch (error) {
     res.status(400).json({ error: error.message, code: error.code });
   }
