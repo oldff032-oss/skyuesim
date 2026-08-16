@@ -76,7 +76,8 @@
       </div>
     </div>
 
-    <button class="btn danger" style="margin-top:24px;" onclick="logout()">Вийти з акаунта</button>
+    <button class="btn ghost" style="margin-top:24px;" onclick="changeLanguage()">🌐 Мова / Language</button>
+    <button class="btn danger" style="margin-top:12px;" onclick="logout()">Вийти з акаунта</button>
   </div>
 
   <nav class="bottomnav">
@@ -86,6 +87,7 @@
     <a href="profile.html" class="active"><span class="ic">👤</span>Профіль</a>
   </nav>
 
+  <script src="config.js"></script>
   <script>
     const email = localStorage.getItem('signal_email');
     if(!email){ window.location.href = 'login.html'; }
@@ -96,6 +98,14 @@
       localStorage.removeItem('signal_session_token');
       localStorage.removeItem('signal_email');
       window.location.href = 'login.html';
+    }
+    async function changeLanguage(){
+      const current = localStorage.getItem('signal_language') || 'uk';
+      const language = prompt(window.signalT('Введи uk для Українська або en для English:', 'Enter uk for Ukrainian or en for English:'), current);
+      if(!['uk','en'].includes(language)) return;
+      const res = await fetch(`${API_URL}/api/account/preferences`, {method:'PUT',headers:{'Content-Type':'application/json','x-session-token':localStorage.getItem('signal_session_token')},body:JSON.stringify({language})});
+      if(!res.ok) return alert(window.signalT('Не вдалося змінити мову', 'Could not change language'));
+      localStorage.setItem('signal_language', language); location.reload();
     }
   </script>
 </body>

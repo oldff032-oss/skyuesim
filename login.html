@@ -79,6 +79,7 @@
 
         localStorage.setItem('signal_session_token', data.sessionToken);
         localStorage.setItem('signal_email', data.email);
+        localStorage.setItem('signal_language', data.language || 'uk');
         window.location.href = 'dashboard.html';
       }catch(e){
         err.textContent = e.message + '. Перевір мережу і спробуй ще раз.';

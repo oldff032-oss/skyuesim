@@ -24,6 +24,10 @@
     <p class="lead">Enter your e-mail to continue</p>
 
     <div class="field-group">
+      <label class="field-label">Мова / Language</label>
+      <select id="language" style="width:100%;background:rgba(255,255,255,.04);border:1.5px solid var(--border);border-radius:14px;padding:15px 16px;color:var(--text);font-size:15px;"><option value="uk">Українська</option><option value="en">English</option></select>
+    </div>
+    <div class="field-group">
       <label class="field-label">Email</label>
       <input type="email" id="email" placeholder="you@example.com" autocomplete="email" />
       <div class="err-text" id="err" style="display:none;"></div>
@@ -38,6 +42,7 @@
     async function requestCode(){
       const emailInput = document.getElementById('email');
       const email = emailInput.value.trim();
+      const language = document.getElementById('language').value;
       const err = document.getElementById('err');
       const btn = document.getElementById('continueBtn');
       err.style.display = 'none';
@@ -56,12 +61,13 @@
       try{
         const res = await fetch(`${API_URL}/api/auth/request-code`, {
           method:'POST', headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({ email })
+          body: JSON.stringify({ email, language })
         });
         const data = await res.json();
         if(!res.ok) throw new Error(data.error || 'Помилка сервера');
 
         localStorage.setItem('signal_pending_email', email);
+        localStorage.setItem('signal_language', language);
         window.location.href = 'verify-code.html';
       }catch(e){
         err.textContent = e.message;

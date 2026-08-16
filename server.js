@@ -19,6 +19,7 @@ const auditStore = require('./auditStore');
 const adminAuth = require('./adminAuthService');
 const pushStore = require('./pushStore');
 const operationsStore = require('./operationsStore');
+const translationService = require('./translationService');
 const { isConfigured: isPushConfigured, sendToEmail } = require('./pushService');
 const { sendEmail, getReceivedEmail, verifyInboundSignature } = require('./emailService');
 
@@ -41,7 +42,7 @@ app.post('/api/auth/request-code', async (req, res) => {
     const { email } = req.body;
     if (!email || !email.includes('@')) return res.status(400).json({ error: 'Введи коректний email' });
     if (operationsStore.store().blacklist.emails.includes(email.toLowerCase())) return res.status(403).json({ error: 'Цей email недоступний для реєстрації' });
-    await authService.requestCode(email);
+    await authService.requestCode(email, req.body?.language);
     res.json({ sent: true });
   } catch (err) {
     const status = err.code === 'COOLDOWN' ? 429 : 500;
@@ -114,23 +115,36 @@ app.post('/api/account/sessions/revoke-others', requireUserSession, (req, res) =
 
 app.get('/api/account/preferences', requireUserSession, (req, res) => {
   const preferences = getUser(req.userEmail)?.preferences || {};
-  res.json({ trafficAlertThresholds: preferences.trafficAlertThresholds || [50, 80, 95] });
+  res.json({ trafficAlertThresholds: preferences.trafficAlertThresholds || [50, 80, 95], language: getUser(req.userEmail)?.language || 'uk' });
 });
 
-app.get('/api/account/announcements', requireUserSession, (req, res) => res.json({ announcements: operationsStore.activeAnnouncements(req.userEmail) }));
+async function localizedAnnouncements(email) {
+  const announcements = operationsStore.activeAnnouncements(email);
+  const userLanguage = getUser(email)?.language || 'uk';
+  if (userLanguage !== 'en') return announcements;
+  return Promise.all(announcements.map(async (announcement) => ({
+    ...announcement,
+    title: await translationService.translate(announcement.title, 'en'),
+    message: await translationService.translate(announcement.message, 'en'),
+  })));
+}
+
+app.get('/api/account/announcements', requireUserSession, async (req, res) => res.json({ announcements: await localizedAnnouncements(req.userEmail) }));
 // General announcements are public by design so the app can show maintenance
 // notices before a saved login session has been restored.
-app.get('/api/announcements', (req, res) => res.json({ announcements: operationsStore.activeAnnouncements(req.query.email || null) }));
+app.get('/api/announcements', async (req, res) => res.json({ announcements: await localizedAnnouncements(req.query.email || null) }));
 
 app.put('/api/account/preferences', requireUserSession, (req, res) => {
   const raw = req.body?.trafficAlertThresholds;
-  if (!Array.isArray(raw) || raw.some((value) => !Number.isInteger(value) || value < 1 || value > 100)) {
+  const language = req.body?.language;
+  if (raw !== undefined && (!Array.isArray(raw) || raw.some((value) => !Number.isInteger(value) || value < 1 || value > 100))) {
     return res.status(400).json({ error: 'Вкажи коректні пороги від 1 до 100' });
   }
-  const trafficAlertThresholds = [...new Set(raw)].sort((a, b) => a - b);
+  if (language !== undefined && !['uk','en'].includes(language)) return res.status(400).json({ error: 'Некоректна мова' });
+  const trafficAlertThresholds = raw === undefined ? null : [...new Set(raw)].sort((a, b) => a - b);
   const user = getUser(req.userEmail);
-  saveUser(req.userEmail, { preferences: { ...(user?.preferences || {}), trafficAlertThresholds } });
-  res.json({ ok: true, trafficAlertThresholds });
+  saveUser(req.userEmail, { ...(language ? { language } : {}), preferences: { ...(user?.preferences || {}), ...(trafficAlertThresholds ? { trafficAlertThresholds } : {}) } });
+  res.json({ ok: true, trafficAlertThresholds: trafficAlertThresholds || user?.preferences?.trafficAlertThresholds || [50,80,95], language: language || user?.language || 'uk' });
 });
 
 // The activation code is intentionally available only to the account owner.
@@ -299,7 +313,12 @@ app.get('/api/support/tickets/:id', (req, res) => {
     return res.status(403).json({ error: 'Немає доступу до цього тікета' });
   }
   // Внутрішні нотатки адмінів користувач бачити не повинен
-  res.json(ticketStore.stripNotesForUser(ticket));
+  const safeTicket = ticketStore.stripNotesForUser(ticket);
+  if ((getUser(ticket.email)?.language || 'uk') !== 'en') return res.json(safeTicket);
+  Promise.all((safeTicket.messages || []).map(async (item) => item.from === 'admin'
+    ? { ...item, text: await translationService.translate(item.text, 'en') }
+    : item
+  )).then((messages) => res.json({ ...safeTicket, messages })).catch(() => res.json(safeTicket));
 });
 
 app.post('/api/support/tickets/:id/reply', (req, res) => {
@@ -418,10 +437,12 @@ app.post('/api/admin/tickets/:id/reply', adminAuth.requireAdmin, adminAuth.requi
     if (!ticket) return res.status(404).json({ error: 'Тікет не знайдено' });
 
     const updated = ticketStore.addMessage(req.params.id, { from: 'admin', text: message, attachment });
+    const customerMessage = await translationService.forEmail(ticket.email, message, getUser);
+    const customerTitle = await translationService.forEmail(ticket.email, 'Нова відповідь від підтримки', getUser);
     // Do not put the reply text in a lock-screen notification. The user can
     // open the protected ticket by tapping the generic push instead.
     sendToEmail(ticket.email, {
-      title: 'Нова відповідь від підтримки',
+      title: customerTitle,
       body: `У зверненні #${ticket.id} є нове повідомлення.`,
       url: `/ticket.html?id=${ticket.id}`,
       tag: `support-${ticket.id}`,
@@ -434,7 +455,7 @@ app.post('/api/admin/tickets/:id/reply', adminAuth.requireAdmin, adminAuth.requi
         subject: `[Сигнал Підтримка #${ticket.id}] ${ticket.subject}`,
         html: `
           <div style="font-family: sans-serif; max-width: 480px;">
-            <p>${message.replace(/\n/g, '<br>')}</p>
+            <p>${customerMessage.replace(/[&<>]/g, (char) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;' }[char])).replace(/\n/g, '<br>')}</p>
             <hr style="border:none; border-top:1px solid #eee; margin:20px 0;">
             <p style="color:#888; font-size:12px;">Ticket ID: #${ticket.id}. Можеш відповісти прямо на цей email — відповідь автоматично додасться в тікет.</p>
           </div>`,
@@ -489,7 +510,10 @@ app.post('/api/admin/announcements', adminAuth.requireAdmin, adminAuth.requireRo
   const isMaintenance = type === 'maintenance' || /^\s*\[maintenance\]/i.test(String(title));
   const announcement={ id:Date.now().toString(36), title:String(title).replace(/^\s*\[maintenance\]\s*/i,'').slice(0,100), message:String(message).slice(0,500), audience, type:isMaintenance?'maintenance':'notice', startsAt:new Date().toISOString(), expiresAt:expiresAt||null, createdBy:req.admin.email };
   operationsStore.store().announcements.unshift(announcement); operationsStore.save();
-  if(sendPush && audience !== 'all') sendToEmail(audience,{title:announcement.title,body:announcement.message,url:'/dashboard.html',tag:`announcement-${announcement.id}`}).catch(()=>{});
+  if(sendPush && audience !== 'all') Promise.all([
+    translationService.forEmail(audience, announcement.title, getUser),
+    translationService.forEmail(audience, announcement.message, getUser),
+  ]).then(([localizedTitle, localizedMessage]) => sendToEmail(audience,{title:localizedTitle,body:localizedMessage,url:'/dashboard.html',tag:`announcement-${announcement.id}`})).catch(()=>{});
   auditStore.log({adminEmail:req.admin.email,action:'announcement_created',target:audience,details:{id:announcement.id}}); res.json(announcement);
 });
 app.post('/api/admin/notify-bulk', adminAuth.requireAdmin, adminAuth.requireRole('super_admin','admin'), async (req,res) => {
@@ -498,7 +522,7 @@ app.post('/api/admin/notify-bulk', adminAuth.requireAdmin, adminAuth.requireRole
   const users=Object.values(getAllUsers()).filter(user => (!status || user.status===status) && (!plan || user.plan===plan) && (!minUsage || (user.esim?.dataLimitGb && (user.esim.usedGb||0)/user.esim.dataLimitGb*100>=Number(minUsage))));
   if(users.length>200) return res.status(400).json({error:'Занадто багато отримувачів; звузьте фільтр до 200'});
   let delivered=0;
-  for(const user of users){ try { if(channel==='push') delivered += await sendToEmail(user.email,{title:title||'Сигнал',body:String(message),url:'/dashboard.html',tag:'bulk-message'}); else { await sendEmail({to:user.email,subject:title||'Сигнал',html:`<p>${String(message).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])).replace(/\n/g,'<br>')}</p>`}); delivered++; } } catch(e){} }
+  for(const user of users){ try { const localizedTitle=await translationService.forEmail(user.email,title||'Сигнал',getUser); const localizedMessage=await translationService.forEmail(user.email,String(message),getUser); if(channel==='push') delivered += await sendToEmail(user.email,{title:localizedTitle,body:localizedMessage,url:'/dashboard.html',tag:'bulk-message'}); else { await sendEmail({to:user.email,subject:localizedTitle,html:`<p>${localizedMessage.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])).replace(/\n/g,'<br>')}</p>`}); delivered++; } } catch(e){} }
   auditStore.log({adminEmail:req.admin.email,action:'bulk_notification_sent',target:`${users.length} users`,details:{channel,status,plan,minUsage,delivered}}); res.json({ok:true,recipients:users.length,delivered});
 });
 app.delete('/api/admin/announcements/:id', adminAuth.requireAdmin, adminAuth.requireRole('super_admin','admin'), (req,res)=>{ const s=operationsStore.store(); s.announcements=s.announcements.filter(a=>a.id!==req.params.id); operationsStore.save(); auditStore.log({adminEmail:req.admin.email,action:'announcement_deleted',target:req.params.id}); res.json({ok:true}); });
@@ -563,9 +587,11 @@ app.post('/api/admin/users/:email/notify', adminAuth.requireAdmin, adminAuth.req
   if (!message || String(message).trim().length > 500) return res.status(400).json({ error: 'Введи повідомлення до 500 символів' });
   try {
     let delivered = 0;
-    if (channel === 'push') delivered = await sendToEmail(email, { title: title || 'Сигнал', body: String(message), url: '/dashboard.html', tag: 'admin-message' });
+    const localizedTitle = await translationService.forEmail(email, title || 'Сигнал', getUser);
+    const localizedMessage = await translationService.forEmail(email, String(message), getUser);
+    if (channel === 'push') delivered = await sendToEmail(email, { title: localizedTitle, body: localizedMessage, url: '/dashboard.html', tag: 'admin-message' });
     else if (channel === 'email') {
-      await sendEmail({ to: email, subject: title || 'Сигнал', html: `<p>${String(message).replace(/[&<>]/g, (char) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;' }[char])).replace(/\n/g, '<br>')}</p>` });
+      await sendEmail({ to: email, subject: localizedTitle, html: `<p>${localizedMessage.replace(/[&<>]/g, (char) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;' }[char])).replace(/\n/g, '<br>')}</p>` });
       delivered = 1;
     } else return res.status(400).json({ error: 'Оберіть push або email' });
     auditStore.log({ adminEmail: req.admin.email, action: 'user_notification_sent', target: email, details: { channel, delivered } });
@@ -661,12 +687,14 @@ app.post('/api/admin/users/:email/recover-esim', adminAuth.requireAdmin, adminAu
   const user = getUser(email);
 
   if (!user) return res.status(404).json({ error: 'Користувача не знайдено' });
-  if (user.esim?.orderNo) return res.status(409).json({ error: 'До цього акаунта вже прикріплено eSIM' });
 
   try {
     const esim = await recoverEsim({ iccid, plan });
+    const previousOrderNo = user.esim?.orderNo || null;
+    // A recovery may also deliberately replace stale local eSIM data. It still
+    // only reads the provider profile and never creates a Stripe payment/order.
     saveUser(email, { status: 'active', plan, esim });
-    auditStore.log({ adminEmail: req.admin.email, action: 'esim_recovered', target: email, details: { orderNo: esim.orderNo } });
+    auditStore.log({ adminEmail: req.admin.email, action: 'esim_recovered', target: email, details: { orderNo: esim.orderNo, previousOrderNo } });
     res.json({ ok: true, esim });
   } catch (err) {
     console.error(`[eSIM recovery] ${email}:`, err.message);
@@ -687,9 +715,9 @@ app.post('/api/create-subscription', async (req, res) => {
     if (!email || !plan) return res.status(400).json({ error: 'Потрібні email і plan' });
     if (operationsStore.store().blacklist.emails.includes(email.toLowerCase())) return res.status(403).json({ error: 'Цей email недоступний для оплати' });
 
-    saveUser(email, { email, plan, status: 'pending_payment' });
-
     const session = await createCheckoutSession({ email, plan });
+    // Do not change the current subscription before Stripe confirms payment.
+    // If the customer closes Checkout, their existing plan and eSIM stay intact.
     res.json({ url: session.url });
   } catch (err) {
     console.error(err);
@@ -751,6 +779,12 @@ app.get('/api/status', (req, res) => {
   const user = getUser(email);
   if (!user) return res.status(404).json({ error: 'Користувача не знайдено' });
   if (user.status === 'blocked') return res.status(403).json({ error: 'Акаунт заблоковано' });
+
+  // Repair accounts that were incorrectly marked as pending by older builds
+  // after a user opened and then cancelled Stripe Checkout.
+  if (user.status === 'pending_payment' && user.esim?.orderNo) {
+    return res.json(saveUser(email, { status: 'active' }));
+  }
 
   res.json(user);
 });
@@ -838,6 +872,7 @@ storage.init().then(() => Promise.all([
   ticketStore.bootstrap(),
   auditStore.bootstrap(),
   operationsStore.bootstrap(),
+  translationService.bootstrap(),
 ])).then(() => adminAuth.bootstrap()).then(() => {
   app.listen(PORT, () => {
     console.log(`Signal backend running on http://localhost:${PORT}`);

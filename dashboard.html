@@ -55,8 +55,8 @@
       const code = currentUser?.esim?.activationCode;
       if(!code) return;
       navigator.clipboard?.writeText(code).then(() => {
-        alert('Код eSIM скопійовано. Відкрий Налаштування → Мобільні дані → Додати eSIM → Ввести дані вручну.');
-      }).catch(() => alert(`Скопіюй цей код вручну:\n${code}`));
+        alert(window.signalT('Код eSIM скопійовано. Відкрий Налаштування → Мобільні дані → Додати eSIM → Ввести дані вручну.', 'eSIM code copied. Open Settings → Cellular Data → Add eSIM → Enter details manually.'));
+      }).catch(() => alert(`${window.signalT('Скопіюй цей код вручну:', 'Copy this code manually:')}\n${code}`));
     }
 
     async function loadAnnouncements(){

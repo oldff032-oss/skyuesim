@@ -85,13 +85,11 @@
         const subscription = user.subscription || {};
         const encodedEmail = encodeURIComponent(user.email);
 
-        const recoveryButton = subscription.status === 'payment_ok_esim_failed'
-          ? `<button class="btn ${subscription.status === 'payment_ok_esim_failed' ? 'primary' : 'ghost'}"
+        const recoveryButton = `<button class="btn ${subscription.status === 'payment_ok_esim_failed' ? 'primary' : 'ghost'}"
                style="padding:7px 10px;font-size:12px;"
-               onclick="recoverEsim('${encodedEmail}')">
+               onclick="recoverEsim('${encodedEmail}', '${subscription.plan || 'basic'}')">
                Відновити eSIM
-             </button>`
-          : '';
+             </button>`;
 
         const blockButton = `<button class="btn ghost"
           style="padding:7px 10px;font-size:12px;${subscription.status === 'blocked' ? 'color:var(--cyan);' : 'color:var(--danger);'}"
@@ -116,15 +114,15 @@
       }).join('') || '<tr><td colspan="6" class="muted">Немає користувачів</td></tr>';
     }
 
-    async function recoverEsim(encodedEmail) {
+    async function recoverEsim(encodedEmail, defaultPlan = 'basic') {
       const email = decodeURIComponent(encodedEmail);
       const iccid = prompt(
-        `Введіть ICCID / UID уже виданої або встановленої eSIM для ${email}. Оплата Stripe не повторюється.`
+        `Введіть ICCID уже виданої або встановленої eSIM для ${email}. Оплата Stripe не повторюється.`
       );
 
       if (!iccid) return;
 
-      const plan = prompt('Оберіть тариф: basic, standard або unlimited.', 'basic');
+      const plan = prompt('Оберіть тариф: basic, standard або unlimited.', defaultPlan);
       if (!plan) return;
 
       try {
@@ -199,6 +197,7 @@
         document.getElementById('userDetailsActions').innerHTML = `
           <button class="btn ghost" style="width:auto;padding:9px 12px;font-size:12px;" onclick="adminUserAction('${encodedEmail}','resync-esim')">Оновити трафік</button>
           <button class="btn ghost" style="width:auto;padding:9px 12px;font-size:12px;" onclick="adminUserAction('${encodedEmail}','resend-esim-instructions')">Інструкція eSIM</button>
+          <button class="btn primary" style="width:auto;padding:9px 12px;font-size:12px;" onclick="recoverEsim('${encodedEmail}','${subscription.plan || 'basic'}')">Відновити eSIM</button>
           <button class="btn ghost" style="width:auto;padding:9px 12px;font-size:12px;color:var(--danger);" onclick="adminUserAction('${encodedEmail}','revoke-sessions')">Завершити входи</button>
           <button class="btn ghost" style="width:auto;padding:9px 12px;font-size:12px;" onclick="notifyUser('${encodedEmail}','push')">Push</button>
           <button class="btn ghost" style="width:auto;padding:9px 12px;font-size:12px;" onclick="notifyUser('${encodedEmail}','email')">Email</button>`;

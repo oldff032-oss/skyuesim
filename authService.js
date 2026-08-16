@@ -33,7 +33,7 @@ function createSession(store, email, deviceName) {
 }
 
 // ---------- Крок 1: запит коду ----------
-async function requestCode(email) {
+async function requestCode(email, language = 'uk') {
   const store = readAll();
   const existing = store.codes[email];
 
@@ -43,7 +43,7 @@ async function requestCode(email) {
   }
 
   const code = randomCode();
-  store.codes[email] = { code, sentAt: Date.now(), attempts: 0 };
+  store.codes[email] = { code, sentAt: Date.now(), attempts: 0, language: language === 'en' ? 'en' : 'uk' };
   writeAll(store);
 
   await sendVerificationCode(email, code);
@@ -69,7 +69,7 @@ function verifyCode(email, code) {
   // Код правильний -> видаємо тимчасовий токен для встановлення пароля
   delete store.codes[email];
   const verifyToken = randomToken();
-  store.verifyTokens[verifyToken] = { email, createdAt: Date.now() };
+  store.verifyTokens[verifyToken] = { email, language: entry.language || 'uk', createdAt: Date.now() };
   writeAll(store);
 
   return { verifyToken };
@@ -89,14 +89,16 @@ async function setPassword(verifyToken, password, deviceName) {
   // Keep the account visible immediately after registration, but never replace
   // an existing subscription/eSIM when an account is restored with the same email.
   if (!getUser(entry.email)) {
-    saveUser(entry.email, { email: entry.email, status: 'registered', createdAt: new Date().toISOString() });
+    saveUser(entry.email, { email: entry.email, status: 'registered', language: entry.language || 'uk', createdAt: new Date().toISOString() });
+  } else {
+    saveUser(entry.email, { language: entry.language || 'uk' });
   }
   delete store.verifyTokens[verifyToken];
 
   const sessionToken = createSession(store, entry.email, deviceName);
   writeAll(store);
 
-  return { sessionToken, email: entry.email };
+  return { sessionToken, email: entry.email, language: getUser(entry.email)?.language || entry.language || 'uk' };
 }
 
 // ---------- Логін ----------
@@ -112,7 +114,7 @@ async function login(email, password, deviceName) {
   user.lastLoginAt = new Date().toISOString();
   writeAll(store);
 
-  return { sessionToken, email };
+  return { sessionToken, email, language: getUser(email)?.language || 'uk' };
 }
 
 // ---------- Перевірка сесії (для захищених маршрутів) ----------
