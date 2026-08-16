@@ -7,7 +7,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 
-const { createCheckoutSession, cancelSubscription, constructWebhookEvent, getNextBillingDate, getBillingHistory } = require('./stripeService');
+const { createCheckoutSession, createCustomPackageCheckout, cancelSubscription, constructWebhookEvent, getNextBillingDate, getBillingHistory } = require('./stripeService');
 const crypto = require('crypto');
 const { provisionEsim, checkUsage, recoverEsim, listPackages } = require('./esimService');
 const { bootstrap: bootstrapUsers, getUser, saveUser, deleteUser, getUserByStripeCustomerId, getAllUsers } = require('./db');
@@ -663,6 +663,23 @@ app.post('/api/admin/users/:email/notify', adminAuth.requireAdmin, adminAuth.req
   }
 });
 
+app.post('/api/admin/users/:email/custom-package-checkout', adminAuth.requireAdmin, adminAuth.requireRole('super_admin', 'admin'), async (req, res) => {
+  const email = req.params.email;
+  const { packageCode, packageName, amountCents, currency = 'usd', dataLimitGb = null } = req.body || {};
+  const user = getUser(email);
+  if (!user) return res.status(404).json({ error: 'Користувача не знайдено' });
+  if (user.esim?.orderNo && user.status === 'active') return res.status(409).json({ error: 'У користувача вже є активна eSIM. Продаж другого профілю буде додано окремо, щоб не замінити поточну eSIM.' });
+  if (!/^[A-Za-z0-9_-]{3,80}$/.test(String(packageCode || ''))) return res.status(400).json({ error: 'Некоректний packageCode' });
+  if (!String(packageName || '').trim() || String(packageName).length > 120) return res.status(400).json({ error: 'Вкажіть назву пакета' });
+  if (!Number.isInteger(Number(amountCents)) || Number(amountCents) < 50 || Number(amountCents) > 1000000) return res.status(400).json({ error: 'Вкажіть ціну в центах: від $0.50 до $10,000' });
+  if (!/^[a-z]{3}$/i.test(currency)) return res.status(400).json({ error: 'Некоректна валюта' });
+  try {
+    const session = await createCustomPackageCheckout({ email, packageCode: String(packageCode), packageName: String(packageName).trim(), amountCents: Number(amountCents), currency: String(currency).toLowerCase(), dataLimitGb });
+    auditStore.log({ adminEmail: req.admin.email, action: 'custom_package_checkout_created', target: email, details: { packageCode, amountCents, currency } });
+    res.json({ ok: true, url: session.url });
+  } catch (error) { res.status(502).json({ error: error.message }); }
+});
+
 app.post('/api/admin/users/:email/resync-esim', adminAuth.requireAdmin, adminAuth.requireRole('super_admin', 'admin'), async (req, res) => {
   const email = req.params.email;
   const user = getUser(email);
@@ -807,13 +824,15 @@ app.post('/api/webhook', async (req, res) => {
 
     try {
       // Оплата підтверджена Stripe -> тепер видаємо реальну eSIM
-      const esim = await provisionEsim({ email, plan });
+      const packageCode = session.metadata.packageCode || '';
+      const dataLimitGb = session.metadata.dataLimitGb === '' ? null : Number(session.metadata.dataLimitGb);
+      const esim = await provisionEsim({ email, plan, packageCode, dataLimitGb });
 
       saveUser(email, {
         status: 'active',
         plan,
         stripeCustomerId: session.customer,
-        stripeSubscriptionId: session.subscription,
+        ...(session.subscription ? { stripeSubscriptionId: session.subscription } : {}),
         esim,
       });
 

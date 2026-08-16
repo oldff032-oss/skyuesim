@@ -44,6 +44,19 @@ async function getNextBillingDate(subscriptionId) {
   return sub.current_period_end ? new Date(sub.current_period_end * 1000).toISOString() : null;
 }
 
+async function createCustomPackageCheckout({ email, packageCode, packageName, amountCents, currency = 'usd', dataLimitGb = null }) {
+  const session = await stripe.checkout.sessions.create({
+    mode: 'payment',
+    customer_email: email,
+    customer_creation: 'always',
+    line_items: [{ price_data: { currency, product_data: { name: packageName }, unit_amount: amountCents }, quantity: 1 }],
+    success_url: `${process.env.FRONTEND_URL}/installing.html?email=${encodeURIComponent(email)}`,
+    cancel_url: `${process.env.FRONTEND_URL}/profile.html`,
+    metadata: { plan: 'custom', email, packageCode, packageName, dataLimitGb: dataLimitGb == null ? '' : String(dataLimitGb) },
+  });
+  return session;
+}
+
 async function getBillingHistory(customerId) {
   const invoices = await stripe.invoices.list({ customer: customerId, limit: 20 });
   return invoices.data.map((invoice) => ({
@@ -73,4 +86,4 @@ function constructWebhookEvent(rawBody, signature) {
   );
 }
 
-module.exports = { createCheckoutSession, cancelSubscription, constructWebhookEvent, getNextBillingDate, getBillingHistory };
+module.exports = { createCheckoutSession, createCustomPackageCheckout, cancelSubscription, constructWebhookEvent, getNextBillingDate, getBillingHistory };

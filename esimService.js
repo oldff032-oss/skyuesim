@@ -268,7 +268,7 @@ function profileToEsim(profile, orderNo, plan) {
   };
 }
 
-async function provisionEsim({ email, plan }) {
+async function provisionEsim({ email, plan, packageCode: suppliedPackageCode = '', dataLimitGb: suppliedDataLimitGb = null }) {
   if (!email || typeof email !== 'string') {
     throw new EsimAccessError('A customer email is required.', { code: 'EMAIL_REQUIRED' });
   }
@@ -282,7 +282,8 @@ async function provisionEsim({ email, plan }) {
     return esim;
   }
 
-  const packageCode = packageCodeFor(plan);
+  const packageCode = suppliedPackageCode || packageCodeFor(plan);
+  if (!/^[A-Za-z0-9_-]{3,80}$/.test(packageCode)) throw new EsimAccessError('Invalid package code.', { code: 'PACKAGE_CODE_INVALID' });
   const requestId = transactionId();
   log('creating_order', { email: mask(email, 3), plan, packageCode, transactionId: requestId });
 
@@ -301,6 +302,7 @@ async function provisionEsim({ email, plan }) {
   log('order_created', { orderNo: mask(orderNo) });
   const profile = await waitForEsim(orderNo);
   const esim = profileToEsim(profile, orderNo, plan);
+  if (suppliedDataLimitGb != null && Number.isFinite(Number(suppliedDataLimitGb))) esim.dataLimitGb = Number(suppliedDataLimitGb);
   log('provisioned', {
     orderNo: mask(orderNo),
     iccid: mask(esim.iccid),

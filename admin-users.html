@@ -198,6 +198,7 @@
           <button class="btn ghost" style="width:auto;padding:9px 12px;font-size:12px;" onclick="adminUserAction('${encodedEmail}','resync-esim')">Оновити трафік</button>
           <button class="btn ghost" style="width:auto;padding:9px 12px;font-size:12px;" onclick="adminUserAction('${encodedEmail}','resend-esim-instructions')">Інструкція eSIM</button>
           <button class="btn primary" style="width:auto;padding:9px 12px;font-size:12px;" onclick="recoverEsim('${encodedEmail}','${subscription.plan || 'basic'}')">Відновити eSIM</button>
+          <button class="btn ghost" style="width:auto;padding:9px 12px;font-size:12px;" onclick="createCustomPackageCheckout('${encodedEmail}')">Продати пакет eSIM</button>
           <button class="btn ghost" style="width:auto;padding:9px 12px;font-size:12px;color:var(--danger);" onclick="adminUserAction('${encodedEmail}','revoke-sessions')">Завершити входи</button>
           <button class="btn ghost" style="width:auto;padding:9px 12px;font-size:12px;" onclick="notifyUser('${encodedEmail}','push')">Push</button>
           <button class="btn ghost" style="width:auto;padding:9px 12px;font-size:12px;" onclick="notifyUser('${encodedEmail}','email')">Email</button>`;
@@ -209,6 +210,29 @@
 
     function closeUserDetails() {
       document.getElementById('userDetailsModal').style.display = 'none';
+    }
+
+    async function createCustomPackageCheckout(encodedEmail) {
+      const email = decodeURIComponent(encodedEmail);
+      const packageCode = prompt('Package code з eSIM Access, наприклад CKH139:');
+      if (!packageCode) return;
+      const packageName = prompt('Назва, яку побачить користувач у Stripe:', packageCode);
+      if (!packageName) return;
+      const price = prompt('Ціна для користувача в USD, наприклад 4.99:');
+      if (price === null) return;
+      const amountCents = Math.round(Number(String(price).replace(',', '.')) * 100);
+      if (!Number.isInteger(amountCents) || amountCents < 50) return alert('Вкажіть коректну ціну, мінімум $0.50.');
+      const dataLimit = prompt('Обсяг пакета в ГБ (необов’язково):', '');
+      try {
+        const response = await adminFetch(`/api/admin/users/${encodedEmail}/custom-package-checkout`, {
+          method: 'POST',
+          body: JSON.stringify({ packageCode: packageCode.trim(), packageName: packageName.trim(), amountCents, currency: 'usd', dataLimitGb: dataLimit === '' ? null : Number(dataLimit) })
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Не вдалося створити оплату');
+        await navigator.clipboard?.writeText(data.url);
+        prompt('Stripe-посилання створено й скопійовано. Надішли його користувачу:', data.url);
+      } catch (error) { alert(error.message); }
     }
 
     async function adminUserAction(encodedEmail, action) {
