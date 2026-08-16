@@ -6,6 +6,7 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const { generateRegistrationOptions, verifyRegistrationResponse } = require('@simplewebauthn/server');
 
 const { createCheckoutSession, createCustomPackageCheckout, cancelSubscription, constructWebhookEvent, getNextBillingDate, getBillingHistory } = require('./stripeService');
 const crypto = require('crypto');
@@ -113,6 +114,17 @@ app.get('/api/account/sessions', requireUserSession, (req, res) => {
 app.post('/api/account/sessions/revoke-others', requireUserSession, (req, res) => {
   const revoked = authService.revokeOtherSessions(req.userEmail, req.sessionToken);
   res.json({ ok: true, revoked });
+});
+
+const PASSKEY_RP_ID = 'skyesim.netlify.app';
+const PASSKEY_ORIGIN = 'https://skyesim.netlify.app';
+app.post('/api/account/passkeys/register/options', requireUserSession, async (req,res) => {
+  const user=getUser(req.userEmail); const passkeys=user?.passkeys||[];
+  const options=await generateRegistrationOptions({rpName:'Signal eSIM',rpID:PASSKEY_RP_ID,userName:req.userEmail,userID:Buffer.from(req.userEmail),attestationType:'none',excludeCredentials:passkeys.map(p=>({id:p.id,transports:p.transports})),authenticatorSelection:{authenticatorAttachment:'platform',residentKey:'required',userVerification:'required'}});
+  saveUser(req.userEmail,{passkeyChallenge:options.challenge}); res.json(options);
+});
+app.post('/api/account/passkeys/register/verify', requireUserSession, async (req,res) => {
+  try { const user=getUser(req.userEmail); const verification=await verifyRegistrationResponse({response:req.body,expectedChallenge:user?.passkeyChallenge,expectedOrigin:PASSKEY_ORIGIN,expectedRPID:PASSKEY_RP_ID,requireUserVerification:true}); if(!verification.verified||!verification.registrationInfo) throw new Error('Face ID не підтверджено'); const c=verification.registrationInfo.credential; saveUser(req.userEmail,{passkeys:[...(user.passkeys||[]),{id:c.id,publicKey:Buffer.from(c.publicKey).toString('base64url'),counter:c.counter,transports:c.transports||[],createdAt:new Date().toISOString()}],passkeyChallenge:null}); res.json({ok:true}); } catch(e){res.status(400).json({error:e.message});}
 });
 
 app.put('/api/account/profile', requireUserSession, async (req, res) => {
