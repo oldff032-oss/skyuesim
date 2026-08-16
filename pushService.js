@@ -32,3 +32,4 @@ async function sendToEmail(email, notification) {
 }
 
 module.exports = { isConfigured, sendToEmail };
+

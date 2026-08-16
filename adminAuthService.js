@@ -120,3 +120,4 @@ function deleteAdmin({ email, actorEmail }) {
 }
 
 module.exports = { bootstrap, login, requireAdmin, requireRole, createAdmin, listAdmins, setAdminBlocked, deleteAdmin };
+

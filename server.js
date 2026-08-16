@@ -29,6 +29,7 @@ const { sendEmail, getReceivedEmail, verifyInboundSignature } = require('./email
 const app = express();
 const esimRetriesInProgress = new Set();
 const coverageCache = new Map();
+const accessRecoveryRateLimit = new Map();
 app.use(cors());
 
 // ВАЖЛИВО: вебхук Stripe має отримати "сирий" (не розпарсений) body,
@@ -371,6 +372,56 @@ app.post('/api/inbound-email', async (req, res) => {
 // ПІДТРИМКА (SUPPORT): звернення користувачів
 // =========================================================
 
+// Public intake for people who cannot receive a verification email. It never
+// reveals whether the supplied email/ICCID matches an account; only an admin
+// can verify ownership and issue a short-lived recovery link.
+app.post('/api/auth/access-recovery', (req, res) => {
+  const rateKey = req.ip || req.socket?.remoteAddress || 'unknown';
+  const now = Date.now();
+  const recent = (accessRecoveryRateLimit.get(rateKey) || []).filter(timestamp => now - timestamp < 60 * 60 * 1000);
+  if (recent.length >= 3) return res.status(429).json({ error: 'Забагато запитів. Спробуй через годину.' });
+  recent.push(now);
+  accessRecoveryRateLimit.set(rateKey, recent);
+  const name = String(req.body?.name || '').trim().slice(0, 80);
+  const possibleEmail = String(req.body?.possibleEmail || '').trim().toLowerCase().slice(0, 254);
+  const esimId = String(req.body?.esimId || '').replace(/\s/g, '').slice(0, 80);
+  const description = String(req.body?.description || '').trim().slice(0, 2000);
+  if (!name || !esimId || description.length < 10) {
+    return res.status(400).json({ error: 'Вкажи ім’я, ICCID/UID eSIM та коротко опиши проблему' });
+  }
+  if (possibleEmail && !possibleEmail.includes('@')) return res.status(400).json({ error: 'Можливий email має бути коректним' });
+
+  const ticket = ticketStore.createTicket({
+    email: possibleEmail || `recovery-${Date.now()}@no-email.invalid`,
+    category: 'access_recovery',
+    subject: 'Відновлення доступу без email',
+    message: `Ім’я: ${name}\nМожливий старий email: ${possibleEmail || 'не вказано'}\nICCID / UID eSIM: ${esimId}\n\n${description}`,
+    recoveryRequest: { name, possibleEmail: possibleEmail || null, esimId, description },
+  });
+  auditStore.log({ action: 'access_recovery_requested', target: `#${ticket.id}` });
+  res.status(201).json({ ok: true, ticketId: ticket.id });
+});
+
+app.get('/api/auth/admin-recovery/:token', (req, res) => {
+  try {
+    res.json(authService.inspectAdminRecoveryToken(req.params.token));
+  } catch (error) {
+    res.status(400).json({ error: error.message, code: error.code });
+  }
+});
+
+app.post('/api/auth/admin-recovery/:token', async (req, res) => {
+  try {
+    const result = await authService.completeAdminRecovery(req.params.token, req.body?.email, req.body?.password, req.body?.pin);
+    const ticket = ticketStore.getTicket(result.ticketId);
+    if (ticket) ticketStore.updateTicket(result.ticketId, { status: 'resolved', recoveredEmail: result.email, recoveryCompletedAt: new Date().toISOString() });
+    auditStore.log({ action: 'access_recovery_completed', target: result.email, details: { ticketId: result.ticketId } });
+    res.json(result);
+  } catch (error) {
+    res.status(400).json({ error: error.message, code: error.code });
+  }
+});
+
 app.post('/api/support/tickets', async (req, res) => {
   try {
     const { email, category, subject, message, attachment } = req.body;
@@ -497,6 +548,23 @@ app.get('/api/admin/tickets/:id', adminAuth.requireAdmin, (req, res) => {
   if (!ticket) return res.status(404).json({ error: 'Тікет не знайдено' });
   const userSubscription = getUser(ticket.email);
   res.json({ ticket, userSubscription });
+});
+
+app.post('/api/admin/tickets/:id/create-recovery-link', adminAuth.requireAdmin, adminAuth.requireRole('super_admin'), (req, res) => {
+  try {
+    const ticket = ticketStore.getTicket(req.params.id);
+    if (!ticket || ticket.category !== 'access_recovery') return res.status(404).json({ error: 'Запит відновлення не знайдено' });
+    const accountEmail = String(req.body?.accountEmail || '').trim().toLowerCase();
+    const result = authService.createAdminRecoveryToken(accountEmail, ticket.id);
+    const frontendUrl = String(process.env.FRONTEND_URL || '').replace(/\/$/, '');
+    if (!frontendUrl) return res.status(500).json({ error: 'FRONTEND_URL не налаштовано' });
+    const url = `${frontendUrl}/access-recovery-complete.html?token=${encodeURIComponent(result.token)}`;
+    ticketStore.updateTicket(ticket.id, { status: 'waiting_customer', verifiedAccountEmail: accountEmail, recoveryLinkCreatedAt: new Date().toISOString(), recoveryLinkExpiresAt: result.expiresAt });
+    auditStore.log({ adminEmail: req.admin.email, action: 'access_recovery_link_created', target: accountEmail, details: { ticketId: ticket.id, expiresAt: result.expiresAt } });
+    res.json({ ok: true, url, expiresAt: result.expiresAt });
+  } catch (error) {
+    res.status(400).json({ error: error.message, code: error.code });
+  }
 });
 
 // Зміна статусу/пріоритету — заборонено для Viewer

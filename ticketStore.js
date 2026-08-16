@@ -3,9 +3,9 @@ let store = { tickets: [], nextId: 1001 };
 
 async function bootstrap() { store = { tickets: [], nextId: 1001, ...(await storage.load('tickets.json', store)) }; }
 function writeAll(data) { store = data; storage.save('tickets.json', store); }
-function createTicket({ email, category, subject, message, attachment }) {
+function createTicket({ email, category, subject, message, attachment, recoveryRequest = null }) {
   const now = new Date().toISOString();
-  const ticket = { id: store.nextId++, email, category, subject, status: 'open', priority: 'normal', createdAt: now, updatedAt: now, messages: [{ from: 'user', text: message, attachment: attachment || null, createdAt: now }] };
+  const ticket = { id: store.nextId++, email, category, subject, status: 'open', priority: category === 'access_recovery' ? 'high' : 'normal', createdAt: now, updatedAt: now, messages: [{ from: 'user', text: message, attachment: attachment || null, createdAt: now }], ...(recoveryRequest ? { recoveryRequest } : {}) };
   store.tickets.push(ticket); writeAll(store); return ticket;
 }
 function getTicketsByEmail(email) { return store.tickets.filter(t => t.email === email).sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt)); }

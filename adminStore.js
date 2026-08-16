@@ -6,3 +6,4 @@ function readAll() { return store; }
 function writeAll(data) { store = data; storage.save('admins.json', store); }
 
 module.exports = { bootstrap, readAll, writeAll };
+

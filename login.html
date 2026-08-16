@@ -35,6 +35,7 @@
         <button class="icon-btn" onclick="togglePw()" type="button">👁️</button>
       </div>
       <p class="muted" style="margin-top:8px; text-align:right;"><a href="forgot-password.html" style="color:var(--text-muted); text-decoration:none;">Забув(ла) пароль?</a></p>
+      <p class="muted" style="margin-top:10px; text-align:right;"><a href="access-recovery.html" style="color:var(--cyan); text-decoration:none;">Немає доступу до email?</a></p>
     </div>
     <div class="err-text" id="err" style="display:none;"></div>
 
@@ -80,6 +81,7 @@
         localStorage.setItem('signal_session_token', data.sessionToken);
         localStorage.setItem('signal_email', data.email);
         localStorage.setItem('signal_language', data.language || 'uk');
+        for (const key of Object.keys(sessionStorage)) if (key.startsWith('signal_app_unlocked:')) sessionStorage.removeItem(key);
         window.location.href = 'dashboard.html';
       }catch(e){
         err.textContent = e.message + '. Перевір мережу і спробуй ще раз.';

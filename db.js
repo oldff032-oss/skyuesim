@@ -15,3 +15,4 @@ function getAllUsers() { return users; }
 function deleteUser(email) { if (!users[email]) return false; delete users[email]; storage.save('users.json', users); return true; }
 
 module.exports = { bootstrap, getUser, saveUser, deleteUser, getUserByStripeCustomerId, getAllUsers };
+

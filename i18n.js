@@ -74,3 +74,4 @@
   else start();
   window.signalT = (uk, en) => en || phrases[uk] || uk;
 })();
+

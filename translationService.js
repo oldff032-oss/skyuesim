@@ -48,3 +48,4 @@ async function forEmail(email, text, getUser) {
 }
 
 module.exports = { bootstrap, enabled, translate, forEmail };
+

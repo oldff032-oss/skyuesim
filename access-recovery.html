@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Відновлення доступу — Сигнал</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="wrap">
+    <div class="brand"><div class="mark">🔐</div><span>Сигнал</span></div>
+    <h1 style="margin-top:22px;">Немає доступу до email?</h1>
+    <p class="lead">Створи запит у підтримку. Ми попросимо адміністратора вручну перевірити, що акаунт належить тобі.</p>
+    <form id="form" class="glass glass-card" style="margin-top:20px;">
+      <div class="field-group"><label class="field-label" for="name">Ім’я</label><input id="name" maxlength="80" required autocomplete="name"></div>
+      <div class="field-group"><label class="field-label" for="possibleEmail">Старий або можливий email</label><input id="possibleEmail" type="email" maxlength="254" autocomplete="email" placeholder="Необов’язково"></div>
+      <div class="field-group"><label class="field-label" for="esimId">ICCID або UID eSIM</label><input id="esimId" maxlength="80" required autocomplete="off" placeholder="Дані твоєї eSIM"></div>
+      <div class="field-group"><label class="field-label" for="description">Що сталося?</label><textarea id="description" minlength="10" maxlength="2000" required placeholder="Опиши втрату доступу та, якщо можеш, дані покупки"></textarea></div>
+      <div id="message" class="err-text" style="display:none;"></div>
+      <button id="submit" class="btn" type="submit">Надіслати запит</button>
+    </form>
+    <p class="muted" style="text-align:center;margin-top:16px;"><a href="login.html" style="color:var(--cyan);">Повернутися до входу</a></p>
+  </main>
+  <script src="config.js"></script>
+  <script>
+    document.getElementById('form').addEventListener('submit', async event => {
+      event.preventDefault();
+      const button = document.getElementById('submit');
+      const message = document.getElementById('message');
+      button.disabled = true; message.style.display = 'none';
+      try{
+        const response = await fetch(`${API_URL}/api/auth/access-recovery`, {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({
+            name:document.getElementById('name').value.trim(),
+            possibleEmail:document.getElementById('possibleEmail').value.trim(),
+            esimId:document.getElementById('esimId').value.trim(),
+            description:document.getElementById('description').value.trim(),
+          })
+        });
+        const data = await response.json();
+        if(!response.ok) throw new Error(data.error || 'Не вдалося створити запит');
+        document.getElementById('form').innerHTML = `<div style="text-align:center;padding:16px 4px;"><div style="font-size:46px;">✅</div><h2 style="margin-top:12px;">Запит №${data.ticketId} створено</h2><p class="lead">Підтримка перевірить дані. Збережи номер звернення.</p><a class="btn ghost" href="login.html" style="margin-top:18px;">До входу</a></div>`;
+      }catch(error){ message.textContent = error.message; message.style.display = 'flex'; button.disabled = false; }
+    });
+  </script>
+</body>
+</html>

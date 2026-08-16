@@ -127,3 +127,4 @@ ESIM_PROVIDER_API_KEY=...
    - Додай у нього ті ж `DATABASE_URL`, `VAPID_SUBJECT`, `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` і ключі eSIM-провайдера, що є у Backend.
 
 На iPhone користувач має додати PWA на початковий екран і натиснути кнопку ввімкнення push власноруч.
+

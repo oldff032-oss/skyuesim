@@ -119,7 +119,7 @@
             <td>#${t.id}</td>
             <td><div class="user-cell"><div class="avatar">${t.email[0].toUpperCase()}</div><div><div class="name">${t.email.split('@')[0]}</div><div class="email">${t.email}</div></div></div></td>
             <td>${t.subject}</td>
-            <td>${t.category}</td>
+            <td>${t.category === 'access_recovery' ? '🔐 Відновлення доступу' : t.category}</td>
             <td><span class="prio-dot ${t.priority}">${t.priority}</span></td>
             <td><span class="status-badge ${t.status}">${statusLabels[t.status]||t.status}</span></td>
             <td class="muted">${new Date(t.updatedAt).toLocaleString('uk-UA')}</td>

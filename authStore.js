@@ -7,3 +7,4 @@ function readAll() { return store; }
 function writeAll(data) { store = data; storage.save('auth.json', store); }
 
 module.exports = { bootstrap, readAll, writeAll };
+

@@ -47,3 +47,4 @@ function logout(){
   localStorage.removeItem('signal_admin_email');
   window.location.href = 'admin-login.html';
 }
+

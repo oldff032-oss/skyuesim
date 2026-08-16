@@ -12,3 +12,4 @@ function log({ adminEmail, action, target, details }) {
 function getAll({ limit = 300 } = {}) { return store.entries.slice(-limit).reverse(); }
 
 module.exports = { bootstrap, log, getAll };
+

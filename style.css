@@ -340,3 +340,4 @@ code.qr{ display:block; background:#000; color:var(--success); font-family:'Spac
 .install-step span.label-text{ font-size:13.5px; color:var(--text-muted); }
 .install-step.done span.label-text{ color:var(--text); }
 .install-step.active span.label-text{ color:var(--text); font-weight:600; }
+

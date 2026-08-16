@@ -217,7 +217,81 @@ async function updateAccount(email, changes = {}) {
   return { email: accountEmail, displayName: getUser(accountEmail)?.displayName || '', avatarDataUrl: getUser(accountEmail)?.avatarDataUrl || null };
 }
 
-module.exports = { requestCode, verifyCode, setPassword, login, getSessionEmail, listSessions, revokeOtherSessions, revokeAllSessions, updateAccount, requestPasswordReset, verifyResetCode, resetPassword };
+const ADMIN_RECOVERY_TTL_MS = 60 * 60 * 1000;
+
+function recoveryTokenHash(token) {
+  return crypto.createHash('sha256').update(String(token)).digest('hex');
+}
+
+function createAdminRecoveryToken(accountEmail, ticketId) {
+  const email = String(accountEmail || '').trim().toLowerCase();
+  const store = readAll();
+  if (!store.users[email] || !getUser(email)) {
+    throw Object.assign(new Error('Акаунт із таким email не знайдено'), { code: 'ACCOUNT_NOT_FOUND' });
+  }
+  const token = randomToken();
+  store.adminRecoveryTokens ||= {};
+  store.adminRecoveryTokens[recoveryTokenHash(token)] = {
+    accountEmail: email,
+    ticketId: Number(ticketId),
+    createdAt: Date.now(),
+  };
+  writeAll(store);
+  return { token, expiresAt: new Date(Date.now() + ADMIN_RECOVERY_TTL_MS).toISOString() };
+}
+
+function inspectAdminRecoveryToken(token) {
+  const entry = readAll().adminRecoveryTokens?.[recoveryTokenHash(token)];
+  if (!entry || Date.now() - entry.createdAt > ADMIN_RECOVERY_TTL_MS) {
+    throw Object.assign(new Error('Посилання недійсне або прострочене'), { code: 'INVALID_TOKEN' });
+  }
+  return { valid: true, expiresAt: new Date(entry.createdAt + ADMIN_RECOVERY_TTL_MS).toISOString() };
+}
+
+async function completeAdminRecovery(token, newEmail, newPassword, pin) {
+  const store = readAll();
+  const hash = recoveryTokenHash(token);
+  const entry = store.adminRecoveryTokens?.[hash];
+  if (!entry || Date.now() - entry.createdAt > ADMIN_RECOVERY_TTL_MS) {
+    throw Object.assign(new Error('Посилання недійсне або прострочене'), { code: 'INVALID_TOKEN' });
+  }
+
+  const oldEmail = entry.accountEmail;
+  const email = String(newEmail || '').trim().toLowerCase();
+  if (!email.includes('@') || email.length > 254) throw Object.assign(new Error('Введи коректний новий email'), { code: 'INVALID_EMAIL' });
+  if (String(newPassword || '').length < 8) throw Object.assign(new Error('Пароль має містити щонайменше 8 символів'), { code: 'WEAK_PASSWORD' });
+  if (!/^\d{6}$/.test(String(pin || ''))) throw Object.assign(new Error('PIN має містити рівно 6 цифр'), { code: 'INVALID_PIN' });
+  if (email !== oldEmail && (store.users[email] || getUser(email))) throw Object.assign(new Error('Цей email уже використовується'), { code: 'EMAIL_TAKEN' });
+  if (!store.users[oldEmail] || !getUser(oldEmail)) throw Object.assign(new Error('Акаунт не знайдено'), { code: 'ACCOUNT_NOT_FOUND' });
+
+  const authUser = { ...store.users[oldEmail], email, passwordHash: await bcrypt.hash(String(newPassword), 10) };
+  delete store.users[oldEmail];
+  store.users[email] = authUser;
+  for (const [sessionToken, session] of Object.entries(store.sessions || {})) {
+    if (session.email === oldEmail) delete store.sessions[sessionToken];
+  }
+
+  const subscription = getUser(oldEmail);
+  deleteUser(oldEmail);
+  saveUser(email, {
+    ...subscription,
+    email,
+    appLock: { enabled: true, pinHash: await bcrypt.hash(String(pin), 10) },
+  });
+  for (const user of Object.values(getAllUsers())) {
+    const patch = {};
+    if (user.referredBy === oldEmail) patch.referredBy = email;
+    if (Array.isArray(user.referrals)) patch.referrals = user.referrals.map((item) => item.email === oldEmail ? { ...item, email } : item);
+    if (Object.keys(patch).length) saveUser(user.email, patch);
+  }
+
+  delete store.adminRecoveryTokens[hash];
+  const sessionToken = createSession(store, email, 'Відновлення доступу');
+  writeAll(store);
+  return { ok: true, email, sessionToken, ticketId: entry.ticketId };
+}
+
+module.exports = { requestCode, verifyCode, setPassword, login, getSessionEmail, listSessions, revokeOtherSessions, revokeAllSessions, updateAccount, requestPasswordReset, verifyResetCode, resetPassword, createAdminRecoveryToken, inspectAdminRecoveryToken, completeAdminRecovery };
 
 // ---------- Забув(ла) пароль: запит коду ----------
 async function requestPasswordReset(email) {

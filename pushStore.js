@@ -32,3 +32,4 @@ function removeSubscription(endpoint, email = null) {
 }
 
 module.exports = { bootstrap, subscriptionsFor, saveSubscription, removeSubscription };
+

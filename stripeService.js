@@ -87,3 +87,4 @@ function constructWebhookEvent(rawBody, signature) {
 }
 
 module.exports = { createCheckoutSession, createCustomPackageCheckout, cancelSubscription, constructWebhookEvent, getNextBillingDate, getBillingHistory };
+

@@ -62,3 +62,4 @@ function save(name, value) {
 }
 
 module.exports = { init, load, save };
+
