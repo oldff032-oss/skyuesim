@@ -332,6 +332,10 @@ app.get('/api/admin/team', adminAuth.requireAdmin, adminAuth.requireRole('super_
   res.json(adminAuth.listAdmins());
 });
 
+app.get('/api/admin/assignees', adminAuth.requireAdmin, (req, res) => {
+  res.json(adminAuth.listAdmins().filter((admin) => !admin.blocked && ['super_admin', 'admin', 'support'].includes(admin.role)).map((admin) => ({ email: admin.email, role: admin.role })));
+});
+
 app.post('/api/admin/team', adminAuth.requireAdmin, adminAuth.requireRole('super_admin'), async (req, res) => {
   try {
     const { email, password, role } = req.body;
@@ -385,13 +389,17 @@ app.get('/api/admin/tickets/:id', adminAuth.requireAdmin, (req, res) => {
 
 // Зміна статусу/пріоритету — заборонено для Viewer
 app.patch('/api/admin/tickets/:id', adminAuth.requireAdmin, adminAuth.requireRole('super_admin', 'admin', 'support'), (req, res) => {
-  const { status, priority } = req.body;
+  const { status, priority, assignedTo } = req.body;
+  if (assignedTo !== undefined && assignedTo !== null && assignedTo !== '' && !adminStore.readAll().admins?.[assignedTo]) {
+    return res.status(400).json({ error: 'Призначеного адміністратора не знайдено' });
+  }
   const updated = ticketStore.updateTicket(req.params.id, {
     ...(status && { status }),
     ...(priority && { priority }),
+    ...(assignedTo !== undefined && { assignedTo: assignedTo || null }),
   });
   if (!updated) return res.status(404).json({ error: 'Тікет не знайдено' });
-  auditStore.log({ adminEmail: req.admin.email, action: 'ticket_updated', target: `#${req.params.id}`, details: { status, priority } });
+  auditStore.log({ adminEmail: req.admin.email, action: 'ticket_updated', target: `#${req.params.id}`, details: { status, priority, assignedTo } });
   res.json(updated);
 });
 
@@ -403,6 +411,14 @@ app.post('/api/admin/tickets/:id/reply', adminAuth.requireAdmin, adminAuth.requi
     if (!ticket) return res.status(404).json({ error: 'Тікет не знайдено' });
 
     const updated = ticketStore.addMessage(req.params.id, { from: 'admin', text: message, attachment });
+    // Do not put the reply text in a lock-screen notification. The user can
+    // open the protected ticket by tapping the generic push instead.
+    sendToEmail(ticket.email, {
+      title: 'Нова відповідь від підтримки',
+      body: `У зверненні #${ticket.id} є нове повідомлення.`,
+      url: `/ticket.html?id=${ticket.id}`,
+      tag: `support-${ticket.id}`,
+    }).catch((pushErr) => console.error(`[push] support reply #${ticket.id}:`, pushErr.message));
     auditStore.log({ adminEmail: req.admin.email, action: 'ticket_reply_sent', target: `#${req.params.id}` });
 
     try {
@@ -442,6 +458,23 @@ app.get('/api/admin/audit-log', adminAuth.requireAdmin, adminAuth.requireRole('s
   res.json(auditStore.getAll());
 });
 
+app.get('/api/admin/dashboard', adminAuth.requireAdmin, (req, res) => {
+  const users = Object.values(getAllUsers());
+  const tickets = ticketStore.getAllTickets();
+  const since = Date.now() - 24 * 60 * 60 * 1000;
+  const active = users.filter((user) => user.status === 'active');
+  const highUsage = active.filter((user) => {
+    const esim = user.esim || {};
+    return esim.dataLimitGb && (Number(esim.usedGb || 0) / Number(esim.dataLimitGb)) >= 0.8;
+  });
+  res.json({
+    users: { total: users.length, registeredToday: users.filter((user) => new Date(user.createdAt || 0).getTime() >= since).length, active: active.length, blocked: users.filter((user) => user.status === 'blocked').length },
+    esim: { active: active.filter((user) => user.esim?.orderNo).length, failed: users.filter((user) => user.status === 'payment_ok_esim_failed').length, highUsage: highUsage.length, expiringSoon: active.filter((user) => user.esim?.expiredTime && new Date(user.esim.expiredTime).getTime() - Date.now() < 7 * 86400000).length },
+    tickets: { total: tickets.length, open: tickets.filter((ticket) => ticket.status === 'open').length, unassigned: tickets.filter((ticket) => !ticket.assignedTo && !['resolved', 'closed'].includes(ticket.status)).length, waitingOver24h: tickets.filter((ticket) => ticket.status === 'waiting_customer' && Date.now() - new Date(ticket.updatedAt).getTime() > 24 * 3600000).length },
+    recentTickets: tickets.slice(0, 5),
+  });
+});
+
 // Список користувачів для адмінки
 app.get('/api/admin/users', adminAuth.requireAdmin, (req, res) => {
   const authData = authStore.readAll();
@@ -459,14 +492,76 @@ app.get('/api/admin/users/:email', adminAuth.requireAdmin, (req, res) => {
   const authUser = authStore.readAll().users?.[email];
   const subscription = getUser(email);
   if (!authUser && !subscription) return res.status(404).json({ error: 'Користувача не знайдено' });
+  const safeSubscription = subscription ? JSON.parse(JSON.stringify(subscription)) : null;
+  if (req.admin.role !== 'super_admin' && safeSubscription?.esim) {
+    delete safeSubscription.esim.activationCode;
+    delete safeSubscription.esim.qrCodeUrl;
+  }
+  const sessions = Object.values(authStore.readAll().sessions || {}).filter((session) => session.email === email).length;
+  const pushDevices = pushStore.subscriptionsFor(email).length;
   res.json({
     email,
     account: authUser ? {
       createdAt: authUser.createdAt || null,
       lastLoginAt: authUser.lastLoginAt || null,
     } : null,
-    subscription: subscription || null,
+    subscription: safeSubscription,
+    security: { activeSessions: sessions, pushDevices },
+    tickets: ticketStore.getTicketsByEmail(email),
   });
+});
+
+app.post('/api/admin/users/:email/revoke-sessions', adminAuth.requireAdmin, adminAuth.requireRole('super_admin', 'admin'), (req, res) => {
+  const email = req.params.email;
+  if (!authStore.readAll().users?.[email]) return res.status(404).json({ error: 'Користувача не знайдено' });
+  const revoked = authService.revokeAllSessions(email);
+  auditStore.log({ adminEmail: req.admin.email, action: 'user_sessions_revoked', target: email, details: { revoked } });
+  res.json({ ok: true, revoked });
+});
+
+app.post('/api/admin/users/:email/notify', adminAuth.requireAdmin, adminAuth.requireRole('super_admin', 'admin', 'support'), async (req, res) => {
+  const email = req.params.email;
+  const { channel, title, message } = req.body || {};
+  if (!getUser(email) && !authStore.readAll().users?.[email]) return res.status(404).json({ error: 'Користувача не знайдено' });
+  if (!message || String(message).trim().length > 500) return res.status(400).json({ error: 'Введи повідомлення до 500 символів' });
+  try {
+    let delivered = 0;
+    if (channel === 'push') delivered = await sendToEmail(email, { title: title || 'Сигнал', body: String(message), url: '/dashboard.html', tag: 'admin-message' });
+    else if (channel === 'email') {
+      await sendEmail({ to: email, subject: title || 'Сигнал', html: `<p>${String(message).replace(/[&<>]/g, (char) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;' }[char])).replace(/\n/g, '<br>')}</p>` });
+      delivered = 1;
+    } else return res.status(400).json({ error: 'Оберіть push або email' });
+    auditStore.log({ adminEmail: req.admin.email, action: 'user_notification_sent', target: email, details: { channel, delivered } });
+    res.json({ ok: true, delivered });
+  } catch (error) {
+    res.status(502).json({ error: error.message });
+  }
+});
+
+app.post('/api/admin/users/:email/resync-esim', adminAuth.requireAdmin, adminAuth.requireRole('super_admin', 'admin'), async (req, res) => {
+  const email = req.params.email;
+  const user = getUser(email);
+  if (!user?.esim?.orderNo) return res.status(404).json({ error: 'Активну eSIM не знайдено' });
+  try {
+    const usage = await checkUsage(user.esim.orderNo);
+    const usedGb = +(usage.usedBytes / (1024 ** 3)).toFixed(2);
+    const totalGb = usage.totalBytes ? +(usage.totalBytes / (1024 ** 3)).toFixed(2) : user.esim.dataLimitGb;
+    const remainingGb = totalGb == null ? null : Math.max(0, +(totalGb - usedGb).toFixed(2));
+    saveUser(email, { esim: { ...user.esim, usedGb, dataLimitGb: totalGb, remainingGb, lastUpdateTime: usage.lastUpdateTime || new Date().toISOString() } });
+    auditStore.log({ adminEmail: req.admin.email, action: 'esim_usage_resynced', target: email });
+    res.json({ ok: true, usedGb, totalGb, remainingGb });
+  } catch (error) { res.status(502).json({ error: error.message }); }
+});
+
+app.post('/api/admin/users/:email/resend-esim-instructions', adminAuth.requireAdmin, adminAuth.requireRole('super_admin', 'admin', 'support'), async (req, res) => {
+  const email = req.params.email;
+  const esim = getUser(email)?.esim;
+  if (!esim?.activationCode) return res.status(404).json({ error: 'Код активації eSIM не знайдено' });
+  try {
+    await sendEmail({ to: email, subject: 'Інструкція встановлення eSIM', html: `<p>Відкрий застосунок Сигнал → Профіль → Керування eSIM.</p><p>Код активації: <strong>${esim.activationCode}</strong></p><p>Не передавай цей код іншим людям.</p>` });
+    auditStore.log({ adminEmail: req.admin.email, action: 'esim_instructions_resent', target: email });
+    res.json({ ok: true });
+  } catch (error) { res.status(502).json({ error: error.message }); }
 });
 
 // Blocked users cannot sign in. Unblocking restores the exact status they had.

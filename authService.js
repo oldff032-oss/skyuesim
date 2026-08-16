@@ -150,7 +150,20 @@ function revokeOtherSessions(email, currentToken) {
   return revoked;
 }
 
-module.exports = { requestCode, verifyCode, setPassword, login, getSessionEmail, listSessions, revokeOtherSessions, requestPasswordReset, verifyResetCode, resetPassword };
+function revokeAllSessions(email) {
+  const store = readAll();
+  let revoked = 0;
+  for (const [token, session] of Object.entries(store.sessions)) {
+    if (session.email === email) {
+      delete store.sessions[token];
+      revoked += 1;
+    }
+  }
+  writeAll(store);
+  return revoked;
+}
+
+module.exports = { requestCode, verifyCode, setPassword, login, getSessionEmail, listSessions, revokeOtherSessions, revokeAllSessions, requestPasswordReset, verifyResetCode, resetPassword };
 
 // ---------- Забув(ла) пароль: запит коду ----------
 async function requestPasswordReset(email) {

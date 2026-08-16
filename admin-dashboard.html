@@ -28,6 +28,7 @@
 
       <div id="loading" class="shimmer" style="height:100px; margin-top:20px;"></div>
       <div class="stat-grid" id="stats" style="display:none;"></div>
+      <div id="ops" style="margin-top:22px;"></div>
     </main>
   </div>
 
@@ -63,7 +64,24 @@
         document.getElementById('loading').style.display = 'none';
       }
     }
-    load();
+    async function loadOps(){
+      try{
+        const res = await adminFetch('/api/admin/dashboard');
+        const data = await res.json(); if(!res.ok) return;
+        document.getElementById('ops').innerHTML = `
+          <div class="glass glass-card"><div style="font-family:'Space Grotesk',sans-serif;font-weight:700;">Операційна увага</div>
+            <div class="stat-grid" style="margin-top:14px;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));">
+              <div class="stat-card"><div class="num">${data.users.registeredToday}</div><div class="lbl">Реєстрацій за 24 год</div></div>
+              <div class="stat-card"><div class="num" style="color:var(--danger);">${data.esim.failed}</div><div class="lbl">Помилок eSIM</div></div>
+              <div class="stat-card"><div class="num" style="color:#f5a623;">${data.esim.highUsage}</div><div class="lbl">Трафік 80%+</div></div>
+              <div class="stat-card"><div class="num" style="color:var(--blue);">${data.tickets.unassigned}</div><div class="lbl">Тікетів без виконавця</div></div>
+              <div class="stat-card"><div class="num">${data.esim.expiringSoon}</div><div class="lbl">eSIM завершаться ≤7 днів</div></div>
+            </div>
+            ${data.recentTickets.length ? `<div style="margin-top:16px;">${data.recentTickets.map(ticket => `<a href="admin-ticket.html?id=${ticket.id}" style="display:flex;justify-content:space-between;gap:12px;padding:9px 0;border-top:1px solid var(--glass-border);color:var(--text);text-decoration:none;font-size:13px;"><span>#${ticket.id} · ${ticket.subject}</span><span class="muted">${ticket.assignedTo || 'не призначено'}</span></a>`).join('')}</div>` : ''}
+          </div>`;
+      }catch(e){}
+    }
+    load(); loadOps();
   </script>
 </body>
 </html>

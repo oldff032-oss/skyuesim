@@ -174,6 +174,7 @@
               </div>
             </div>
           </div>`;
+        loadAssignees(ticket);
       }catch(e){
         document.getElementById('loading').style.display = 'none';
       }
@@ -182,8 +183,20 @@
     async function updateTicket(){
       const status = document.getElementById('statusSelect').value;
       const priority = document.getElementById('prioritySelect').value;
-      await adminFetch(`/api/admin/tickets/${ticketId}`, { method:'PATCH', body: JSON.stringify({ status, priority }) });
+      const assignedTo = document.getElementById('assignedToSelect')?.value;
+      await adminFetch(`/api/admin/tickets/${ticketId}`, { method:'PATCH', body: JSON.stringify({ status, priority, assignedTo }) });
       load();
+    }
+
+    async function loadAssignees(ticket){
+      if(localStorage.getItem('signal_admin_role') === 'viewer') return;
+      try{
+        const res = await adminFetch('/api/admin/assignees'); const admins = await res.json();
+        if(!res.ok) return;
+        const sideCard = document.querySelector('.side > .glass');
+        if(!sideCard) return;
+        sideCard.insertAdjacentHTML('beforeend', `<div class="side-row"><div class="k">Виконавець</div><select id="assignedToSelect" onchange="updateTicket()"><option value="">Не призначено</option>${admins.map(admin => `<option value="${admin.email}" ${admin.email===ticket.assignedTo?'selected':''}>${admin.email} · ${admin.role}</option>`).join('')}</select></div>`);
+      }catch(e){}
     }
 
     async function sendReply(){

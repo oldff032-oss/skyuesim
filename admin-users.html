@@ -26,6 +26,12 @@
       <h1 style="font-size:22px;">Користувачі</h1>
       <p class="lead">Усі зареєстровані акаунти</p>
       <div class="filter-bar"><input type="text" id="search" placeholder="Пошук за email..." style="min-width:260px;"></div>
+      <div class="filter-bar" style="margin-top:10px;">
+        <select id="userStatusFilter"><option value="">Усі статуси</option><option value="active">Активні</option><option value="blocked">Заблоковані</option><option value="payment_ok_esim_failed">Помилка eSIM</option><option value="pending_payment">Очікують оплату</option></select>
+        <select id="userPlanFilter"><option value="">Усі тарифи</option><option value="basic">Basic</option><option value="standard">Standard</option><option value="unlimited">Unlimited</option></select>
+        <select id="userUsageFilter"><option value="">Будь-який трафік</option><option value="80">80%+ трафіку</option><option value="no_esim">Без eSIM</option></select>
+        <button class="btn ghost" style="width:auto;padding:9px 12px;font-size:12px;" onclick="exportCsv()">CSV</button>
+      </div>
       <div id="loading" class="shimmer" style="height:200px; margin-top:16px;"></div>
 
       <table class="admin-table" id="table" style="display:none;">
@@ -39,6 +45,7 @@
           <button class="icon-btn" type="button" onclick="closeUserDetails()" style="position:absolute;right:12px;top:12px;">×</button>
           <h2 style="font-size:18px;margin-right:36px;">Дані користувача</h2>
           <pre id="userDetailsContent" style="margin-top:16px;white-space:pre-wrap;word-break:break-word;font-family:'Space Mono',monospace;font-size:12px;color:var(--text-muted);"></pre>
+          <div id="userDetailsActions" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:16px;"></div>
         </div>
       </div>
     </main>
@@ -65,7 +72,7 @@
 
         allUsers = await res.json();
         document.getElementById('table').style.display = 'table';
-        render(allUsers);
+        applyFilters();
       } catch (error) {
         alert(error.message || 'Помилка завантаження');
       } finally {
@@ -78,7 +85,7 @@
         const subscription = user.subscription || {};
         const encodedEmail = encodeURIComponent(user.email);
 
-        const recoveryButton = !subscription.esim && subscription.status !== 'blocked'
+        const recoveryButton = subscription.status === 'payment_ok_esim_failed'
           ? `<button class="btn ${subscription.status === 'payment_ok_esim_failed' ? 'primary' : 'ghost'}"
                style="padding:7px 10px;font-size:12px;"
                onclick="recoverEsim('${encodedEmail}')">
@@ -189,6 +196,12 @@
           `Код активації: ${esim.activationCode || '—'}`,
         ];
         document.getElementById('userDetailsContent').textContent = lines.join('\n');
+        document.getElementById('userDetailsActions').innerHTML = `
+          <button class="btn ghost" style="width:auto;padding:9px 12px;font-size:12px;" onclick="adminUserAction('${encodedEmail}','resync-esim')">Оновити трафік</button>
+          <button class="btn ghost" style="width:auto;padding:9px 12px;font-size:12px;" onclick="adminUserAction('${encodedEmail}','resend-esim-instructions')">Інструкція eSIM</button>
+          <button class="btn ghost" style="width:auto;padding:9px 12px;font-size:12px;color:var(--danger);" onclick="adminUserAction('${encodedEmail}','revoke-sessions')">Завершити входи</button>
+          <button class="btn ghost" style="width:auto;padding:9px 12px;font-size:12px;" onclick="notifyUser('${encodedEmail}','push')">Push</button>
+          <button class="btn ghost" style="width:auto;padding:9px 12px;font-size:12px;" onclick="notifyUser('${encodedEmail}','email')">Email</button>`;
         document.getElementById('userDetailsModal').style.display = 'block';
       } catch (error) {
         alert(error.message || 'Помилка завантаження даних користувача');
@@ -199,10 +212,51 @@
       document.getElementById('userDetailsModal').style.display = 'none';
     }
 
-    document.getElementById('search').addEventListener('input', (event) => {
-      const query = event.target.value.toLowerCase();
-      render(allUsers.filter((user) => user.email.toLowerCase().includes(query)));
-    });
+    async function adminUserAction(encodedEmail, action) {
+      const email = decodeURIComponent(encodedEmail);
+      if(action === 'revoke-sessions' && !confirm(`Завершити всі активні входи ${email}?`)) return;
+      try {
+        const res = await adminFetch(`/api/admin/users/${encodedEmail}/${action}`, { method: 'POST' });
+        const data = await res.json();
+        if(!res.ok) throw new Error(data.error || 'Дію не виконано');
+        alert(action === 'revoke-sessions' ? `Завершено входів: ${data.revoked}` : 'Готово');
+        await showUserDetails(encodedEmail); await load();
+      } catch(error) { alert(error.message); }
+    }
+
+    async function notifyUser(encodedEmail, channel) {
+      const email = decodeURIComponent(encodedEmail);
+      const title = prompt('Заголовок повідомлення:', 'Сигнал');
+      if(title === null) return;
+      const message = prompt(`Текст для ${email}:`);
+      if(!message) return;
+      try {
+        const res = await adminFetch(`/api/admin/users/${encodedEmail}/notify`, { method:'POST', body:JSON.stringify({ channel, title, message }) });
+        const data = await res.json(); if(!res.ok) throw new Error(data.error || 'Не вдалося надіслати');
+        alert(channel === 'push' && !data.delivered ? 'Push-пристрій не підключено.' : 'Повідомлення надіслано.');
+      } catch(error) { alert(error.message); }
+    }
+
+    function applyFilters(){
+      const query = document.getElementById('search').value.toLowerCase();
+      const status = document.getElementById('userStatusFilter').value;
+      const plan = document.getElementById('userPlanFilter').value;
+      const usage = document.getElementById('userUsageFilter').value;
+      render(allUsers.filter((user) => {
+        const subscription = user.subscription || {}; const esim = subscription.esim || {};
+        const percent = esim.dataLimitGb ? (Number(esim.usedGb || 0) / Number(esim.dataLimitGb)) * 100 : 0;
+        return user.email.toLowerCase().includes(query) && (!status || subscription.status === status) && (!plan || subscription.plan === plan) && (!usage || (usage === 'no_esim' ? !subscription.esim : percent >= Number(usage)));
+      }));
+    }
+
+    function exportCsv(){
+      const rows = [['Email','Тариф','Статус','Використано ГБ','Ліміт ГБ'], ...allUsers.map(user => [user.email, user.subscription?.plan || '', user.subscription?.status || '', user.subscription?.esim?.usedGb ?? '', user.subscription?.esim?.dataLimitGb ?? ''])];
+      const blob = new Blob([rows.map(row => row.map(value => `"${String(value).replace(/"/g,'""')}"`).join(',')).join('\n')], {type:'text/csv;charset=utf-8'});
+      const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = 'signal-users.csv'; link.click(); URL.revokeObjectURL(url);
+    }
+
+    document.getElementById('search').addEventListener('input', applyFilters);
+    ['userStatusFilter','userPlanFilter','userUsageFilter'].forEach((id) => document.getElementById(id).addEventListener('change', applyFilters));
 
     load();
   </script>
