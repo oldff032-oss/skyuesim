@@ -9,7 +9,7 @@ const cors = require('cors');
 
 const { createCheckoutSession, createCustomPackageCheckout, cancelSubscription, constructWebhookEvent, getNextBillingDate, getBillingHistory } = require('./stripeService');
 const crypto = require('crypto');
-const { provisionEsim, checkUsage, recoverEsim, listPackages } = require('./esimService');
+const { provisionEsim, checkUsage, recoverEsim, topupEsim, listPackages } = require('./esimService');
 const { bootstrap: bootstrapUsers, getUser, saveUser, deleteUser, getUserByStripeCustomerId, getAllUsers } = require('./db');
 const storage = require('./persistentState');
 const authStore = require('./authStore');
@@ -33,7 +33,7 @@ app.use(cors());
 // тому для цього одного маршруту JSON-парсер вимикаємо.
 app.use('/api/webhook', express.raw({ type: 'application/json' }));
 app.use('/api/inbound-email', express.raw({ type: 'application/json' }));
-app.use(express.json());
+app.use(express.json({ limit: '1mb' }));
 
 // =========================================================
 // АВТЕНТИФІКАЦІЯ: email -> код -> пароль -> акаунт, і логін
@@ -44,7 +44,7 @@ app.post('/api/auth/request-code', async (req, res) => {
     const { email } = req.body;
     if (!email || !email.includes('@')) return res.status(400).json({ error: 'Введи коректний email' });
     if (operationsStore.store().blacklist.emails.includes(email.toLowerCase())) return res.status(403).json({ error: 'Цей email недоступний для реєстрації' });
-    await authService.requestCode(email, req.body?.language);
+    await authService.requestCode(email, req.body?.language, req.body?.referralCode, { displayName: req.body?.displayName, avatarDataUrl: req.body?.avatarDataUrl });
     res.json({ sent: true });
   } catch (err) {
     const status = err.code === 'COOLDOWN' ? 429 : 500;
@@ -159,6 +159,11 @@ app.get('/api/account/referral', requireUserSession, (req, res) => {
   const referralCode = user.referralCode || crypto.randomBytes(4).toString('hex').toUpperCase();
   if (!user.referralCode) saveUser(req.userEmail, { referralCode });
   res.json({ code: referralCode, referrals: user.referrals || [] });
+});
+
+app.get('/api/account/referral-status', requireUserSession, (req, res) => {
+  const user = getUser(req.userEmail);
+  res.json({ referredBy: user?.referredBy || null, rewardStatus: user?.referralRewardStatus || null, rewardPackageCode: user?.referralRewardPackageCode || null });
 });
 
 app.post('/api/account/feedback', requireUserSession, (req, res) => {
@@ -680,6 +685,43 @@ app.post('/api/admin/users/:email/custom-package-checkout', adminAuth.requireAdm
   } catch (error) { res.status(502).json({ error: error.message }); }
 });
 
+app.get('/api/admin/referrals', adminAuth.requireAdmin, adminAuth.requireRole('super_admin', 'admin'), (req, res) => {
+  res.json(Object.values(getAllUsers()).filter((user) => user.referredBy).map((user) => ({ email: user.email, referredBy: user.referredBy, status: user.referralRewardStatus || 'pending_first_payment', packageCode: user.referralRewardPackageCode || null, createdAt: user.createdAt || null })));
+});
+
+app.post('/api/admin/referrals/:email/prepare-reward', adminAuth.requireAdmin, adminAuth.requireRole('super_admin', 'admin'), async (req, res) => {
+  const email = req.params.email;
+  const user = getUser(email);
+  const packageCode = String(req.body?.packageCode || '').trim();
+  if (!user?.referredBy) return res.status(404).json({ error: 'Запрошення для цього користувача не знайдено' });
+  if (!/^[A-Za-z0-9_-]{3,80}$/.test(packageCode)) return res.status(400).json({ error: 'Вкажіть коректний packageCode бонусу' });
+  saveUser(email, { referralRewardStatus: 'waiting_12_24h', referralRewardPackageCode: packageCode, referralRewardPreparedAt: new Date().toISOString() });
+  const inviter = getUser(user.referredBy);
+  if (inviter?.referrals) saveUser(inviter.email, { referrals: inviter.referrals.map((item) => item.email === email ? { ...item, status: 'waiting_12_24h', packageCode } : item) });
+  sendToEmail(email, { title: 'Винагорода за запрошення', body: 'Винагорода буде нарахована протягом 12–24 годин.', url: '/profile.html', tag: 'referral-reward' }).catch(() => {});
+  auditStore.log({ adminEmail: req.admin.email, action: 'referral_reward_prepared', target: email, details: { packageCode } });
+  res.json({ ok: true, status: 'waiting_12_24h' });
+});
+
+app.post('/api/admin/referrals/:email/credit-reward', adminAuth.requireAdmin, adminAuth.requireRole('super_admin', 'admin'), async (req, res) => {
+  const invitedEmail = req.params.email;
+  const invited = getUser(invitedEmail);
+  const packageCode = String(req.body?.packageCode || invited?.referralRewardPackageCode || '').trim();
+  if (!invited?.referredBy) return res.status(404).json({ error: 'Запрошення для цього користувача не знайдено' });
+  if (invited.referralRewardStatus === 'credited_to_inviter') return res.status(409).json({ error: 'Винагороду вже нараховано' });
+  const inviter = getUser(invited.referredBy);
+  if (!inviter?.esim?.orderNo || (!inviter.esim.esimTranNo && !inviter.esim.iccid)) return res.status(409).json({ error: 'У того, хто запросив, немає активної eSIM для поповнення' });
+  try {
+    const topup = await topupEsim({ esimTranNo: inviter.esim.esimTranNo, iccid: inviter.esim.iccid, packageCode });
+    saveUser(inviter.email, { esim: { ...inviter.esim, ...(topup.iccid ? { iccid: topup.iccid } : {}), ...(topup.totalGb != null ? { dataLimitGb: topup.totalGb } : {}), ...(topup.usedGb != null ? { usedGb: topup.usedGb } : {}), ...(topup.remainingGb != null ? { remainingGb: topup.remainingGb } : {}), ...(topup.expiredTime ? { expiredTime: topup.expiredTime } : {}), lastTopupAt: new Date().toISOString(), lastTopupPackageCode: packageCode } });
+    saveUser(invitedEmail, { referralRewardStatus: 'credited_to_inviter', referralRewardCreditedAt: new Date().toISOString() });
+    if (inviter.referrals) saveUser(inviter.email, { referrals: inviter.referrals.map((item) => item.email === invitedEmail ? { ...item, status: 'credited', packageCode, creditedAt: new Date().toISOString() } : item) });
+    sendToEmail(inviter.email, { title: 'Винагороду нараховано', body: 'Тобі нараховано реферальний бонус 1 ГБ.', url: '/usage.html', tag: 'referral-credited' }).catch(() => {});
+    auditStore.log({ adminEmail: req.admin.email, action: 'referral_reward_credited', target: inviter.email, details: { invitedEmail, packageCode, transactionId: topup.transactionId } });
+    res.json({ ok: true, beneficiary: inviter.email, topup });
+  } catch (error) { res.status(502).json({ error: error.message }); }
+});
+
 app.post('/api/admin/users/:email/resync-esim', adminAuth.requireAdmin, adminAuth.requireRole('super_admin', 'admin'), async (req, res) => {
   const email = req.params.email;
   const user = getUser(email);
@@ -827,6 +869,7 @@ app.post('/api/webhook', async (req, res) => {
       const packageCode = session.metadata.packageCode || '';
       const dataLimitGb = session.metadata.dataLimitGb === '' ? null : Number(session.metadata.dataLimitGb);
       const esim = await provisionEsim({ email, plan, packageCode, dataLimitGb });
+      esim.dashboardQrExpiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
 
       saveUser(email, {
         status: 'active',

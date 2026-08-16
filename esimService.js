@@ -386,4 +386,30 @@ function usageResult(usedBytes, totalBytes, profile, usageDetails = null) {
   };
 }
 
-module.exports = { provisionEsim, checkUsage, recoverEsim, listPackages };
+// Adds a provider top-up package to an existing eSIM. Unlike /order, this
+// does not issue a second profile; it increases the existing profile balance.
+async function topupEsim({ esimTranNo = '', iccid = '', packageCode }) {
+  if (isConfiguredMockMode()) throw new EsimAccessError('Cannot top up a real eSIM while mock mode is enabled.', { code: 'MOCK_MODE' });
+  if (!esimTranNo && !iccid) throw new EsimAccessError('eSIM UID or ICCID is required for top-up.', { code: 'ESIM_ID_REQUIRED' });
+  if (!/^[A-Za-z0-9_-]{3,80}$/.test(String(packageCode || ''))) throw new EsimAccessError('A valid top-up package code is required.', { code: 'PACKAGE_CODE_INVALID' });
+  const result = await esimAccessRequest('/api/v1/open/esim/topup', {
+    esimTranNo: String(esimTranNo || ''),
+    iccid: String(iccid || ''),
+    packageCode: String(packageCode),
+    transactionId: transactionId(),
+  });
+  const topup = result?.obj || {};
+  const totalBytes = bytes(topup.totalVolume);
+  const usedBytes = bytes(topup.orderUsage);
+  return {
+    transactionId: topup.transactionId || null,
+    iccid: topup.iccid || iccid || null,
+    totalGb: totalBytes == null ? null : bytesToGb(totalBytes),
+    usedGb: usedBytes == null ? null : bytesToGb(usedBytes),
+    remainingGb: totalBytes == null || usedBytes == null ? null : Math.max(0, +(bytesToGb(totalBytes) - bytesToGb(usedBytes)).toFixed(2)),
+    expiredTime: topup.expiredTime || null,
+    totalDuration: topup.totalDuration || null,
+  };
+}
+
+module.exports = { provisionEsim, checkUsage, recoverEsim, topupEsim, listPackages };

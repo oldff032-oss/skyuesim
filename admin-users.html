@@ -107,7 +107,7 @@
           <td>${escapeHtml(user.email)}</td>
           <td>${user.createdAt ? new Date(user.createdAt).toLocaleDateString('uk-UA') : '—'}</td>
           <td>${escapeHtml(subscription.plan || '—')}</td>
-          <td>${escapeHtml(subscription.status || 'Немає підписки')}</td>
+          <td>${escapeHtml(subscription.status || 'Немає підписки')}${subscription.referredBy ? '<br><span class="muted" style="font-size:11px;">🎁 Запрошення</span>' : ''}</td>
           <td>${usage}</td>
           <td style="display:flex;gap:6px;flex-wrap:wrap;">${detailsButton}${recoveryButton}${blockButton}</td>
         </tr>`;
@@ -178,6 +178,9 @@
           `Останній вхід: ${data.account?.lastLoginAt ? new Date(data.account.lastLoginAt).toLocaleString('uk-UA') : '—'}`,
           `Тариф: ${subscription.plan || '—'}`,
           `Статус: ${subscription.status || '—'}`,
+          `Запросив: ${subscription.referredBy || '—'}`,
+          `Винагорода: ${subscription.referralRewardStatus || '—'}`,
+          `Код бонусу: ${subscription.referralRewardPackageCode || '—'}`,
           `Оновлено: ${subscription.updatedAt ? new Date(subscription.updatedAt).toLocaleString('uk-UA') : '—'}`,
           '',
           'eSIM',
@@ -199,6 +202,8 @@
           <button class="btn ghost" style="width:auto;padding:9px 12px;font-size:12px;" onclick="adminUserAction('${encodedEmail}','resend-esim-instructions')">Інструкція eSIM</button>
           <button class="btn primary" style="width:auto;padding:9px 12px;font-size:12px;" onclick="recoverEsim('${encodedEmail}','${subscription.plan || 'basic'}')">Відновити eSIM</button>
           <button class="btn ghost" style="width:auto;padding:9px 12px;font-size:12px;" onclick="createCustomPackageCheckout('${encodedEmail}')">Продати пакет eSIM</button>
+          ${subscription.referredBy ? `<button class="btn ghost" style="width:auto;padding:9px 12px;font-size:12px;" onclick="prepareReferralReward('${encodedEmail}')">Підготувати 1 ГБ</button>` : ''}
+          ${subscription.referredBy ? `<button class="btn primary" style="width:auto;padding:9px 12px;font-size:12px;" onclick="creditReferralReward('${encodedEmail}')">Нарахувати 1 ГБ рефералу</button>` : ''}
           <button class="btn ghost" style="width:auto;padding:9px 12px;font-size:12px;color:var(--danger);" onclick="adminUserAction('${encodedEmail}','revoke-sessions')">Завершити входи</button>
           <button class="btn ghost" style="width:auto;padding:9px 12px;font-size:12px;" onclick="notifyUser('${encodedEmail}','push')">Push</button>
           <button class="btn ghost" style="width:auto;padding:9px 12px;font-size:12px;" onclick="notifyUser('${encodedEmail}','email')">Email</button>`;
@@ -232,6 +237,31 @@
         if (!response.ok) throw new Error(data.error || 'Не вдалося створити оплату');
         await navigator.clipboard?.writeText(data.url);
         prompt('Stripe-посилання створено й скопійовано. Надішли його користувачу:', data.url);
+      } catch (error) { alert(error.message); }
+    }
+
+    async function prepareReferralReward(encodedEmail) {
+      const packageCode = prompt('Введіть packageCode top-up пакета на 1 ГБ з eSIM Access:');
+      if (!packageCode) return;
+      try {
+        const response = await adminFetch(`/api/admin/referrals/${encodedEmail}/prepare-reward`, { method: 'POST', body: JSON.stringify({ packageCode: packageCode.trim() }) });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Не вдалося підготувати винагороду');
+        alert('Готово. Користувач отримав статус: винагорода очікується 12–24 години.');
+        await showUserDetails(encodedEmail); await load();
+      } catch (error) { alert(error.message); }
+    }
+
+    async function creditReferralReward(encodedEmail) {
+      const packageCode = prompt('Введіть packageCode top-up пакета на 1 ГБ. Він буде застосований до eSIM того, хто запросив друга:');
+      if (!packageCode) return;
+      if (!confirm('Підтвердити реальне поповнення eSIM на 1 ГБ? Цю дію не можна скасувати.')) return;
+      try {
+        const response = await adminFetch(`/api/admin/referrals/${encodedEmail}/credit-reward`, { method: 'POST', body: JSON.stringify({ packageCode: packageCode.trim() }) });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Не вдалося нарахувати винагороду');
+        alert(`Готово. 1 ГБ нараховано користувачу ${data.beneficiary}.`);
+        await showUserDetails(encodedEmail); await load();
       } catch (error) { alert(error.message); }
     }
 

@@ -90,6 +90,11 @@
     if(!email){ window.location.href = 'login.html'; }
     document.getElementById('emailShown').textContent = email;
     document.getElementById('avatarLetter').textContent = email[0].toUpperCase();
+    fetch(`${API_URL}/api/status?email=${encodeURIComponent(email)}`).then(response => response.json()).then(user => {
+      const name = user.displayName || email;
+      document.getElementById('emailShown').textContent = name;
+      if(user.avatarDataUrl){ const avatar=document.getElementById('avatarLetter'); avatar.textContent=''; avatar.style.backgroundImage=`url("${user.avatarDataUrl}")`; avatar.style.backgroundSize='cover'; avatar.style.backgroundPosition='center'; }
+    }).catch(()=>{});
 
     function logout(){
       localStorage.removeItem('signal_session_token');

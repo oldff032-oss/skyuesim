@@ -28,9 +28,22 @@
       <select id="language" style="width:100%;background:rgba(255,255,255,.04);border:1.5px solid var(--border);border-radius:14px;padding:15px 16px;color:var(--text);font-size:15px;"><option value="uk">Українська</option><option value="en">English</option></select>
     </div>
     <div class="field-group">
+      <label class="field-label">Ім’я</label>
+      <input type="text" id="displayName" placeholder="Як до тебе звертатися" autocomplete="name" maxlength="60" />
+    </div>
+    <div class="field-group">
+      <label class="field-label">Фото профілю <span class="muted">(необов’язково)</span></label>
+      <input type="file" id="avatar" accept="image/png,image/jpeg,image/webp" style="padding:12px;" />
+      <div class="muted" style="font-size:11px;margin-top:6px;">PNG, JPG або WebP до 500 КБ</div>
+    </div>
+    <div class="field-group">
       <label class="field-label">Email</label>
       <input type="email" id="email" placeholder="you@example.com" autocomplete="email" />
       <div class="err-text" id="err" style="display:none;"></div>
+    </div>
+    <div class="field-group">
+      <label class="field-label">Код запрошення <span class="muted">(необов’язково)</span></label>
+      <input type="text" id="referralCode" placeholder="Наприклад: A1B2C3D4" autocomplete="off" maxlength="32" />
     </div>
 
     <button class="btn" id="continueBtn" style="margin-top:24px;" onclick="requestCode()">Continue</button>
@@ -43,6 +56,8 @@
       const emailInput = document.getElementById('email');
       const email = emailInput.value.trim();
       const language = document.getElementById('language').value;
+      const referralCode = document.getElementById('referralCode').value.trim().toUpperCase();
+      const displayName = document.getElementById('displayName').value.trim();
       const err = document.getElementById('err');
       const btn = document.getElementById('continueBtn');
       err.style.display = 'none';
@@ -54,20 +69,24 @@
         emailInput.classList.add('error');
         return;
       }
+      if(!displayName){ err.textContent = 'Введи ім’я'; err.style.display = 'flex'; return; }
 
       btn.classList.add('loading');
       btn.textContent = 'Надсилаємо код...';
 
       try{
+        const file = document.getElementById('avatar').files[0];
+        const avatarDataUrl = await readAvatar(file);
         const res = await fetch(`${API_URL}/api/auth/request-code`, {
           method:'POST', headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({ email, language })
+          body: JSON.stringify({ email, language, referralCode, displayName, avatarDataUrl })
         });
         const data = await res.json();
         if(!res.ok) throw new Error(data.error || 'Помилка сервера');
 
         localStorage.setItem('signal_pending_email', email);
         localStorage.setItem('signal_language', language);
+        if(referralCode) localStorage.setItem('signal_referral_code', referralCode);
         window.location.href = 'verify-code.html';
       }catch(e){
         err.textContent = e.message;
@@ -78,6 +97,13 @@
     }
 
     document.getElementById('email').addEventListener('keydown', e => { if(e.key === 'Enter') requestCode(); });
+    function readAvatar(file){
+      if(!file) return Promise.resolve(null);
+      if(!['image/png','image/jpeg','image/webp'].includes(file.type) || file.size > 500 * 1024) return Promise.reject(new Error('Фото має бути PNG, JPG або WebP до 500 КБ'));
+      return new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(new Error('Не вдалося прочитати фото'));reader.readAsDataURL(file);});
+    }
+    const refFromLink = new URLSearchParams(window.location.search).get('ref');
+    if(refFromLink) document.getElementById('referralCode').value = refFromLink.trim().toUpperCase();
   </script>
 </body>
 </html>

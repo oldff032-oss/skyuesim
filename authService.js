@@ -6,7 +6,7 @@
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const { readAll, writeAll } = require('./authStore');
-const { getUser, saveUser } = require('./db');
+const { getUser, saveUser, getAllUsers } = require('./db');
 const { sendVerificationCode } = require('./emailService');
 
 const CODE_TTL_MS = 10 * 60 * 1000; // 10 хвилин
@@ -33,7 +33,7 @@ function createSession(store, email, deviceName) {
 }
 
 // ---------- Крок 1: запит коду ----------
-async function requestCode(email, language = 'uk') {
+async function requestCode(email, language = 'uk', referralCode = '', profile = {}) {
   const store = readAll();
   const existing = store.codes[email];
 
@@ -43,7 +43,9 @@ async function requestCode(email, language = 'uk') {
   }
 
   const code = randomCode();
-  store.codes[email] = { code, sentAt: Date.now(), attempts: 0, language: language === 'en' ? 'en' : 'uk' };
+  const displayName = String(profile?.displayName || existing?.displayName || '').trim().slice(0, 60);
+  const avatarDataUrl = typeof profile?.avatarDataUrl === 'string' && /^data:image\/(png|jpeg|webp);base64,/i.test(profile.avatarDataUrl) && profile.avatarDataUrl.length <= 700000 ? profile.avatarDataUrl : (existing?.avatarDataUrl || null);
+  store.codes[email] = { code, sentAt: Date.now(), attempts: 0, language: language === 'en' ? 'en' : 'uk', referralCode: String(referralCode || existing?.referralCode || '').trim().toUpperCase().slice(0, 32), displayName, avatarDataUrl };
   writeAll(store);
 
   await sendVerificationCode(email, code);
@@ -69,7 +71,7 @@ function verifyCode(email, code) {
   // Код правильний -> видаємо тимчасовий токен для встановлення пароля
   delete store.codes[email];
   const verifyToken = randomToken();
-  store.verifyTokens[verifyToken] = { email, language: entry.language || 'uk', createdAt: Date.now() };
+  store.verifyTokens[verifyToken] = { email, language: entry.language || 'uk', referralCode: entry.referralCode || '', displayName: entry.displayName || '', avatarDataUrl: entry.avatarDataUrl || null, createdAt: Date.now() };
   writeAll(store);
 
   return { verifyToken };
@@ -89,7 +91,9 @@ async function setPassword(verifyToken, password, deviceName) {
   // Keep the account visible immediately after registration, but never replace
   // an existing subscription/eSIM when an account is restored with the same email.
   if (!getUser(entry.email)) {
-    saveUser(entry.email, { email: entry.email, status: 'registered', language: entry.language || 'uk', createdAt: new Date().toISOString() });
+    const inviter = Object.values(getAllUsers()).find((user) => user.referralCode && user.referralCode === entry.referralCode && user.email !== entry.email);
+    saveUser(entry.email, { email: entry.email, status: 'registered', language: entry.language || 'uk', displayName: entry.displayName || '', avatarDataUrl: entry.avatarDataUrl || null, createdAt: new Date().toISOString(), ...(inviter ? { referredBy: inviter.email, referralRewardStatus: 'pending_first_payment' } : {}) });
+    if (inviter) saveUser(inviter.email, { referrals: [...(inviter.referrals || []), { email: entry.email, createdAt: new Date().toISOString(), status: 'pending_first_payment' }] });
   } else {
     saveUser(entry.email, { language: entry.language || 'uk' });
   }

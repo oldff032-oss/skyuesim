@@ -27,11 +27,16 @@
     </div>
 
     <h1 style="margin-top:24px; font-size:24px;">Account <em>ready</em></h1>
-    <p class="lead" style="max-width:280px; margin:10px auto 32px;">Твій акаунт створено. Тепер оформи підписку і отримай доступ до інтернету по всій Європі.</p>
+    <p class="lead" style="max-width:280px; margin:10px auto 18px;">Твій акаунт створено. Тепер оформи підписку і отримай доступ до інтернету по всій Європі.</p>
+    <div id="referralNotice" class="glass" style="display:none;max-width:320px;padding:14px;margin-bottom:18px;font-size:13px;line-height:1.5;"></div>
 
     <div style="width:100%; max-width:320px;">
       <a class="btn" href="device-check.html">Продовжити</a>
     </div>
   </div>
+  <script src="config.js"></script>
+  <script>
+    (async()=>{ try { const response=await fetch(`${API_URL}/api/account/referral-status`,{headers:{'x-session-token':localStorage.getItem('signal_session_token')}}); const data=await response.json(); if(data.referredBy){const notice=document.getElementById('referralNotice');notice.style.display='block';notice.innerHTML='🎁 <b>Код запрошення прийнято</b><br>Винагорода буде нарахована протягом 12–24 годин.';} }catch(e){} })();
+  </script>
 </body>
 </html>

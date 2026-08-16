@@ -43,6 +43,7 @@
     ,'Історія оплат': 'Payment history', 'Квитанції та статус твоїх платежів Stripe': 'Receipts and status of your Stripe payments', 'Квитанція': 'Receipt', 'Оплат ще немає.': 'No payments yet.'
     ,'Подорожі та інструменти': 'Travel and tools', 'Все важливе для поїздки та зв’язку': 'Everything important for travel and connectivity', 'Карта покриття та Travel Mode': 'Coverage map and Travel Mode', 'Діагностика інтернету': 'Internet diagnostics', 'Запросити друга': 'Invite a friend', 'Статус сервісу': 'Service status', 'Оцінити застосунок': 'Rate the app', 'Змінити тему': 'Change theme', 'Історія використання': 'Usage history'
     ,'Запустити перевірку': 'Run check', 'Поділитися': 'Share', 'Надіслати оцінку': 'Send rating', 'Усі сервіси працюють': 'All services are operational', 'Технічні роботи': 'Maintenance'
+    ,'Код запрошення': 'Invitation code', 'Код запрошення прийнято': 'Invitation code accepted', 'Винагорода буде нарахована протягом 12–24 годин.': 'Your reward will be credited within 12–24 hours.'
   };
 
   const translate = (value) => phrases[value.trim()] || value;

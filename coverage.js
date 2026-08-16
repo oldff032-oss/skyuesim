@@ -13,6 +13,13 @@
       if (lead) lead.innerHTML = '<a href="profile.html" style="color:var(--cyan);text-decoration:none;">← Повернутися до профілю</a>';
     }
     const select = document.getElementById('country');
+    window.shareReferral = () => {
+      const code = document.querySelector('#referralResult b')?.textContent || '';
+      const link = `${window.location.origin}/register-email.html?ref=${encodeURIComponent(code)}`;
+      const text = `Спробуй Signal eSIM. Мій код: ${code}\n${link}`;
+      if (navigator.share) return navigator.share({ title: 'Signal eSIM', text, url: link });
+      return navigator.clipboard?.writeText(text).then(() => alert('Код і посилання скопійовано'));
+    };
     if (!select) return;
     [...select.options].forEach((option) => { if (codes[option.textContent]) option.value = codes[option.textContent]; });
     window.saveTravel = async () => {
