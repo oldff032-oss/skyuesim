@@ -24,9 +24,9 @@ function addMessage(id, { from, text, attachment }) {
 }
 function updateTicket(id, patch) { const ticket = getTicket(id); if (!ticket) return null; Object.assign(ticket, patch, { updatedAt: new Date().toISOString() }); writeAll(store); return ticket; }
 function deleteTicket(id) {
-  const index = store.findIndex(ticket => ticket.id === id);
+  const index = store.tickets.findIndex(ticket => ticket.id === Number(id));
   if (index < 0) return null;
-  const [deleted] = store.splice(index, 1);
+  const [deleted] = store.tickets.splice(index, 1);
   writeAll(store);
   return deleted;
 }
