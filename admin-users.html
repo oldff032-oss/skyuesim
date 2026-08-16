@@ -340,15 +340,19 @@
         if (reasonChoice === null) return;
         const reason = ({ '1':'requested_by_customer', '2':'duplicate', '3':'fraudulent' })[reasonChoice];
         if (!reason) return alert('Некоректна причина.');
-        const confirmationEmail = prompt(`УВАГА: Stripe поверне ${(amount / 100).toFixed(2)} ${payment.currency.toUpperCase()} на початковий спосіб оплати. Цю дію не можна скасувати.\n\nВведіть точний email ${email} для підтвердження:`);
+        const confirmationEmail = prompt(`УВАГА: Stripe поверне ${(amount / 100).toFixed(2)} ${payment.currency.toUpperCase()} на початковий спосіб оплати, а всі активні підписки цього email будуть скасовані НЕГАЙНО. Цю дію не можна скасувати.\n\nВведіть точний email ${email} для підтвердження:`);
         if (confirmationEmail === null) return;
         if (confirmationEmail.trim().toLowerCase() !== email.toLowerCase()) return alert('Email не збігається. Повернення скасовано.');
-        if (!confirm('Останнє підтвердження: виконати реальне повернення коштів у Stripe?')) return;
+        if (!confirm('Останнє підтвердження: повернути кошти та негайно скасувати всі Stripe-підписки користувача?')) return;
         const requestId = (crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`).replace(/[^A-Za-z0-9-]/g, '');
         const refundResponse = await adminFetch(`/api/admin/users/${encodedEmail}/refund`, { method:'POST', body:JSON.stringify({ chargeId:payment.id, amount, reason, confirmationEmail, requestId }) });
         const refundData = await refundResponse.json();
         if (!refundResponse.ok) throw new Error(refundData.error || 'Stripe не виконав повернення');
-        alert(`Повернення створено.\nStripe ID: ${refundData.refund.id}\nСума: ${(refundData.refund.amount / 100).toFixed(2)} ${refundData.refund.currency.toUpperCase()}\nСтатус: ${refundData.refund.status}\n\nПідписка користувача не скасована.`);
+        const subscriptionResult = refundData.subscription?.canceled
+          ? `Підписку скасовано негайно. Закрито підписок: ${refundData.subscription.canceledCount}.`
+          : `УВАГА: кошти повернено, але не всі підписки вдалося скасувати. Перевір Stripe Dashboard вручну. Помилка: ${(refundData.subscription?.errors || []).map(item => item.error).join('; ')}`;
+        alert(`Повернення створено.\nStripe ID: ${refundData.refund.id}\nСума: ${(refundData.refund.amount / 100).toFixed(2)} ${refundData.refund.currency.toUpperCase()}\nСтатус: ${refundData.refund.status}\n\n${subscriptionResult}`);
+        await showUserDetails(encodedEmail); await load();
       } catch (error) { alert(error.message); }
     }
 

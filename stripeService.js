@@ -111,6 +111,26 @@ async function refundPayment({ customerIds, chargeId, amount, reason = 'requeste
   return stripe.refunds.create({ charge: chargeId, amount, reason, metadata }, idempotencyKey ? { idempotencyKey } : undefined);
 }
 
+async function cancelAllSubscriptionsForCustomers(customerIds) {
+  const subscriptions = [];
+  for (const customer of [...new Set(customerIds || [])]) {
+    const list = await stripe.subscriptions.list({ customer, status: 'all', limit: 100 });
+    subscriptions.push(...list.data);
+  }
+  const cancelable = [...new Map(subscriptions.map(subscription => [subscription.id, subscription])).values()]
+    .filter(subscription => !['canceled','incomplete_expired'].includes(subscription.status));
+  const canceled = [], errors = [];
+  for (const subscription of cancelable) {
+    try {
+      const result = await stripe.subscriptions.cancel(subscription.id);
+      canceled.push({ id: result.id, status: result.status, canceledAt: result.canceled_at ? new Date(result.canceled_at * 1000).toISOString() : new Date().toISOString() });
+    } catch (error) {
+      errors.push({ id: subscription.id, error: error.message });
+    }
+  }
+  return { canceled, errors };
+}
+
 // Read-only evidence for a Super Admin reviewing an account recovery request.
 // Only non-sensitive card metadata is returned; full card data never reaches us.
 async function getRecoveryPaymentEvidence(customerId) {
@@ -153,4 +173,4 @@ function constructWebhookEvent(rawBody, signature) {
   );
 }
 
-module.exports = { createCheckoutSession, createCustomPackageCheckout, cancelSubscription, deleteStripeCustomer, constructWebhookEvent, getNextBillingDate, getBillingHistory, getRecoveryPaymentEvidence, findCustomerIdsByEmail, listRefundablePaymentsByEmail, refundPayment };
+module.exports = { createCheckoutSession, createCustomPackageCheckout, cancelSubscription, cancelAllSubscriptionsForCustomers, deleteStripeCustomer, constructWebhookEvent, getNextBillingDate, getBillingHistory, getRecoveryPaymentEvidence, findCustomerIdsByEmail, listRefundablePaymentsByEmail, refundPayment };

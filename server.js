@@ -9,7 +9,7 @@ const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const { generateRegistrationOptions, verifyRegistrationResponse } = require('@simplewebauthn/server');
 
-const { createCheckoutSession, createCustomPackageCheckout, cancelSubscription, deleteStripeCustomer, constructWebhookEvent, getNextBillingDate, getBillingHistory, getRecoveryPaymentEvidence, findCustomerIdsByEmail, listRefundablePaymentsByEmail, refundPayment } = require('./stripeService');
+const { createCheckoutSession, createCustomPackageCheckout, cancelSubscription, cancelAllSubscriptionsForCustomers, deleteStripeCustomer, constructWebhookEvent, getNextBillingDate, getBillingHistory, getRecoveryPaymentEvidence, findCustomerIdsByEmail, listRefundablePaymentsByEmail, refundPayment } = require('./stripeService');
 const crypto = require('crypto');
 const { provisionEsim, checkUsage, recoverEsim, topupEsim, listPackages, findRenewalTopup } = require('./esimService');
 const { bootstrap: bootstrapUsers, getUser, saveUser, deleteUser, getUserByStripeCustomerId, getAllUsers } = require('./db');
@@ -819,8 +819,23 @@ app.post('/api/admin/users/:email/refund', adminAuth.requireAdmin, adminAuth.req
       metadata: { signal_user_email: email, signal_admin_email: req.admin.email },
       idempotencyKey: `signal-admin-refund-${requestId}`,
     });
-    auditStore.log({ adminEmail:req.admin.email, action:'stripe_refund_created', target:email, details:{ refundId:refund.id, chargeId, amount:refund.amount, currency:refund.currency, status:refund.status, reason } });
-    res.json({ ok:true, refund:{ id:refund.id, amount:refund.amount, currency:refund.currency, status:refund.status } });
+    let canceledSubscriptions = [], cancellationErrors = [];
+    try {
+      const cancellation = await cancelAllSubscriptionsForCustomers(customerIds);
+      canceledSubscriptions = cancellation.canceled;
+      cancellationErrors = cancellation.errors;
+      if (!cancellationErrors.length) saveUser(email, {
+          status: 'canceled',
+          canceledAt: new Date().toISOString(),
+          canceledReason: 'admin_refund',
+          lastRefund: { id:refund.id, chargeId, amount:refund.amount, currency:refund.currency, status:refund.status, createdAt:new Date().toISOString() },
+        });
+    } catch (error) {
+      cancellationErrors = [{ id:null, error:error.message }];
+      console.error(`[refund cancellation] ${email}:`, error.message);
+    }
+    auditStore.log({ adminEmail:req.admin.email, action:'stripe_refund_created', target:email, details:{ refundId:refund.id, chargeId, amount:refund.amount, currency:refund.currency, status:refund.status, reason, canceledSubscriptions:canceledSubscriptions.map(item=>item.id), cancellationErrors } });
+    res.json({ ok:true, refund:{ id:refund.id, amount:refund.amount, currency:refund.currency, status:refund.status }, subscription:{ canceled:!cancellationErrors.length, canceledCount:canceledSubscriptions.length, ids:canceledSubscriptions.map(item=>item.id), errors:cancellationErrors } });
   } catch (error) {
     auditStore.log({ adminEmail:req.admin.email, action:'stripe_refund_failed', target:email, details:{ chargeId, amount:amountCents, reason, error:error.message } });
     res.status(502).json({ error:`Stripe не виконав повернення: ${error.message}` });
