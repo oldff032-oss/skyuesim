@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Налаштування акаунта — Signal</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<link rel="manifest" href="/manifest.json"><link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="theme-color" content="#05060d"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<style>.avatar-preview{width:72px;height:72px;border-radius:22px;background:linear-gradient(135deg,var(--blue),var(--violet));display:grid;place-items:center;font-family:'Space Grotesk',sans-serif;font-size:26px;font-weight:700;background-size:cover;background-position:center}.section-title{font-family:'Space Grotesk',sans-serif;font-size:16px;font-weight:700;margin-top:26px}.hint{font-size:12px;line-height:1.45;color:var(--text-muted);margin-top:7px}</style>
+</head>
+<body>
+  <div class="wrap" style="padding-bottom:38px;max-width:560px;">
+    <a href="profile.html" class="muted" style="text-decoration:none;font-size:14px;">← Профіль</a>
+    <h1 style="font-size:25px;margin-top:18px;">Налаштування акаунта</h1>
+    <p class="lead">Керуй своїми персональними даними та входом.</p>
+
+    <form id="form" class="glass" style="margin-top:20px;padding:18px;">
+      <div style="display:flex;align-items:center;gap:14px;"><div id="preview" class="avatar-preview">?</div><div><label class="btn ghost" style="display:inline-block;cursor:pointer;">Змінити фото<input id="avatar" type="file" accept="image/png,image/jpeg,image/webp" hidden></label><button id="removePhoto" type="button" class="muted" style="display:block;border:0;background:transparent;padding:8px 0 0;cursor:pointer;">Прибрати фото</button></div></div>
+      <div class="field-group" style="margin-top:20px;"><label class="field-label" for="name">Ім’я</label><input id="name" maxlength="60" autocomplete="name" required></div>
+      <div class="field-group"><label class="field-label" for="email">Email</label><input id="email" type="email" autocomplete="email" required></div>
+      <p class="hint">Щоб змінити email або пароль, введи поточний пароль нижче.</p>
+
+      <div class="section-title">Зміна пароля</div>
+      <div class="field-group"><label class="field-label" for="newPassword">Новий пароль <span class="muted">(необов’язково)</span></label><input id="newPassword" type="password" minlength="8" autocomplete="new-password" placeholder="Щонайменше 8 символів"></div>
+      <div class="field-group"><label class="field-label" for="currentPassword">Поточний пароль</label><input id="currentPassword" type="password" autocomplete="current-password" placeholder="Потрібен для email або нового пароля"></div>
+      <div id="message" class="error-msg" style="display:none;margin-top:14px;"></div>
+      <button id="save" class="btn" style="width:100%;margin-top:20px;" type="submit">Зберегти зміни</button>
+    </form>
+  </div>
+  <script src="config.js"></script><script src="pwa.js"></script>
+  <script>
+    const token=localStorage.getItem('signal_session_token'); const savedEmail=localStorage.getItem('signal_email');
+    if(!token || !savedEmail) location.href='login.html';
+    const preview=document.getElementById('preview'), avatar=document.getElementById('avatar'); let avatarDataUrl=undefined;
+    function showAvatar(value,name){ preview.textContent=''; preview.style.backgroundImage=value?`url("${value}")`:''; if(!value) preview.textContent=(name||'?')[0].toUpperCase(); }
+    fetch(`${API_URL}/api/status?email=${encodeURIComponent(savedEmail)}`).then(r=>r.json()).then(user=>{ document.getElementById('name').value=user.displayName||''; document.getElementById('email').value=user.email||savedEmail; showAvatar(user.avatarDataUrl,user.displayName||savedEmail); }).catch(()=>showAvatar(null,savedEmail));
+    avatar.addEventListener('change',()=>{ const file=avatar.files[0]; if(!file)return; if(!['image/png','image/jpeg','image/webp'].includes(file.type)||file.size>500*1024){ alert('Обери PNG, JPG або WebP до 500 КБ'); avatar.value=''; return; } const reader=new FileReader(); reader.onload=()=>{avatarDataUrl=reader.result;showAvatar(avatarDataUrl,document.getElementById('name').value)};reader.readAsDataURL(file); });
+    document.getElementById('removePhoto').addEventListener('click',()=>{avatarDataUrl=null;avatar.value='';showAvatar(null,document.getElementById('name').value);});
+    document.getElementById('form').addEventListener('submit',async(event)=>{ event.preventDefault(); const message=document.getElementById('message'),button=document.getElementById('save'); message.style.display='none'; const body={displayName:document.getElementById('name').value.trim(),newEmail:document.getElementById('email').value.trim().toLowerCase(),newPassword:document.getElementById('newPassword').value,currentPassword:document.getElementById('currentPassword').value}; if(avatarDataUrl!==undefined)body.avatarDataUrl=avatarDataUrl; button.disabled=true;button.textContent='Зберігаємо…'; try{const res=await fetch(`${API_URL}/api/account/profile`,{method:'PUT',headers:{'Content-Type':'application/json','x-session-token':token},body:JSON.stringify(body)});const data=await res.json();if(!res.ok)throw new Error(data.error||'Не вдалося зберегти зміни');localStorage.setItem('signal_email',data.email);document.getElementById('newPassword').value='';document.getElementById('currentPassword').value='';avatarDataUrl=undefined;showAvatar(data.avatarDataUrl,data.displayName||data.email);message.className='success-msg';message.textContent='Зміни збережено';message.style.display='block';}catch(error){message.className='error-msg';message.textContent=error.message;message.style.display='block';}finally{button.disabled=false;button.textContent='Зберегти зміни';}});
+  </script>
+</body></html>

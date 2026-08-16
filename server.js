@@ -115,6 +115,15 @@ app.post('/api/account/sessions/revoke-others', requireUserSession, (req, res) =
   res.json({ ok: true, revoked });
 });
 
+app.put('/api/account/profile', requireUserSession, async (req, res) => {
+  try {
+    const result = await authService.updateAccount(req.userEmail, req.body || {});
+    res.json({ ok: true, ...result });
+  } catch (error) {
+    res.status(400).json({ error: error.message, code: error.code });
+  }
+});
+
 app.get('/api/account/preferences', requireUserSession, (req, res) => {
   const preferences = getUser(req.userEmail)?.preferences || {};
   res.json({ trafficAlertThresholds: preferences.trafficAlertThresholds || [50, 80, 95], language: getUser(req.userEmail)?.language || 'uk' });

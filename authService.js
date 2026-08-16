@@ -6,7 +6,7 @@
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const { readAll, writeAll } = require('./authStore');
-const { getUser, saveUser, getAllUsers } = require('./db');
+const { getUser, saveUser, getAllUsers, deleteUser } = require('./db');
 const { sendVerificationCode } = require('./emailService');
 
 const CODE_TTL_MS = 10 * 60 * 1000; // 10 хвилин
@@ -169,7 +169,54 @@ function revokeAllSessions(email) {
   return revoked;
 }
 
-module.exports = { requestCode, verifyCode, setPassword, login, getSessionEmail, listSessions, revokeOtherSessions, revokeAllSessions, requestPasswordReset, verifyResetCode, resetPassword };
+async function updateAccount(email, changes = {}) {
+  const store = readAll();
+  const authUser = store.users[email];
+  if (!authUser) throw Object.assign(new Error('Акаунт не знайдено'), { code: 'ACCOUNT_NOT_FOUND' });
+
+  const displayName = changes.displayName === undefined ? undefined : String(changes.displayName || '').trim().slice(0, 60);
+  if (changes.displayName !== undefined && !displayName) throw Object.assign(new Error('Вкажи ім’я'), { code: 'INVALID_NAME' });
+  let avatarDataUrl;
+  if (changes.avatarDataUrl !== undefined) {
+    avatarDataUrl = changes.avatarDataUrl === null ? null : changes.avatarDataUrl;
+    if (avatarDataUrl !== null && (typeof avatarDataUrl !== 'string' || !/^data:image\/(png|jpeg|webp);base64,/i.test(avatarDataUrl) || avatarDataUrl.length > 700000)) {
+      throw Object.assign(new Error('Некоректне фото профілю'), { code: 'INVALID_AVATAR' });
+    }
+  }
+
+  const nextEmail = changes.newEmail === undefined ? email : String(changes.newEmail).trim().toLowerCase();
+  const newPassword = changes.newPassword ? String(changes.newPassword) : '';
+  const sensitiveChange = nextEmail !== email || Boolean(newPassword);
+  if (sensitiveChange) {
+    if (!changes.currentPassword || !await bcrypt.compare(String(changes.currentPassword), authUser.passwordHash)) {
+      throw Object.assign(new Error('Поточний пароль невірний'), { code: 'INVALID_CURRENT_PASSWORD' });
+    }
+    if (nextEmail !== email && (!nextEmail.includes('@') || nextEmail.length > 254)) throw Object.assign(new Error('Введи коректний email'), { code: 'INVALID_EMAIL' });
+    if (nextEmail !== email && (store.users[nextEmail] || getUser(nextEmail))) throw Object.assign(new Error('Цей email уже використовується'), { code: 'EMAIL_TAKEN' });
+    if (newPassword && newPassword.length < 8) throw Object.assign(new Error('Новий пароль має містити щонайменше 8 символів'), { code: 'WEAK_PASSWORD' });
+  }
+
+  if (newPassword) authUser.passwordHash = await bcrypt.hash(newPassword, 10);
+  if (nextEmail !== email) {
+    delete store.users[email];
+    store.users[nextEmail] = { ...authUser, email: nextEmail };
+    for (const session of Object.values(store.sessions)) if (session.email === email) session.email = nextEmail;
+    const oldUser = getUser(email);
+    if (oldUser) { deleteUser(email); saveUser(nextEmail, { ...oldUser, email: nextEmail }); }
+    for (const user of Object.values(getAllUsers())) {
+      const patches = {};
+      if (user.referredBy === email) patches.referredBy = nextEmail;
+      if (Array.isArray(user.referrals)) patches.referrals = user.referrals.map((referral) => referral.email === email ? { ...referral, email: nextEmail } : referral);
+      if (Object.keys(patches).length) saveUser(user.email, patches);
+    }
+  }
+  const accountEmail = nextEmail;
+  if (displayName !== undefined || avatarDataUrl !== undefined) saveUser(accountEmail, { ...(displayName !== undefined ? { displayName } : {}), ...(avatarDataUrl !== undefined ? { avatarDataUrl } : {}) });
+  writeAll(store);
+  return { email: accountEmail, displayName: getUser(accountEmail)?.displayName || '', avatarDataUrl: getUser(accountEmail)?.avatarDataUrl || null };
+}
+
+module.exports = { requestCode, verifyCode, setPassword, login, getSessionEmail, listSessions, revokeOtherSessions, revokeAllSessions, updateAccount, requestPasswordReset, verifyResetCode, resetPassword };
 
 // ---------- Забув(ла) пароль: запит коду ----------
 async function requestPasswordReset(email) {
