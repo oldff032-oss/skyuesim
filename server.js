@@ -9,7 +9,7 @@ const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const { generateRegistrationOptions, verifyRegistrationResponse } = require('@simplewebauthn/server');
 
-const { createCheckoutSession, createCustomPackageCheckout, cancelSubscription, deleteStripeCustomer, constructWebhookEvent, getNextBillingDate, getBillingHistory, getRecoveryPaymentEvidence, listRefundablePayments, refundPayment } = require('./stripeService');
+const { createCheckoutSession, createCustomPackageCheckout, cancelSubscription, deleteStripeCustomer, constructWebhookEvent, getNextBillingDate, getBillingHistory, getRecoveryPaymentEvidence, findCustomerIdsByEmail, listRefundablePaymentsByEmail, refundPayment } = require('./stripeService');
 const crypto = require('crypto');
 const { provisionEsim, checkUsage, recoverEsim, topupEsim, listPackages, findRenewalTopup } = require('./esimService');
 const { bootstrap: bootstrapUsers, getUser, saveUser, deleteUser, getUserByStripeCustomerId, getAllUsers } = require('./db');
@@ -792,8 +792,8 @@ app.get('/api/admin/users/:email/refundable-payments', adminAuth.requireAdmin, a
   try {
     const email = String(req.params.email || '').trim().toLowerCase();
     const user = getUser(email);
-    if (!user?.stripeCustomerId) return res.status(404).json({ error: 'У користувача немає Stripe-платежів' });
-    res.json({ payments: await listRefundablePayments(user.stripeCustomerId) });
+    const payments = await listRefundablePaymentsByEmail(email, user?.stripeCustomerId || null);
+    res.json({ payments });
   } catch (error) {
     res.status(502).json({ error: `Stripe: ${error.message}` });
   }
@@ -808,10 +808,11 @@ app.post('/api/admin/users/:email/refund', adminAuth.requireAdmin, adminAuth.req
   if (!/^[A-Za-z0-9-]{16,80}$/.test(String(requestId || ''))) return res.status(400).json({ error: 'Некоректний ідентифікатор операції' });
   const amountCents = Number(amount);
   const user = getUser(email);
-  if (!user?.stripeCustomerId) return res.status(404).json({ error: 'Stripe-профіль користувача не знайдено' });
   try {
+    const customerIds = await findCustomerIdsByEmail(email, user?.stripeCustomerId || null);
+    if (!customerIds.length) return res.status(404).json({ error: 'Stripe-платежі за цим email не знайдено' });
     const refund = await refundPayment({
-      customerId: user.stripeCustomerId,
+      customerIds,
       chargeId: String(chargeId),
       amount: amountCents,
       reason,
@@ -1234,6 +1235,15 @@ app.post('/api/webhook', async (req, res) => {
     const session = event.data.object;
     const email = session.metadata.email;
     const plan = session.metadata.plan;
+
+    // Save Stripe ownership immediately after confirmed payment. Provisioning
+    // can fail later, but the admin must still be able to find and refund it.
+    saveUser(email, {
+      status: 'payment_confirmed',
+      plan,
+      stripeCustomerId: session.customer,
+      ...(session.subscription ? { stripeSubscriptionId: session.subscription } : {}),
+    });
 
     try {
       // Оплата підтверджена Stripe -> тепер видаємо реальну eSIM

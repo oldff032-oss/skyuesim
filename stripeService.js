@@ -74,10 +74,20 @@ async function getBillingHistory(customerId) {
   }));
 }
 
-async function listRefundablePayments(customerId) {
-  if (!customerId) return [];
-  const charges = await stripe.charges.list({ customer: customerId, limit: 30 });
-  return charges.data
+async function findCustomerIdsByEmail(email, knownCustomerId = null) {
+  const ids = new Set(knownCustomerId ? [knownCustomerId] : []);
+  if (email) {
+    const customers = await stripe.customers.list({ email: String(email).trim().toLowerCase(), limit: 100 });
+    customers.data.forEach(customer => ids.add(customer.id));
+  }
+  return [...ids];
+}
+
+async function listRefundablePaymentsByEmail(email, knownCustomerId = null) {
+  const customerIds = await findCustomerIdsByEmail(email, knownCustomerId);
+  const chargeLists = await Promise.all(customerIds.map(customer => stripe.charges.list({ customer, limit: 100 })));
+  const charges = [...new Map(chargeLists.flatMap(list => list.data).map(charge => [charge.id, charge])).values()];
+  return charges
     .filter(charge => charge.paid && !charge.disputed && charge.amount > charge.amount_refunded)
     .map(charge => ({
       id: charge.id,
@@ -91,10 +101,10 @@ async function listRefundablePayments(customerId) {
     }));
 }
 
-async function refundPayment({ customerId, chargeId, amount, reason = 'requested_by_customer', metadata = {}, idempotencyKey }) {
+async function refundPayment({ customerIds, chargeId, amount, reason = 'requested_by_customer', metadata = {}, idempotencyKey }) {
   const charge = await stripe.charges.retrieve(chargeId);
   const chargeCustomer = typeof charge.customer === 'string' ? charge.customer : charge.customer?.id;
-  if (!chargeCustomer || chargeCustomer !== customerId) throw new Error('Цей платіж не належить вибраному користувачу');
+  if (!chargeCustomer || !customerIds.includes(chargeCustomer)) throw new Error('Цей платіж не належить вибраному користувачу');
   if (!charge.paid || charge.disputed) throw new Error('Цей платіж не можна повернути');
   const refundableAmount = charge.amount - charge.amount_refunded;
   if (!Number.isInteger(amount) || amount < 1 || amount > refundableAmount) throw new Error('Сума перевищує доступний залишок повернення');
@@ -143,4 +153,4 @@ function constructWebhookEvent(rawBody, signature) {
   );
 }
 
-module.exports = { createCheckoutSession, createCustomPackageCheckout, cancelSubscription, deleteStripeCustomer, constructWebhookEvent, getNextBillingDate, getBillingHistory, getRecoveryPaymentEvidence, listRefundablePayments, refundPayment };
+module.exports = { createCheckoutSession, createCustomPackageCheckout, cancelSubscription, deleteStripeCustomer, constructWebhookEvent, getNextBillingDate, getBillingHistory, getRecoveryPaymentEvidence, findCustomerIdsByEmail, listRefundablePaymentsByEmail, refundPayment };
