@@ -17,6 +17,8 @@ const authService = require('./authService');
 const ticketStore = require('./ticketStore');
 const auditStore = require('./auditStore');
 const adminAuth = require('./adminAuthService');
+const pushStore = require('./pushStore');
+const { isConfigured: isPushConfigured, sendToEmail } = require('./pushService');
 const { sendEmail, getReceivedEmail, verifyInboundSignature } = require('./emailService');
 
 const app = express();
@@ -145,6 +147,39 @@ app.get('/api/account/esim', requireUserSession, (req, res) => {
       expiredTime: esim.expiredTime || null,
     },
   });
+});
+
+app.get('/api/push/public-key', requireUserSession, (req, res) => {
+  if (!isPushConfigured()) return res.status(503).json({ error: 'Push ще не налаштовано на сервері' });
+  res.json({ publicKey: process.env.VAPID_PUBLIC_KEY });
+});
+
+app.post('/api/push/subscribe', requireUserSession, (req, res) => {
+  try {
+    pushStore.saveSubscription(req.userEmail, req.body?.subscription);
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+app.post('/api/push/unsubscribe', requireUserSession, (req, res) => {
+  pushStore.removeSubscription(req.body?.endpoint, req.userEmail);
+  res.json({ ok: true });
+});
+
+app.post('/api/push/test', requireUserSession, async (req, res) => {
+  try {
+    const delivered = await sendToEmail(req.userEmail, {
+      title: 'Сповіщення увімкнено',
+      body: 'Тепер Сигнал може попереджати про трафік та eSIM.',
+      url: '/traffic-alerts.html',
+      tag: 'signal-test',
+    });
+    res.json({ ok: true, delivered });
+  } catch (error) {
+    res.status(503).json({ error: error.message });
+  }
 });
 
 // ---- Забув(ла) пароль ----
@@ -665,6 +700,7 @@ const PORT = process.env.PORT || 4242;
 storage.init().then(() => Promise.all([
   bootstrapUsers(),
   authStore.bootstrap(),
+  pushStore.bootstrap(),
   adminStore.bootstrap(),
   ticketStore.bootstrap(),
   auditStore.bootstrap(),

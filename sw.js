@@ -38,3 +38,19 @@ self.addEventListener('fetch', (event) => {
     caches.match(event.request).then((cached) => cached || fetch(event.request))
   );
 });
+
+self.addEventListener('push', (event) => {
+  const data = event.data ? event.data.json() : {};
+  event.waitUntil(self.registration.showNotification(data.title || 'Сигнал', {
+    body: data.body || '',
+    icon: '/icon-192.png',
+    badge: '/icon-192.png',
+    tag: data.tag || 'signal-update',
+    data: { url: data.url || '/dashboard.html' },
+  }));
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  event.waitUntil(clients.openWindow(event.notification.data?.url || '/dashboard.html'));
+});

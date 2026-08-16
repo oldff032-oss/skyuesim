@@ -109,3 +109,21 @@ ESIM_PROVIDER_API_KEY=...
   (обов'язково для збору платежів і email).
 - Чітко вказати умови підписки (ціна, періодичність, як скасувати) —
   це юридична вимога в ЄС/США (ясна згода на автопродовження).
+# Сигнал eSIM
+
+## Постійна робота та push-сповіщення
+
+1. У Render відкрий Backend Web Service → **Settings** → **Instance Type** → обери **Starter** (не Free). Free-сервіс засинає через 15 хвилин без запитів.
+2. Переконайся, що `DATABASE_URL` веде до постійної PostgreSQL бази. Не використовуй локальні JSON-файли як базу у production.
+3. На комп’ютері у теці проєкту виконай `npm install`, потім `npm run generate:vapid`. Збережи обидва рядки: приватний ключ нікому не передавай.
+4. У Render → Backend Web Service → **Environment** додай:
+   - `VAPID_SUBJECT` = `mailto:твій-email@example.com`
+   - `VAPID_PUBLIC_KEY` = значення з команди
+   - `VAPID_PRIVATE_KEY` = значення з команди
+5. Задеплой нову версію. У застосунку: **Профіль → Сповіщення про трафік → Увімкнути push-сповіщення → Надіслати тестове сповіщення**.
+6. Створи в Render **Cron Job** з цього ж GitHub-репозиторію:
+   - Command: `node pushWorker.js`
+   - Schedule: `0 * * * *` (раз на годину)
+   - Додай у нього ті ж `DATABASE_URL`, `VAPID_SUBJECT`, `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` і ключі eSIM-провайдера, що є у Backend.
+
+На iPhone користувач має додати PWA на початковий екран і натиснути кнопку ввімкнення push власноруч.
