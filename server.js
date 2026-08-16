@@ -18,6 +18,7 @@ const ticketStore = require('./ticketStore');
 const auditStore = require('./auditStore');
 const adminAuth = require('./adminAuthService');
 const pushStore = require('./pushStore');
+const operationsStore = require('./operationsStore');
 const { isConfigured: isPushConfigured, sendToEmail } = require('./pushService');
 const { sendEmail, getReceivedEmail, verifyInboundSignature } = require('./emailService');
 
@@ -39,6 +40,7 @@ app.post('/api/auth/request-code', async (req, res) => {
   try {
     const { email } = req.body;
     if (!email || !email.includes('@')) return res.status(400).json({ error: 'Введи коректний email' });
+    if (operationsStore.store().blacklist.emails.includes(email.toLowerCase())) return res.status(403).json({ error: 'Цей email недоступний для реєстрації' });
     await authService.requestCode(email);
     res.json({ sent: true });
   } catch (err) {
@@ -114,6 +116,8 @@ app.get('/api/account/preferences', requireUserSession, (req, res) => {
   const preferences = getUser(req.userEmail)?.preferences || {};
   res.json({ trafficAlertThresholds: preferences.trafficAlertThresholds || [50, 80, 95] });
 });
+
+app.get('/api/account/announcements', requireUserSession, (req, res) => res.json({ announcements: operationsStore.activeAnnouncements(req.userEmail) }));
 
 app.put('/api/account/preferences', requireUserSession, (req, res) => {
   const raw = req.body?.trafficAlertThresholds;
@@ -475,6 +479,21 @@ app.get('/api/admin/dashboard', adminAuth.requireAdmin, (req, res) => {
   });
 });
 
+app.get('/api/admin/operations', adminAuth.requireAdmin, (req, res) => res.json(operationsStore.store()));
+app.post('/api/admin/announcements', adminAuth.requireAdmin, adminAuth.requireRole('super_admin','admin'), async (req,res) => {
+  const { title, message, audience='all', expiresAt=null, sendPush=false } = req.body || {};
+  if(!title || !message) return res.status(400).json({error:'Вкажіть заголовок і текст'});
+  const announcement={ id:Date.now().toString(36), title:String(title).slice(0,100), message:String(message).slice(0,500), audience, startsAt:new Date().toISOString(), expiresAt:expiresAt||null, createdBy:req.admin.email };
+  operationsStore.store().announcements.unshift(announcement); operationsStore.save();
+  if(sendPush && audience !== 'all') sendToEmail(audience,{title:announcement.title,body:announcement.message,url:'/dashboard.html',tag:`announcement-${announcement.id}`}).catch(()=>{});
+  auditStore.log({adminEmail:req.admin.email,action:'announcement_created',target:audience,details:{id:announcement.id}}); res.json(announcement);
+});
+app.delete('/api/admin/announcements/:id', adminAuth.requireAdmin, adminAuth.requireRole('super_admin','admin'), (req,res)=>{ const s=operationsStore.store(); s.announcements=s.announcements.filter(a=>a.id!==req.params.id); operationsStore.save(); auditStore.log({adminEmail:req.admin.email,action:'announcement_deleted',target:req.params.id}); res.json({ok:true}); });
+app.post('/api/admin/users/:email/note', adminAuth.requireAdmin, adminAuth.requireRole('super_admin','admin','support'), (req,res)=>{ const text=String(req.body?.text||'').trim(); if(!text) return res.status(400).json({error:'Введіть нотатку'}); const s=operationsStore.store(); (s.notes[req.params.email] ||= []).push({text:text.slice(0,1000),by:req.admin.email,createdAt:new Date().toISOString()}); operationsStore.save(); auditStore.log({adminEmail:req.admin.email,action:'user_note_added',target:req.params.email}); res.json({ok:true}); });
+app.post('/api/admin/blacklist', adminAuth.requireAdmin, adminAuth.requireRole('super_admin','admin'), (req,res)=>{ const {type,value}=req.body||{}; if(!['emails','iccids'].includes(type)||!value) return res.status(400).json({error:'Некоректні дані'}); const list=operationsStore.store().blacklist[type]; if(!list.includes(value)) list.push(value); operationsStore.save(); auditStore.log({adminEmail:req.admin.email,action:'blacklist_added',target:value}); res.json({ok:true}); });
+app.delete('/api/admin/blacklist/:type/:value', adminAuth.requireAdmin, adminAuth.requireRole('super_admin','admin'), (req,res)=>{ const list=operationsStore.store().blacklist[req.params.type]; if(!list) return res.status(400).json({error:'Некоректний список'}); operationsStore.store().blacklist[req.params.type]=list.filter(v=>v!==req.params.value); operationsStore.save(); res.json({ok:true}); });
+app.get('/api/admin/system-status', adminAuth.requireAdmin, (req,res)=>res.json({ server:'ok', database:Boolean(process.env.DATABASE_URL), push:isPushConfigured(), esimProvider:Boolean(process.env.ESIM_PROVIDER_API_KEY), stripe:Boolean(process.env.STRIPE_SECRET_KEY), checkedAt:new Date().toISOString() }));
+
 // Список користувачів для адмінки
 app.get('/api/admin/users', adminAuth.requireAdmin, (req, res) => {
   const authData = authStore.readAll();
@@ -648,6 +667,7 @@ app.post('/api/create-subscription', async (req, res) => {
   try {
     const { email, plan } = req.body;
     if (!email || !plan) return res.status(400).json({ error: 'Потрібні email і plan' });
+    if (operationsStore.store().blacklist.emails.includes(email.toLowerCase())) return res.status(403).json({ error: 'Цей email недоступний для оплати' });
 
     saveUser(email, { email, plan, status: 'pending_payment' });
 
@@ -799,6 +819,7 @@ storage.init().then(() => Promise.all([
   adminStore.bootstrap(),
   ticketStore.bootstrap(),
   auditStore.bootstrap(),
+  operationsStore.bootstrap(),
 ])).then(() => adminAuth.bootstrap()).then(() => {
   app.listen(PORT, () => {
     console.log(`Signal backend running on http://localhost:${PORT}`);
