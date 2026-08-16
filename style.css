@@ -15,6 +15,11 @@
   --border:#1C2036;
   --surface:#12151f;
 }
+html.light-theme{
+  --bg:#f4f7fc; --bg-2:#e9eff9; --glass:rgba(255,255,255,.78); --glass-border:rgba(34,50,80,.13);
+  --text:#10182b; --text-muted:#5d6a82; --border:#d9e1ef; --surface:#ffffff;
+}
+html.light-theme body{background:radial-gradient(ellipse 700px 500px at 15% -5%,rgba(59,130,246,.14),transparent 60%),radial-gradient(ellipse 600px 500px at 100% 10%,rgba(139,92,246,.12),transparent 55%),var(--bg);}
 *{box-sizing:border-box; margin:0; padding:0;}
 html,body{ height:100%; }
 body{

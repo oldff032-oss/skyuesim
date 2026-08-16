@@ -3,6 +3,8 @@
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('/sw.js').catch(() => {});
 }
+const applyTheme = () => document.documentElement.classList.toggle('light-theme', localStorage.getItem('signal_theme') === 'light');
+applyTheme();
 // All customer pages already load pwa.js, so language support is loaded once
 // and stays consistent across the app.
 if (!document.querySelector('script[data-signal-i18n]')) {

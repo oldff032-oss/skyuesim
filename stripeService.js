@@ -44,6 +44,18 @@ async function getNextBillingDate(subscriptionId) {
   return sub.current_period_end ? new Date(sub.current_period_end * 1000).toISOString() : null;
 }
 
+async function getBillingHistory(customerId) {
+  const invoices = await stripe.invoices.list({ customer: customerId, limit: 20 });
+  return invoices.data.map((invoice) => ({
+    id: invoice.id,
+    createdAt: new Date(invoice.created * 1000).toISOString(),
+    amount: invoice.amount_paid / 100,
+    currency: invoice.currency,
+    status: invoice.status,
+    receiptUrl: invoice.hosted_invoice_url || invoice.invoice_pdf || null,
+  }));
+}
+
 // Перевіряє, що вебхук справді прийшов від Stripe (а не від когось,
 // хто намагається підробити "оплату успішна").
 //
@@ -61,4 +73,4 @@ function constructWebhookEvent(rawBody, signature) {
   );
 }
 
-module.exports = { createCheckoutSession, cancelSubscription, constructWebhookEvent, getNextBillingDate };
+module.exports = { createCheckoutSession, cancelSubscription, constructWebhookEvent, getNextBillingDate, getBillingHistory };

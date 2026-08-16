@@ -7,7 +7,8 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 
-const { createCheckoutSession, cancelSubscription, constructWebhookEvent, getNextBillingDate } = require('./stripeService');
+const { createCheckoutSession, cancelSubscription, constructWebhookEvent, getNextBillingDate, getBillingHistory } = require('./stripeService');
+const crypto = require('crypto');
 const { provisionEsim, checkUsage, recoverEsim } = require('./esimService');
 const { bootstrap: bootstrapUsers, getUser, saveUser, deleteUser, getUserByStripeCustomerId, getAllUsers } = require('./db');
 const storage = require('./persistentState');
@@ -145,6 +146,33 @@ app.put('/api/account/preferences', requireUserSession, (req, res) => {
   const user = getUser(req.userEmail);
   saveUser(req.userEmail, { ...(language ? { language } : {}), preferences: { ...(user?.preferences || {}), ...(trafficAlertThresholds ? { trafficAlertThresholds } : {}) } });
   res.json({ ok: true, trafficAlertThresholds: trafficAlertThresholds || user?.preferences?.trafficAlertThresholds || [50,80,95], language: language || user?.language || 'uk' });
+});
+
+app.get('/api/account/usage-history', requireUserSession, (req, res) => {
+  res.json({ history: getUser(req.userEmail)?.esim?.usageHistory || [] });
+});
+
+app.get('/api/account/referral', requireUserSession, (req, res) => {
+  const user = getUser(req.userEmail);
+  if (!user) return res.status(404).json({ error: 'Користувача не знайдено' });
+  const referralCode = user.referralCode || crypto.randomBytes(4).toString('hex').toUpperCase();
+  if (!user.referralCode) saveUser(req.userEmail, { referralCode });
+  res.json({ code: referralCode, referrals: user.referrals || [] });
+});
+
+app.post('/api/account/feedback', requireUserSession, (req, res) => {
+  const rating = Number(req.body?.rating);
+  const message = String(req.body?.message || '').trim();
+  if (!Number.isInteger(rating) || rating < 1 || rating > 5 || message.length > 1000) return res.status(400).json({ error: 'Некоректний відгук' });
+  const operations = operationsStore.store();
+  (operations.feedback ||= []).unshift({ id: Date.now().toString(36), email: req.userEmail, rating, message, createdAt: new Date().toISOString() });
+  operationsStore.save();
+  res.json({ ok: true });
+});
+
+app.get('/api/service-status', (req, res) => {
+  const maintenance = operationsStore.activeAnnouncements(null).find((item) => item.type === 'maintenance');
+  res.json({ status: maintenance ? 'maintenance' : 'operational', message: maintenance?.message || null, checkedAt: new Date().toISOString() });
 });
 
 // The activation code is intentionally available only to the account owner.
@@ -813,6 +841,13 @@ app.get('/api/usage', async (req, res) => {
     const remainingGb = totalGb == null ? null : Math.max(0, +(totalGb - usedGb).toFixed(2));
 
     // Зберігаємо оновлені дані, щоб дашборд теж їх бачив без повторного запиту
+    const history = [...(user.esim.usageHistory || [])];
+    const day = new Date().toISOString().slice(0, 10);
+    const snapshot = { day, usedGb, remainingGb, totalGb };
+    const existingIndex = history.findIndex((item) => item.day === day);
+    if (existingIndex >= 0) history[existingIndex] = snapshot;
+    else history.push(snapshot);
+    const usageHistory = history.slice(-31);
     saveUser(email, {
       esim: {
         ...user.esim,
@@ -823,6 +858,7 @@ app.get('/api/usage', async (req, res) => {
         activateTime: usage.activateTime ?? user.esim.activateTime,
         lastUpdateTime: usage.lastUpdateTime ?? user.esim.lastUpdateTime,
         remainingGb,
+        usageHistory,
       },
     });
 
@@ -886,4 +922,15 @@ storage.init().then(() => Promise.all([
 }).catch((error) => {
   console.error('Failed to start persistent storage:', error);
   process.exit(1);
+});
+
+app.get('/api/account/billing-history', requireUserSession, async (req, res) => {
+  try {
+    const user = getUser(req.userEmail);
+    if (!user?.stripeCustomerId) return res.json({ invoices: [] });
+    res.json({ invoices: await getBillingHistory(user.stripeCustomerId) });
+  } catch (error) {
+    console.error('Billing history:', error.message);
+    res.status(502).json({ error: 'Не вдалося завантажити історію оплат' });
+  }
 });

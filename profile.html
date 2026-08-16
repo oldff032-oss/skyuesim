@@ -50,10 +50,10 @@
         <div class="left"><span class="ic">📱</span>Керування eSIM</div>
         <span class="chev">›</span>
       </div>
-      <div class="menu-row disabled">
-        <div class="left"><span class="ic">🤖</span>AI Network Copilot<span class="soon-tag">скоро</span></div>
-        <span class="chev">›</span>
+      <div class="menu-row" onclick="window.location.href='payments.html'">
+        <div class="left"><span class="ic">🧾</span>Історія оплат</div><span class="chev">›</span>
       </div>
+      <div class="menu-row" onclick="window.location.href='app-tools.html#diagnostics'"><div class="left"><span class="ic">🩺</span>Діагностика інтернету</div><span class="chev">›</span></div>
       <div class="menu-row" onclick="window.location.href='security.html'">
         <div class="left"><span class="ic">🛡️</span>Центр безпеки</div>
         <span class="chev">›</span>
@@ -62,14 +62,10 @@
         <div class="left"><span class="ic">🔔</span>Сповіщення про трафік</div>
         <span class="chev">›</span>
       </div>
-      <div class="menu-row disabled">
-        <div class="left"><span class="ic">👨‍👩‍👧</span>Family / Team<span class="soon-tag">скоро</span></div>
-        <span class="chev">›</span>
-      </div>
-      <div class="menu-row disabled">
-        <div class="left"><span class="ic">🌍</span>Travel Mode<span class="soon-tag">скоро</span></div>
-        <span class="chev">›</span>
-      </div>
+      <div class="menu-row" onclick="window.location.href='app-tools.html#travel'"><div class="left"><span class="ic">🌍</span>Карта покриття та Travel Mode</div><span class="chev">›</span></div>
+      <div class="menu-row" onclick="window.location.href='app-tools.html#referral'"><div class="left"><span class="ic">🎁</span>Запросити друга</div><span class="chev">›</span></div>
+      <div class="menu-row" onclick="window.location.href='app-tools.html#status'"><div class="left"><span class="ic">🟢</span>Статус сервісу</div><span class="chev">›</span></div>
+      <div class="menu-row" onclick="window.location.href='app-tools.html#feedback'"><div class="left"><span class="ic">⭐</span>Оцінити застосунок</div><span class="chev">›</span></div>
       <div class="menu-row" onclick="window.location.href='support.html'">
         <div class="left"><span class="ic">💬</span>Підтримка</div>
         <span class="chev">›</span>
@@ -77,6 +73,7 @@
     </div>
 
     <button class="btn ghost" style="margin-top:24px;" onclick="changeLanguage()">🌐 Мова / Language</button>
+    <button class="btn ghost" style="margin-top:12px;" onclick="toggleTheme()">🌓 Змінити тему</button>
     <button class="btn danger" style="margin-top:12px;" onclick="logout()">Вийти з акаунта</button>
   </div>
 
@@ -106,6 +103,11 @@
       const res = await fetch(`${API_URL}/api/account/preferences`, {method:'PUT',headers:{'Content-Type':'application/json','x-session-token':localStorage.getItem('signal_session_token')},body:JSON.stringify({language})});
       if(!res.ok) return alert(window.signalT('Не вдалося змінити мову', 'Could not change language'));
       localStorage.setItem('signal_language', language); location.reload();
+    }
+    function toggleTheme(){
+      const next = localStorage.getItem('signal_theme') === 'light' ? 'dark' : 'light';
+      localStorage.setItem('signal_theme', next);
+      document.documentElement.classList.toggle('light-theme', next === 'light');
     }
   </script>
 </body>

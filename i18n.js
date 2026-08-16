@@ -40,6 +40,9 @@
     'Введи код': 'Enter code', 'Ми надіслали код на': 'We sent a code to', 'Не прийшов код?': 'Did not receive a code?', 'Надіслати ще раз': 'Send again',
     'Звернення': 'Request', 'Технічні роботи': 'Maintenance', 'Спробуй ще раз пізніше.': 'Please try again later.', 'Помилка': 'Error', 'Готово': 'Done', 'Деталі': 'Details',
     'Email': 'Email', 'Пароль': 'Password', 'Введи пароль': 'Enter password', 'Пошук': 'Search', 'Завантаження...': 'Loading...'
+    ,'Історія оплат': 'Payment history', 'Квитанції та статус твоїх платежів Stripe': 'Receipts and status of your Stripe payments', 'Квитанція': 'Receipt', 'Оплат ще немає.': 'No payments yet.'
+    ,'Подорожі та інструменти': 'Travel and tools', 'Все важливе для поїздки та зв’язку': 'Everything important for travel and connectivity', 'Карта покриття та Travel Mode': 'Coverage map and Travel Mode', 'Діагностика інтернету': 'Internet diagnostics', 'Запросити друга': 'Invite a friend', 'Статус сервісу': 'Service status', 'Оцінити застосунок': 'Rate the app', 'Змінити тему': 'Change theme', 'Історія використання': 'Usage history'
+    ,'Запустити перевірку': 'Run check', 'Поділитися': 'Share', 'Надіслати оцінку': 'Send rating', 'Усі сервіси працюють': 'All services are operational', 'Технічні роботи': 'Maintenance'
   };
 
   const translate = (value) => phrases[value.trim()] || value;

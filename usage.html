@@ -130,6 +130,17 @@
           forecastHtml = `<div class="card"><p class="muted">Прогноз з'явиться, коли назбирається трохи даних про використання.</p></div>`;
         }
 
+        let historyHtml = '';
+        try{
+          const historyRes = await fetch(`${API_URL}/api/account/usage-history`, { headers: { 'x-session-token': localStorage.getItem('signal_session_token') } });
+          const historyData = await historyRes.json();
+          const history = (historyData.history || []).slice(-14);
+          if(history.length){
+            const max = Math.max(...history.map(item => Number(item.usedGb) || 0), 0.01);
+            historyHtml = `<div class="card"><div class="usage-top"><span>Історія використання</span><b>${history.length} дн.</b></div><div style="height:86px;display:flex;align-items:flex-end;gap:5px;margin-top:14px;">${history.map(item => `<div title="${item.day}: ${item.usedGb} ГБ" style="flex:1;min-width:7px;height:${Math.max(7,Math.round((Number(item.usedGb)||0)/max*100))}%;border-radius:5px 5px 2px 2px;background:linear-gradient(180deg,var(--cyan),var(--blue));"></div>`).join('')}</div><p class="muted" style="font-size:11px;margin-top:9px;">Точки зберігаються після оновлення даних у застосунку.</p></div>`;
+          }
+        }catch(e){}
+
         content.innerHTML = `
           ${trafficAlertHtml || (isLow ? `<div class="card" style="border-color:var(--danger);"><p style="color:var(--danger); font-size:13px; display:flex; align-items:center; gap:8px;">⚠️ Використано понад 80% трафіку тарифу</p></div>` : '')}
 
@@ -142,6 +153,7 @@
           </div>
 
           ${daysLeftHtml}
+          ${historyHtml}
           <div id="billingCard" class="card"><p class="muted">Завантажуємо дату списання...</p></div>
           ${forecastHtml}`;
 
