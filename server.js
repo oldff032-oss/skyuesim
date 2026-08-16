@@ -124,6 +124,29 @@ app.put('/api/account/preferences', requireUserSession, (req, res) => {
   res.json({ ok: true, trafficAlertThresholds });
 });
 
+// The activation code is intentionally available only to the account owner.
+app.get('/api/account/esim', requireUserSession, (req, res) => {
+  const user = getUser(req.userEmail);
+  if (!user?.esim) return res.status(404).json({ error: 'eSIM ще не видано' });
+  if (user.status === 'blocked') return res.status(403).json({ error: 'Акаунт заблоковано' });
+  const { esim } = user;
+  res.json({
+    plan: user.plan || null,
+    status: user.status,
+    esim: {
+      iccid: esim.iccid || null,
+      activationCode: esim.activationCode || null,
+      qrCodeUrl: esim.qrCodeUrl || null,
+      apn: esim.apn || null,
+      dataLimitGb: esim.dataLimitGb ?? null,
+      usedGb: esim.usedGb ?? 0,
+      remainingGb: esim.remainingGb ?? null,
+      activateTime: esim.activateTime || null,
+      expiredTime: esim.expiredTime || null,
+    },
+  });
+});
+
 // ---- Забув(ла) пароль ----
 app.post('/api/auth/forgot-password', async (req, res) => {
   try {
