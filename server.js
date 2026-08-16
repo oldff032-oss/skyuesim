@@ -9,7 +9,7 @@ const cors = require('cors');
 
 const { createCheckoutSession, cancelSubscription, constructWebhookEvent, getNextBillingDate, getBillingHistory } = require('./stripeService');
 const crypto = require('crypto');
-const { provisionEsim, checkUsage, recoverEsim } = require('./esimService');
+const { provisionEsim, checkUsage, recoverEsim, listPackages } = require('./esimService');
 const { bootstrap: bootstrapUsers, getUser, saveUser, deleteUser, getUserByStripeCustomerId, getAllUsers } = require('./db');
 const storage = require('./persistentState');
 const authStore = require('./authStore');
@@ -26,6 +26,7 @@ const { sendEmail, getReceivedEmail, verifyInboundSignature } = require('./email
 
 const app = express();
 const esimRetriesInProgress = new Set();
+const coverageCache = new Map();
 app.use(cors());
 
 // ВАЖЛИВО: вебхук Stripe має отримати "сирий" (не розпарсений) body,
@@ -173,6 +174,33 @@ app.post('/api/account/feedback', requireUserSession, (req, res) => {
 app.get('/api/service-status', (req, res) => {
   const maintenance = operationsStore.activeAnnouncements(null).find((item) => item.type === 'maintenance');
   res.json({ status: maintenance ? 'maintenance' : 'operational', message: maintenance?.message || null, checkedAt: new Date().toISOString() });
+});
+
+app.get('/api/account/coverage', requireUserSession, async (req, res) => {
+  const locationCode = String(req.query.location || '').trim().toUpperCase();
+  if (!/^[A-Z]{2,3}$/.test(locationCode)) return res.status(400).json({ error: 'Вкажи код країни' });
+  const cached = coverageCache.get(locationCode);
+  if (cached && Date.now() - cached.createdAt < 6 * 60 * 60 * 1000) return res.json({ locationCode, cached: true, packages: cached.packages });
+  try {
+    const packages = await listPackages({ locationCode });
+    const safePackages = packages.slice(0, 100).map((item) => ({
+      packageCode: item.packageCode,
+      name: item.name,
+      description: item.description,
+      volume: item.volume,
+      duration: item.duration,
+      durationUnit: item.durationUnit,
+      speed: item.speed,
+      currencyCode: item.currencyCode,
+      location: item.location,
+      networks: (item.locationNetworkList || []).map((network) => ({ locationName: network.locationName, operatorCount: (network.operatorList || []).length })),
+    }));
+    coverageCache.set(locationCode, { createdAt: Date.now(), packages: safePackages });
+    res.json({ locationCode, cached: false, packages: safePackages });
+  } catch (error) {
+    console.error(`[coverage] ${locationCode}:`, error.message);
+    res.status(502).json({ error: 'Не вдалося отримати покриття від eSIM-провайдера' });
+  }
 });
 
 // The activation code is intentionally available only to the account owner.

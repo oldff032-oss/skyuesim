@@ -14,3 +14,9 @@ if (!document.querySelector('script[data-signal-i18n]')) {
   script.dataset.signalI18n = 'true';
   document.head.appendChild(script);
 }
+if (window.location.pathname.endsWith('/app-tools.html')) {
+  const coverageScript = document.createElement('script');
+  coverageScript.src = '/coverage.js';
+  coverageScript.defer = true;
+  document.head.appendChild(coverageScript);
+}

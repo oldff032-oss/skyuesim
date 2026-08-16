@@ -235,6 +235,13 @@ function bytes(value) {
   return Number.isFinite(number) && number >= 0 ? number : null;
 }
 
+// Public package catalogue from eSIM Access. It is used server-side only so
+// the provider Access Code and signature never reach the customer's browser.
+async function listPackages({ locationCode = '', type = '', packageCode = '', iccid = '' } = {}) {
+  const payload = await esimAccessRequest('/api/v1/open/package/list', { locationCode, type, packageCode, iccid });
+  return payload?.obj?.packageList || [];
+}
+
 function bytesToGb(value) {
   const valueInBytes = bytes(value);
   return valueInBytes == null ? null : +(valueInBytes / (1024 ** 3)).toFixed(2);
@@ -377,4 +384,4 @@ function usageResult(usedBytes, totalBytes, profile, usageDetails = null) {
   };
 }
 
-module.exports = { provisionEsim, checkUsage, recoverEsim };
+module.exports = { provisionEsim, checkUsage, recoverEsim, listPackages };
