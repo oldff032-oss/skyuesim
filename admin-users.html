@@ -184,6 +184,9 @@
           `Винагорода: ${subscription.referralRewardStatus || '—'}`,
           `Код бонусу: ${subscription.referralRewardPackageCode || '—'}`,
           `Оновлено: ${subscription.updatedAt ? new Date(subscription.updatedAt).toLocaleString('uk-UA') : '—'}`,
+          `Push-пристроїв: ${data.security?.pushDevices ?? 0}`,
+          `Останнє автопоновлення: ${subscription.lastRenewalAt ? new Date(subscription.lastRenewalAt).toLocaleString('uk-UA') : '—'}`,
+          `Помилка автопоновлення: ${subscription.renewalError || '—'}`,
           '',
           'eSIM',
           `ICCID: ${esim.iccid || '—'}`,
@@ -209,6 +212,8 @@
           <button class="btn ghost" style="width:auto;padding:9px 12px;font-size:12px;color:var(--danger);" onclick="adminUserAction('${encodedEmail}','revoke-sessions')">Завершити входи</button>
           <button class="btn ghost" style="width:auto;padding:9px 12px;font-size:12px;" onclick="notifyUser('${encodedEmail}','push')">Push</button>
           <button class="btn ghost" style="width:auto;padding:9px 12px;font-size:12px;" onclick="notifyUser('${encodedEmail}','email')">Email</button>
+          ${subscription.status === 'renewal_failed' ? `<button class="btn primary" style="width:auto;padding:9px 12px;font-size:12px;" onclick="adminUserAction('${encodedEmail}','retry-renewal')">Повторити автопоновлення</button>` : ''}
+          ${localStorage.getItem('signal_admin_role') === 'super_admin' ? `<button class="btn ghost" style="width:auto;padding:9px 12px;font-size:12px;color:#f6b84a;" onclick="refundUserPayment('${encodedEmail}')">Повернути кошти</button>` : ''}
           ${localStorage.getItem('signal_admin_role') === 'super_admin' ? `<button class="btn" style="width:auto;padding:9px 12px;font-size:12px;background:var(--danger);border-color:var(--danger);" onclick="permanentlyDeleteUser()">Повністю видалити акаунт</button>` : ''}`;
         document.getElementById('userDetailsModal').style.display = 'block';
       } catch (error) {
@@ -313,6 +318,38 @@
         const data = await res.json(); if(!res.ok) throw new Error(data.error || 'Не вдалося надіслати');
         alert(channel === 'push' && !data.delivered ? 'Push-пристрій не підключено.' : 'Повідомлення надіслано.');
       } catch(error) { alert(error.message); }
+    }
+
+    async function refundUserPayment(encodedEmail) {
+      const email = decodeURIComponent(encodedEmail);
+      try {
+        const response = await adminFetch(`/api/admin/users/${encodedEmail}/refundable-payments`);
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Не вдалося отримати платежі Stripe');
+        if (!data.payments?.length) return alert('Немає платежів, з яких ще можна повернути кошти.');
+        const options = data.payments.map((payment, index) => `${index + 1}. ${new Date(payment.createdAt).toLocaleString('uk-UA')} · доступно ${(payment.refundableAmount / 100).toFixed(2)} ${payment.currency.toUpperCase()} · ${payment.id}`).join('\n');
+        const choice = prompt(`Виберіть номер платежу користувача ${email}:\n\n${options}`, '1');
+        if (choice === null) return;
+        const payment = data.payments[Number(choice) - 1];
+        if (!payment) return alert('Невірний номер платежу.');
+        const amountText = prompt(`Сума повернення в ${payment.currency.toUpperCase()}. Максимум ${(payment.refundableAmount / 100).toFixed(2)}:`, (payment.refundableAmount / 100).toFixed(2));
+        if (amountText === null) return;
+        const amount = Math.round(Number(String(amountText).replace(',', '.')) * 100);
+        if (!Number.isInteger(amount) || amount < 1 || amount > payment.refundableAmount) return alert('Некоректна сума повернення.');
+        const reasonChoice = prompt('Причина: 1 — прохання клієнта, 2 — подвійний платіж, 3 — шахрайство', '1');
+        if (reasonChoice === null) return;
+        const reason = ({ '1':'requested_by_customer', '2':'duplicate', '3':'fraudulent' })[reasonChoice];
+        if (!reason) return alert('Некоректна причина.');
+        const confirmationEmail = prompt(`УВАГА: Stripe поверне ${(amount / 100).toFixed(2)} ${payment.currency.toUpperCase()} на початковий спосіб оплати. Цю дію не можна скасувати.\n\nВведіть точний email ${email} для підтвердження:`);
+        if (confirmationEmail === null) return;
+        if (confirmationEmail.trim().toLowerCase() !== email.toLowerCase()) return alert('Email не збігається. Повернення скасовано.');
+        if (!confirm('Останнє підтвердження: виконати реальне повернення коштів у Stripe?')) return;
+        const requestId = (crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`).replace(/[^A-Za-z0-9-]/g, '');
+        const refundResponse = await adminFetch(`/api/admin/users/${encodedEmail}/refund`, { method:'POST', body:JSON.stringify({ chargeId:payment.id, amount, reason, confirmationEmail, requestId }) });
+        const refundData = await refundResponse.json();
+        if (!refundResponse.ok) throw new Error(refundData.error || 'Stripe не виконав повернення');
+        alert(`Повернення створено.\nStripe ID: ${refundData.refund.id}\nСума: ${(refundData.refund.amount / 100).toFixed(2)} ${refundData.refund.currency.toUpperCase()}\nСтатус: ${refundData.refund.status}\n\nПідписка користувача не скасована.`);
+      } catch (error) { alert(error.message); }
     }
 
     async function permanentlyDeleteUser() {

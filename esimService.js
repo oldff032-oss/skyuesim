@@ -24,6 +24,12 @@ const PACKAGE_CODE_MAP = {
   unlimited: process.env.ESIM_PACKAGE_CODE_UNLIMITED || '',
 };
 
+const TOPUP_PACKAGE_CODE_MAP = {
+  basic: process.env.ESIM_TOPUP_PACKAGE_CODE_BASIC || '',
+  standard: process.env.ESIM_TOPUP_PACKAGE_CODE_STANDARD || '',
+  unlimited: process.env.ESIM_TOPUP_PACKAGE_CODE_UNLIMITED || '',
+};
+
 const DEFAULT_PLAN_LIMITS_GB = { basic: 10, standard: 20, unlimited: null };
 const MAX_ATTEMPTS = positiveInteger(process.env.ESIM_MAX_ATTEMPTS, 12);
 const POLL_INTERVAL_MS = positiveInteger(process.env.ESIM_POLL_INTERVAL_MS, 5000);
@@ -242,6 +248,38 @@ async function listPackages({ locationCode = '', type = '', packageCode = '', ic
   return payload?.obj?.packageList || [];
 }
 
+async function findRenewalTopup({ iccid, plan }) {
+  const configured = TOPUP_PACKAGE_CODE_MAP[plan];
+  if (configured) return { packageCode: configured, source: 'environment' };
+  const packages = await listPackages({ type: 'TOPUP', iccid });
+  const targetGb = { basic: 10, standard: 20 }[plan] || null;
+  const candidates = packages.map(item => {
+    const volumeBytes = bytes(item.volume ?? item.dataVolume);
+    const volumeGb = volumeBytes == null ? null : bytesToGb(volumeBytes);
+    const text = `${item.name || ''} ${item.description || ''}`.toLowerCase();
+    const unlimited = Number(item.dataType) === 4 || text.includes('unlimited');
+    return { item, volumeGb, unlimited };
+  }).filter(candidate => {
+    if (!(candidate.item.packageCode || candidate.item.slug)) return false;
+    if (plan === 'unlimited') return candidate.unlimited;
+    return candidate.volumeGb != null && Math.abs(candidate.volumeGb - targetGb) <= Math.max(0.25, targetGb * 0.08);
+  }).sort((a, b) => {
+    const durationA = Math.abs(Number(a.item.duration || 30) - 30);
+    const durationB = Math.abs(Number(b.item.duration || 30) - 30);
+    return durationA - durationB || Number(a.item.price || Infinity) - Number(b.item.price || Infinity);
+  });
+  const selected = candidates[0];
+  if (!selected) {
+    throw new EsimAccessError(`No compatible renewal top-up found for plan "${plan}" and this ICCID. Configure ESIM_TOPUP_PACKAGE_CODE_${String(plan).toUpperCase()}.`, { code: 'RENEWAL_PACKAGE_NOT_FOUND' });
+  }
+  return {
+    packageCode: selected.item.packageCode || selected.item.slug,
+    source: 'provider_lookup',
+    volumeGb: selected.volumeGb,
+    name: selected.item.name || selected.item.description || null,
+  };
+}
+
 function bytesToGb(value) {
   const valueInBytes = bytes(value);
   return valueInBytes == null ? null : +(valueInBytes / (1024 ** 3)).toFixed(2);
@@ -388,7 +426,7 @@ function usageResult(usedBytes, totalBytes, profile, usageDetails = null) {
 
 // Adds a provider top-up package to an existing eSIM. Unlike /order, this
 // does not issue a second profile; it increases the existing profile balance.
-async function topupEsim({ esimTranNo = '', iccid = '', packageCode }) {
+async function topupEsim({ esimTranNo = '', iccid = '', packageCode, transactionId: suppliedTransactionId = '' }) {
   if (isConfiguredMockMode()) throw new EsimAccessError('Cannot top up a real eSIM while mock mode is enabled.', { code: 'MOCK_MODE' });
   if (!esimTranNo && !iccid) throw new EsimAccessError('eSIM UID or ICCID is required for top-up.', { code: 'ESIM_ID_REQUIRED' });
   if (!/^[A-Za-z0-9_-]{3,80}$/.test(String(packageCode || ''))) throw new EsimAccessError('A valid top-up package code is required.', { code: 'PACKAGE_CODE_INVALID' });
@@ -396,7 +434,7 @@ async function topupEsim({ esimTranNo = '', iccid = '', packageCode }) {
     esimTranNo: String(esimTranNo || ''),
     iccid: String(iccid || ''),
     packageCode: String(packageCode),
-    transactionId: transactionId(),
+    transactionId: suppliedTransactionId || transactionId(),
   });
   const topup = result?.obj || {};
   const totalBytes = bytes(topup.totalVolume);
@@ -412,5 +450,4 @@ async function topupEsim({ esimTranNo = '', iccid = '', packageCode }) {
   };
 }
 
-module.exports = { provisionEsim, checkUsage, recoverEsim, topupEsim, listPackages };
-
+module.exports = { provisionEsim, checkUsage, recoverEsim, topupEsim, listPackages, findRenewalTopup };

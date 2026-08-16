@@ -58,7 +58,17 @@
       if('serviceWorker' in navigator && 'PushManager' in window){
         const registration = await navigator.serviceWorker.ready;
         const subscription = await registration.pushManager.getSubscription();
-        if(subscription){ document.getElementById('pushBtn').textContent = 'Push-сповіщення увімкнено'; document.getElementById('testPushBtn').style.display = 'block'; }
+        if(subscription){
+          const statusRes = await fetch(`${API_URL}/api/push/status?endpoint=${encodeURIComponent(subscription.endpoint)}`, {headers});
+          const status = await statusRes.json();
+          if(statusRes.ok && status.configured && status.registered){
+            document.getElementById('pushBtn').textContent = 'Push-сповіщення увімкнено';
+            document.getElementById('testPushBtn').style.display = 'block';
+          } else {
+            document.getElementById('pushBtn').textContent = 'Перепідключити push-сповіщення';
+            document.getElementById('message').textContent = status.configured ? 'Підписку браузера потрібно синхронізувати із сервером.' : 'Push не налаштовано на сервері: перевір VAPID ключі.';
+          }
+        }
       }
     }
     async function save(){
@@ -83,6 +93,12 @@
         const keyRes = await fetch(`${API_URL}/api/push/public-key`, {headers});
         const keyData = await keyRes.json(); if(!keyRes.ok) throw new Error(keyData.error || 'Push ще не налаштовано');
         const registration = await navigator.serviceWorker.ready;
+        await registration.update();
+        const oldSubscription = await registration.pushManager.getSubscription();
+        if(oldSubscription){
+          await fetch(`${API_URL}/api/push/unsubscribe`, {method:'POST',headers,body:JSON.stringify({endpoint:oldSubscription.endpoint})}).catch(()=>{});
+          await oldSubscription.unsubscribe();
+        }
         const subscription = await registration.pushManager.subscribe({userVisibleOnly:true, applicationServerKey:base64ToUint8Array(keyData.publicKey)});
         const saveRes = await fetch(`${API_URL}/api/push/subscribe`, {method:'POST',headers,body:JSON.stringify({subscription:subscription.toJSON()})});
         const saveData = await saveRes.json(); if(!saveRes.ok) throw new Error(saveData.error || 'Не вдалося зберегти підписку');
@@ -102,4 +118,3 @@
   </script>
 </body>
 </html>
-

@@ -74,6 +74,33 @@ async function getBillingHistory(customerId) {
   }));
 }
 
+async function listRefundablePayments(customerId) {
+  if (!customerId) return [];
+  const charges = await stripe.charges.list({ customer: customerId, limit: 30 });
+  return charges.data
+    .filter(charge => charge.paid && !charge.disputed && charge.amount > charge.amount_refunded)
+    .map(charge => ({
+      id: charge.id,
+      createdAt: new Date(charge.created * 1000).toISOString(),
+      amount: charge.amount,
+      amountRefunded: charge.amount_refunded,
+      refundableAmount: charge.amount - charge.amount_refunded,
+      currency: charge.currency,
+      description: charge.description || charge.metadata?.plan || 'Stripe payment',
+      receiptUrl: charge.receipt_url || null,
+    }));
+}
+
+async function refundPayment({ customerId, chargeId, amount, reason = 'requested_by_customer', metadata = {}, idempotencyKey }) {
+  const charge = await stripe.charges.retrieve(chargeId);
+  const chargeCustomer = typeof charge.customer === 'string' ? charge.customer : charge.customer?.id;
+  if (!chargeCustomer || chargeCustomer !== customerId) throw new Error('Цей платіж не належить вибраному користувачу');
+  if (!charge.paid || charge.disputed) throw new Error('Цей платіж не можна повернути');
+  const refundableAmount = charge.amount - charge.amount_refunded;
+  if (!Number.isInteger(amount) || amount < 1 || amount > refundableAmount) throw new Error('Сума перевищує доступний залишок повернення');
+  return stripe.refunds.create({ charge: chargeId, amount, reason, metadata }, idempotencyKey ? { idempotencyKey } : undefined);
+}
+
 // Read-only evidence for a Super Admin reviewing an account recovery request.
 // Only non-sensitive card metadata is returned; full card data never reaches us.
 async function getRecoveryPaymentEvidence(customerId) {
@@ -116,4 +143,4 @@ function constructWebhookEvent(rawBody, signature) {
   );
 }
 
-module.exports = { createCheckoutSession, createCustomPackageCheckout, cancelSubscription, deleteStripeCustomer, constructWebhookEvent, getNextBillingDate, getBillingHistory, getRecoveryPaymentEvidence };
+module.exports = { createCheckoutSession, createCustomPackageCheckout, cancelSubscription, deleteStripeCustomer, constructWebhookEvent, getNextBillingDate, getBillingHistory, getRecoveryPaymentEvidence, listRefundablePayments, refundPayment };

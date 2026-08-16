@@ -9,9 +9,9 @@ const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const { generateRegistrationOptions, verifyRegistrationResponse } = require('@simplewebauthn/server');
 
-const { createCheckoutSession, createCustomPackageCheckout, cancelSubscription, deleteStripeCustomer, constructWebhookEvent, getNextBillingDate, getBillingHistory, getRecoveryPaymentEvidence } = require('./stripeService');
+const { createCheckoutSession, createCustomPackageCheckout, cancelSubscription, deleteStripeCustomer, constructWebhookEvent, getNextBillingDate, getBillingHistory, getRecoveryPaymentEvidence, listRefundablePayments, refundPayment } = require('./stripeService');
 const crypto = require('crypto');
-const { provisionEsim, checkUsage, recoverEsim, topupEsim, listPackages } = require('./esimService');
+const { provisionEsim, checkUsage, recoverEsim, topupEsim, listPackages, findRenewalTopup } = require('./esimService');
 const { bootstrap: bootstrapUsers, getUser, saveUser, deleteUser, getUserByStripeCustomerId, getAllUsers } = require('./db');
 const storage = require('./persistentState');
 const authStore = require('./authStore');
@@ -28,6 +28,7 @@ const { sendEmail, getReceivedEmail, verifyInboundSignature } = require('./email
 
 const app = express();
 const esimRetriesInProgress = new Set();
+const renewalInvoicesInProgress = new Set();
 const coverageCache = new Map();
 const accessRecoveryRateLimit = new Map();
 app.use(cors());
@@ -269,6 +270,12 @@ app.post('/api/push/subscribe', requireUserSession, (req, res) => {
   } catch (error) {
     res.status(400).json({ error: error.message });
   }
+});
+
+app.get('/api/push/status', requireUserSession, (req, res) => {
+  const endpoint = String(req.query.endpoint || '');
+  const registered = endpoint ? pushStore.subscriptionsFor(req.userEmail).some(subscription => subscription.endpoint === endpoint) : false;
+  res.json({ configured: isPushConfigured(), registered, devices: pushStore.subscriptionsFor(req.userEmail).length });
 });
 
 app.post('/api/push/unsubscribe', requireUserSession, (req, res) => {
@@ -708,13 +715,23 @@ app.post('/api/admin/announcements', adminAuth.requireAdmin, adminAuth.requireRo
   const { title, message, audience='all', expiresAt=null, sendPush=false, type='notice' } = req.body || {};
   if(!title || !message) return res.status(400).json({error:'Вкажіть заголовок і текст'});
   const isMaintenance = type === 'maintenance' || /^\s*\[maintenance\]/i.test(String(title));
-  const announcement={ id:Date.now().toString(36), title:String(title).replace(/^\s*\[maintenance\]\s*/i,'').slice(0,100), message:String(message).slice(0,500), audience, type:isMaintenance?'maintenance':'notice', startsAt:new Date().toISOString(), expiresAt:expiresAt||null, createdBy:req.admin.email };
+  const normalizedAudience = isMaintenance ? 'all' : String(audience || 'all').trim().toLowerCase();
+  if (normalizedAudience !== 'all' && !authStore.readAll().users?.[normalizedAudience] && !getUser(normalizedAudience)) return res.status(404).json({error:'Користувача з таким email не знайдено'});
+  if (expiresAt && Number.isNaN(new Date(expiresAt).getTime())) return res.status(400).json({error:'Некоректна дата завершення'});
+  const announcement={ id:Date.now().toString(36), title:String(title).replace(/^\s*\[maintenance\]\s*/i,'').slice(0,100), message:String(message).slice(0,500), audience:normalizedAudience, type:isMaintenance?'maintenance':'notice', startsAt:new Date().toISOString(), expiresAt:expiresAt||null, createdBy:req.admin.email };
   operationsStore.store().announcements.unshift(announcement); operationsStore.save();
-  if(sendPush && audience !== 'all') Promise.all([
-    translationService.forEmail(audience, announcement.title, getUser),
-    translationService.forEmail(audience, announcement.message, getUser),
-  ]).then(([localizedTitle, localizedMessage]) => sendToEmail(audience,{title:localizedTitle,body:localizedMessage,url:'/dashboard.html',tag:`announcement-${announcement.id}`})).catch(()=>{});
-  auditStore.log({adminEmail:req.admin.email,action:'announcement_created',target:audience,details:{id:announcement.id}}); res.json(announcement);
+  let pushRecipients = 0, pushDelivered = 0;
+  if(sendPush && isPushConfigured()) {
+    const recipients = normalizedAudience === 'all' ? Object.keys(authStore.readAll().users || {}) : [normalizedAudience];
+    pushRecipients = recipients.length;
+    for (const email of recipients) {
+      try {
+        const [localizedTitle, localizedMessage] = await Promise.all([translationService.forEmail(email, announcement.title, getUser), translationService.forEmail(email, announcement.message, getUser)]);
+        pushDelivered += await sendToEmail(email,{title:localizedTitle,body:localizedMessage,url:'/dashboard.html',tag:`announcement-${announcement.id}`});
+      } catch (error) { console.error(`[announcement push] ${email}:`, error.message); }
+    }
+  }
+  auditStore.log({adminEmail:req.admin.email,action:'announcement_created',target:normalizedAudience,details:{id:announcement.id,type:announcement.type,sendPush,pushRecipients,pushDelivered}}); res.json({...announcement,pushRecipients,pushDelivered,pushConfigured:isPushConfigured()});
 });
 app.post('/api/admin/notify-bulk', adminAuth.requireAdmin, adminAuth.requireRole('super_admin','admin'), async (req,res) => {
   const { channel, title, message, status, plan, minUsage } = req.body || {};
@@ -769,6 +786,44 @@ app.get('/api/admin/users/:email', adminAuth.requireAdmin, (req, res) => {
     notes: operationsStore.store().notes[email] || [],
     tickets: ticketStore.getTicketsByEmail(email),
   });
+});
+
+app.get('/api/admin/users/:email/refundable-payments', adminAuth.requireAdmin, adminAuth.requireRole('super_admin'), async (req, res) => {
+  try {
+    const email = String(req.params.email || '').trim().toLowerCase();
+    const user = getUser(email);
+    if (!user?.stripeCustomerId) return res.status(404).json({ error: 'У користувача немає Stripe-платежів' });
+    res.json({ payments: await listRefundablePayments(user.stripeCustomerId) });
+  } catch (error) {
+    res.status(502).json({ error: `Stripe: ${error.message}` });
+  }
+});
+
+app.post('/api/admin/users/:email/refund', adminAuth.requireAdmin, adminAuth.requireRole('super_admin'), async (req, res) => {
+  const email = String(req.params.email || '').trim().toLowerCase();
+  const { chargeId, amount, reason = 'requested_by_customer', confirmationEmail, requestId } = req.body || {};
+  if (String(confirmationEmail || '').trim().toLowerCase() !== email) return res.status(400).json({ error: 'Email підтвердження не збігається' });
+  if (!/^ch_[A-Za-z0-9]+$/.test(String(chargeId || ''))) return res.status(400).json({ error: 'Некоректний Stripe-платіж' });
+  if (!['requested_by_customer','duplicate','fraudulent'].includes(reason)) return res.status(400).json({ error: 'Некоректна причина повернення' });
+  if (!/^[A-Za-z0-9-]{16,80}$/.test(String(requestId || ''))) return res.status(400).json({ error: 'Некоректний ідентифікатор операції' });
+  const amountCents = Number(amount);
+  const user = getUser(email);
+  if (!user?.stripeCustomerId) return res.status(404).json({ error: 'Stripe-профіль користувача не знайдено' });
+  try {
+    const refund = await refundPayment({
+      customerId: user.stripeCustomerId,
+      chargeId: String(chargeId),
+      amount: amountCents,
+      reason,
+      metadata: { signal_user_email: email, signal_admin_email: req.admin.email },
+      idempotencyKey: `signal-admin-refund-${requestId}`,
+    });
+    auditStore.log({ adminEmail:req.admin.email, action:'stripe_refund_created', target:email, details:{ refundId:refund.id, chargeId, amount:refund.amount, currency:refund.currency, status:refund.status, reason } });
+    res.json({ ok:true, refund:{ id:refund.id, amount:refund.amount, currency:refund.currency, status:refund.status } });
+  } catch (error) {
+    auditStore.log({ adminEmail:req.admin.email, action:'stripe_refund_failed', target:email, details:{ chargeId, amount:amountCents, reason, error:error.message } });
+    res.status(502).json({ error:`Stripe не виконав повернення: ${error.message}` });
+  }
 });
 
 // Permanently remove the application account so the same email can register
@@ -859,7 +914,12 @@ app.post('/api/admin/users/:email/notify', adminAuth.requireAdmin, adminAuth.req
     let delivered = 0;
     const localizedTitle = await translationService.forEmail(email, title || 'Сигнал', getUser);
     const localizedMessage = await translationService.forEmail(email, String(message), getUser);
-    if (channel === 'push') delivered = await sendToEmail(email, { title: localizedTitle, body: localizedMessage, url: '/dashboard.html', tag: 'admin-message' });
+    if (channel === 'push') {
+      if (!isPushConfigured()) return res.status(503).json({ error: 'Push не налаштовано на сервері. Додайте правильну пару VAPID ключів у Render Environment.' });
+      if (!pushStore.subscriptionsFor(email).length) return res.status(409).json({ error: 'У користувача немає підключеного push-пристрою. Попросіть його відкрити «Сповіщення» та натиснути «Увімкнути/перепідключити push».' });
+      delivered = await sendToEmail(email, { title: localizedTitle, body: localizedMessage, url: '/dashboard.html', tag: 'admin-message' });
+      if (!delivered) return res.status(410).json({ error: 'Push-підписка користувача прострочена або браузер її відхилив. Користувачу потрібно перепідключити push у застосунку.' });
+    }
     else if (channel === 'email') {
       await sendEmail({ to: email, subject: localizedTitle, html: `<p>${localizedMessage.replace(/[&<>]/g, (char) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;' }[char])).replace(/\n/g, '<br>')}</p>` });
       delivered = 1;
@@ -1085,6 +1145,81 @@ app.post('/api/create-subscription', async (req, res) => {
 // ---------- 2. Вебхук від Stripe ----------
 // Stripe сам викликає цю адресу, коли оплата пройшла успішно.
 // Саме тут ми довіряємо, що гроші реально прийшли, і видаємо eSIM.
+async function processSubscriptionRenewal(invoice) {
+  const invoiceId = String(invoice.id || '');
+  if (!invoiceId) return { ok: false, error: 'Stripe invoice ID is missing' };
+  if (renewalInvoicesInProgress.has(invoiceId)) return { ok: false, error: 'Поновлення вже виконується' };
+  const customerId = typeof invoice.customer === 'string' ? invoice.customer : invoice.customer?.id;
+  const user = getUserByStripeCustomerId(customerId);
+  if (!user?.email || !user.esim?.iccid || !user.plan) {
+    console.warn(`[renewal] ${invoiceId}: user/eSIM/plan not found for customer ${customerId || 'n/a'}`);
+    return { ok: false, error: 'Користувача, eSIM або тариф не знайдено' };
+  }
+  if (user.lastRenewalInvoiceId === invoiceId || user.renewalInvoices?.[invoiceId]?.status === 'succeeded') return { ok: true, duplicate: true };
+
+  renewalInvoicesInProgress.add(invoiceId);
+  saveUser(user.email, { renewalInvoices: { ...(user.renewalInvoices || {}), [invoiceId]: { status: 'processing', startedAt: new Date().toISOString() } } });
+  try {
+    const selected = await findRenewalTopup({ iccid: user.esim.iccid, plan: user.plan });
+    const topup = await topupEsim({
+      esimTranNo: user.esim.esimTranNo,
+      iccid: user.esim.iccid,
+      packageCode: selected.packageCode,
+      transactionId: `stripe-${invoiceId}`,
+    });
+    const current = getUser(user.email) || user;
+    const now = new Date().toISOString();
+    saveUser(user.email, {
+      status: 'active',
+      lastRenewalInvoiceId: invoiceId,
+      lastRenewalAt: now,
+      renewalError: null,
+      renewalInvoices: { ...(current.renewalInvoices || {}), [invoiceId]: { status: 'succeeded', packageCode: selected.packageCode, completedAt: now } },
+      esim: {
+        ...current.esim,
+        ...(topup.totalGb != null ? { dataLimitGb: topup.totalGb } : {}),
+        ...(topup.usedGb != null ? { usedGb: topup.usedGb } : {}),
+        ...(topup.remainingGb != null ? { remainingGb: topup.remainingGb } : {}),
+        ...(topup.expiredTime ? { expiredTime: topup.expiredTime } : {}),
+        lastTopupAt: now,
+        lastTopupPackageCode: selected.packageCode,
+        lastPushAlertThreshold: null,
+      },
+    });
+    sendToEmail(user.email, { title: 'Тариф успішно поновлено', body: `Оплату отримано. Пакет ${user.plan} автоматично поновлено.`, url: '/dashboard.html', tag: `renewal-${invoiceId.slice(-12)}` }).catch(error => console.error(`[renewal push] ${user.email}:`, error.message));
+    console.log(`[renewal] ${user.email}: ${invoiceId} -> ${selected.packageCode}`);
+    return { ok: true, packageCode: selected.packageCode };
+  } catch (error) {
+    const current = getUser(user.email) || user;
+    const failedAt = new Date().toISOString();
+    saveUser(user.email, {
+      status: 'renewal_failed',
+      renewalError: error.message,
+      renewalFailedAt: failedAt,
+      renewalInvoices: { ...(current.renewalInvoices || {}), [invoiceId]: { status: 'failed', message: error.message, failedAt } },
+    });
+    sendToEmail(user.email, { title: 'Потрібна увага до тарифу', body: 'Оплату отримано, але пакет eSIM ще не поновлено. Підтримка вже бачить помилку.', url: '/support.html', tag: `renewal-failed-${invoiceId.slice(-8)}` }).catch(() => {});
+    console.error(`[renewal] ${user.email}: ${invoiceId} failed:`, error.message);
+    return { ok: false, error: error.message };
+  } finally {
+    renewalInvoicesInProgress.delete(invoiceId);
+  }
+}
+
+app.post('/api/admin/users/:email/retry-renewal', adminAuth.requireAdmin, adminAuth.requireRole('super_admin', 'admin'), async (req, res) => {
+  const email = String(req.params.email || '').trim().toLowerCase();
+  const user = getUser(email);
+  if (!user) return res.status(404).json({ error: 'Користувача не знайдено' });
+  const failed = Object.entries(user.renewalInvoices || {})
+    .filter(([, item]) => item?.status === 'failed')
+    .sort((a, b) => String(b[1].failedAt || '').localeCompare(String(a[1].failedAt || '')))[0];
+  if (!failed) return res.status(409).json({ error: 'Немає невдалого оплаченого поновлення для повтору.' });
+  const result = await processSubscriptionRenewal({ id: failed[0], customer: user.stripeCustomerId, billing_reason: 'subscription_cycle' });
+  auditStore.log({ adminEmail: req.admin.email, action: 'subscription_renewal_retried', target: email, details: { invoiceId: failed[0], ok: Boolean(result?.ok) } });
+  if (!result?.ok) return res.status(502).json({ error: result?.error || 'Пакет eSIM не вдалося поновити.' });
+  res.json({ ok: true, invoiceId: failed[0], packageCode: result.packageCode });
+});
+
 app.post('/api/webhook', async (req, res) => {
   let event;
   try {
@@ -1126,6 +1261,23 @@ app.post('/api/webhook', async (req, res) => {
     const sub = event.data.object;
     const user = getUserByStripeCustomerId(sub.customer);
     if (user) saveUser(user.email, { status: 'canceled' });
+  }
+
+  if (event.type === 'invoice.paid') {
+    const invoice = event.data.object;
+    // The first invoice is fulfilled by checkout.session.completed. Only a
+    // real subscription cycle should top up the existing profile.
+    if (invoice.billing_reason === 'subscription_cycle') await processSubscriptionRenewal(invoice);
+  }
+
+  if (event.type === 'invoice.payment_failed') {
+    const invoice = event.data.object;
+    const customerId = typeof invoice.customer === 'string' ? invoice.customer : invoice.customer?.id;
+    const user = getUserByStripeCustomerId(customerId);
+    if (user) {
+      saveUser(user.email, { status: 'renewal_payment_failed', renewalPaymentFailedAt: new Date().toISOString(), renewalPaymentInvoiceId: invoice.id || null });
+      sendToEmail(user.email, { title: 'Не вдалося поновити тариф', body: 'Stripe не зміг провести щомісячну оплату. Перевір спосіб оплати.', url: '/payments.html', tag: 'renewal-payment-failed' }).catch(() => {});
+    }
   }
 
   res.json({ received: true });
