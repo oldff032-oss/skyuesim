@@ -11,6 +11,16 @@ function requireAdminAuth(){
     if(teamLink) teamLink.style.display = 'none';
     if(auditLink) auditLink.style.display = 'none';
   }
+  const nav = document.querySelector('.admin-nav');
+  if(nav && !document.getElementById('guideNavLink')){
+    const guide = document.createElement('a');
+    guide.id = 'guideNavLink';
+    guide.href = 'admin-guide.html';
+    guide.textContent = '📚 Інструкції';
+    if(window.location.pathname.endsWith('/admin-guide.html')) guide.classList.add('active');
+    const logoutLink = nav.querySelector('a[onclick="logout()"]');
+    nav.insertBefore(guide, logoutLink || null);
+  }
 }
 
 async function adminFetch(path, options = {}){

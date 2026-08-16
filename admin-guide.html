@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Інструкції — Signal Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<style>
+  .guide-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(285px,1fr));gap:14px;margin-top:20px}
+  .guide-card{padding:20px}.guide-card h2{font-size:16px;margin:0}.guide-card p,.guide-card li{font-size:13px;line-height:1.55;color:var(--text-muted)}
+  .guide-card ol,.guide-card ul{padding-left:19px;margin:10px 0 0}.guide-card li+li{margin-top:6px}
+  .guide-card a{color:var(--cyan);text-decoration:none}.guide-tag{display:inline-block;font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;padding:4px 8px;border-radius:8px;background:rgba(59,130,246,.14);color:var(--blue);margin-bottom:11px}
+  .guide-warning{margin-top:18px;padding:16px 18px;border:1px solid rgba(245,166,35,.38);background:rgba(245,166,35,.08);border-radius:14px;color:var(--text-muted);font-size:13px;line-height:1.55}
+</style>
+</head>
+<body>
+  <div class="admin-shell">
+    <aside class="admin-sidebar">
+      <div class="brand"><div class="mark" style="width:32px;height:32px;font-size:15px;">🛡️</div><span style="font-size:15px;">Signal Admin</span></div>
+      <nav class="admin-nav">
+        <a href="admin-dashboard.html">📊 Dashboard</a>
+        <a href="admin-tickets.html">🎫 Підтримка</a>
+        <a href="admin-users.html">👥 Користувачі</a>
+        <a href="admin-operations.html">⚙️ Операції</a>
+        <a href="admin-team.html" id="teamNavLink">🔑 Команда</a>
+        <a href="admin-audit.html" id="auditNavLink">🛡️ Журнал дій</a>
+        <a href="#" onclick="logout()">⏏ Вийти</a>
+      </nav>
+    </aside>
+    <main class="admin-main">
+      <h1 style="font-size:24px;">📚 Інструкції для адмінки</h1>
+      <p class="lead">Коротко: що натискати, коли це робити і що отримає користувач.</p>
+
+      <div class="guide-warning"><strong style="color:var(--text)">Важливо.</strong> Оплата та видача eSIM — різні речі. Ніколи не проси користувача платити повторно, якщо Stripe уже підтвердив оплату. Для втраченої eSIM використовуй відновлення за ICCID.</div>
+
+      <div class="guide-grid">
+        <section class="glass guide-card"><span class="guide-tag">Щоденна робота</span><h2>Dashboard</h2><p>Тут дивись загальну картину: нові реєстрації, помилки eSIM, трафік 80%+, незакріплені тікети та eSIM, у яких скоро закінчується строк.</p><ol><li>Спочатку відкрий «Операційна увага».</li><li>Візьми тікети без виконавця.</li><li>Перевір помилки eSIM — вони потребують ручної дії.</li></ol></section>
+
+        <section class="glass guide-card"><span class="guide-tag">Користувачі</span><h2>Деталі акаунта</h2><p>У «Користувачі» натисни «Деталі». Там є тариф, статус, ICCID, UID eSIM, використання, сесії, push-пристрої та історія звернень.</p><ul><li><strong>Заблокувати</strong> — негайно закриває доступ.</li><li><strong>Розблокувати</strong> — повертає доступ.</li><li><strong>Завершити входи</strong> — коли є підозра на чужий вхід.</li><li><strong>Оновити трафік</strong> — запитує свіжі дані у провайдера.</li></ul></section>
+
+        <section class="glass guide-card"><span class="guide-tag">eSIM</span><h2>Відновити eSIM без оплати</h2><p>Якщо оплата пройшла, але eSIM не з’явилася, або дані зникли:</p><ol><li>Відкрий «Деталі» користувача.</li><li>Натисни «Відновити eSIM».</li><li>Введи <strong>ICCID</strong> eSIM — це цифровий номер із 15–22 цифр.</li><li>Обери тариф і підтвердь.</li></ol><p>Ця дія лише прив’язує існуючу eSIM до акаунта. Stripe не списує кошти й нове замовлення не створюється.</p></section>
+
+        <section class="glass guide-card"><span class="guide-tag">Підтримка</span><h2>Як вести звернення</h2><ol><li>«Відкритий» — звернення ще ніхто не взяв.</li><li>«В роботі» — ти вже займаєшся проблемою.</li><li>«Очікує клієнта» — потрібна відповідь або дані від користувача.</li><li>«Вирішено» — проблема усунена, але запис ще видно.</li><li>«Закрито» — тікет повністю видаляється з адмінки, застосунку й бази.</li></ol><p>Перед закриттям переконайся, що користувач отримав відповідь.</p></section>
+
+        <section class="glass guide-card"><span class="guide-tag">Повідомлення</span><h2>Push та Email</h2><p>У «Деталях» користувача є кнопки <strong>Push</strong> і <strong>Email</strong>. Введи короткий заголовок і текст. Для користувача з англійською мовою повідомлення перекладеться автоматично.</p><ul><li>Push приходить лише на підключений пристрій.</li><li>Email надходить завжди, якщо пошта налаштована.</li><li>Не надсилай коди, паролі або платіжні дані.</li></ul></section>
+
+        <section class="glass guide-card"><span class="guide-tag">Оголошення</span><h2>Повідомлення в застосунку</h2><p>Відкрий «Операції» → «Нове оголошення». Воно з’явиться на головній сторінці користувача. Можна вказати конкретний email або всіх користувачів, а також дату зникнення.</p><p>Для звичайного повідомлення напиши назву і текст та натисни «Опублікувати».</p></section>
+
+        <section class="glass guide-card"><span class="guide-tag">Терміново</span><h2>Технічні роботи на весь екран</h2><p>У «Операції» створюй оголошення, де заголовок починається так:</p><p style="padding:10px;border-radius:8px;background:rgba(0,0,0,.2);font-family:monospace;color:var(--cyan);">[maintenance] Технічні роботи</p><p>Напиши причину, наприклад «Оновлюємо сервер. Повернемося о 18:00», за потреби постав дату завершення. Користувач побачить повноекранне повідомлення замість застосунку.</p><p>Після робіт видали оголошення або дочекайся часу завершення.</p></section>
+
+        <section class="glass guide-card"><span class="guide-tag">Безпека</span><h2>Чорний список</h2><p>У «Операції» можна додати email до чорного списку. Такий email не зможе зареєструватися або почати нову оплату.</p><p>Для вже створеного акаунта використовуй кнопку «Заблокувати» в розділі користувачів. ICCID у чорному списку зберігається для контролю, але не замінює блокування акаунта.</p></section>
+
+        <section class="glass guide-card"><span class="guide-tag">Команда</span><h2>Ролі адміністраторів</h2><ul><li><strong>Super Admin</strong> — повний доступ, команда, аудит і резервні копії.</li><li><strong>Admin</strong> — користувачі, eSIM, платежі, підтримка.</li><li><strong>Support</strong> — робота із зверненнями й даними користувачів.</li><li><strong>Viewer</strong> — лише перегляд.</li></ul><p>Не давай роль Super Admin без реальної потреби.</p></section>
+      </div>
+    </main>
+  </div>
+  <script src="config.js"></script>
+  <script src="admin-common.js"></script>
+  <script>requireAdminAuth();</script>
+</body>
+</html>
