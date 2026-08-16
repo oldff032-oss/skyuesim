@@ -9,7 +9,7 @@ const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const { generateRegistrationOptions, verifyRegistrationResponse } = require('@simplewebauthn/server');
 
-const { createCheckoutSession, createCustomPackageCheckout, cancelSubscription, cancelAllSubscriptionsForCustomers, deleteStripeCustomer, constructWebhookEvent, getNextBillingDate, getBillingHistory, getRecoveryPaymentEvidence, findCustomerIdsByEmail, listRefundablePaymentsByEmail, refundPayment } = require('./stripeService');
+const { createCheckoutSession, createCustomPackageCheckout, cancelSubscription, cancelAllSubscriptionsForCustomers, deleteStripeCustomer, constructWebhookEvent, getNextBillingDate, getBillingHistory, getRecoveryPaymentEvidence, findCustomerIdsByEmail, getCustomerEmail, getSubscriptionStateByEmail, listRefundablePaymentsByEmail, refundPayment } = require('./stripeService');
 const crypto = require('crypto');
 const { provisionEsim, checkUsage, recoverEsim, topupEsim, listPackages, findRenewalTopup } = require('./esimService');
 const { bootstrap: bootstrapUsers, getUser, saveUser, deleteUser, getUserByStripeCustomerId, getAllUsers } = require('./db');
@@ -799,6 +799,27 @@ app.get('/api/admin/users/:email/refundable-payments', adminAuth.requireAdmin, a
   }
 });
 
+app.post('/api/admin/users/:email/sync-stripe-status', adminAuth.requireAdmin, adminAuth.requireRole('super_admin','admin'), async (req, res) => {
+  const email = String(req.params.email || '').trim().toLowerCase();
+  const user = getUser(email);
+  if (!user && !authStore.readAll().users?.[email]) return res.status(404).json({ error:'Користувача не знайдено' });
+  try {
+    const state = await getSubscriptionStateByEmail(email, user?.stripeCustomerId || null);
+    const status = state.active.length ? 'active' : 'canceled';
+    saveUser(email, {
+      status,
+      stripeCustomerIds: state.customerIds,
+      stripeSubscriptionIds: state.subscriptions.map(subscription => subscription.id),
+      stripeStatusSyncedAt: new Date().toISOString(),
+      ...(status === 'canceled' ? { canceledAt:new Date().toISOString(), canceledReason:'stripe_sync' } : {}),
+    });
+    auditStore.log({ adminEmail:req.admin.email, action:'stripe_status_synchronized', target:email, details:{ status, customerIds:state.customerIds, subscriptions:state.subscriptions } });
+    res.json({ ok:true, status, activeSubscriptions:state.active.length, subscriptions:state.subscriptions });
+  } catch (error) {
+    res.status(502).json({ error:`Не вдалося перевірити Stripe: ${error.message}` });
+  }
+});
+
 app.post('/api/admin/users/:email/refund', adminAuth.requireAdmin, adminAuth.requireRole('super_admin'), async (req, res) => {
   const email = String(req.params.email || '').trim().toLowerCase();
   const { chargeId, amount, reason = 'requested_by_customer', confirmationEmail, requestId } = req.body || {};
@@ -1284,8 +1305,17 @@ app.post('/api/webhook', async (req, res) => {
 
   if (event.type === 'customer.subscription.deleted') {
     const sub = event.data.object;
-    const user = getUserByStripeCustomerId(sub.customer);
-    if (user) saveUser(user.email, { status: 'canceled' });
+    let user = getUserByStripeCustomerId(sub.customer);
+    if (!user) {
+      try {
+        const customerEmail = await getCustomerEmail(typeof sub.customer === 'string' ? sub.customer : sub.customer?.id);
+        if (customerEmail) user = getUser(customerEmail);
+      } catch (error) { console.error('[subscription deleted lookup]', error.message); }
+    }
+    if (user) {
+      const state = await getSubscriptionStateByEmail(user.email, user.stripeCustomerId || null).catch(() => null);
+      if (!state || !state.active.length) saveUser(user.email, { status:'canceled', canceledAt:new Date().toISOString(), canceledReason:'stripe_webhook' });
+    }
   }
 
   if (event.type === 'invoice.paid') {

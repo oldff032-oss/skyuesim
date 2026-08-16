@@ -131,6 +131,24 @@ async function cancelAllSubscriptionsForCustomers(customerIds) {
   return { canceled, errors };
 }
 
+async function getCustomerEmail(customerId) {
+  if (!customerId) return null;
+  const customer = await stripe.customers.retrieve(customerId);
+  return customer && !customer.deleted ? String(customer.email || '').trim().toLowerCase() || null : null;
+}
+
+async function getSubscriptionStateByEmail(email, knownCustomerId = null) {
+  const customerIds = await findCustomerIdsByEmail(email, knownCustomerId);
+  const subscriptions = [];
+  for (const customer of customerIds) {
+    const list = await stripe.subscriptions.list({ customer, status: 'all', limit: 100 });
+    subscriptions.push(...list.data.map(subscription => ({ id:subscription.id, customer, status:subscription.status, cancelAtPeriodEnd:subscription.cancel_at_period_end })));
+  }
+  const unique = [...new Map(subscriptions.map(subscription => [subscription.id, subscription])).values()];
+  const active = unique.filter(subscription => !['canceled','incomplete_expired'].includes(subscription.status));
+  return { customerIds, subscriptions:unique, active };
+}
+
 // Read-only evidence for a Super Admin reviewing an account recovery request.
 // Only non-sensitive card metadata is returned; full card data never reaches us.
 async function getRecoveryPaymentEvidence(customerId) {
@@ -173,4 +191,4 @@ function constructWebhookEvent(rawBody, signature) {
   );
 }
 
-module.exports = { createCheckoutSession, createCustomPackageCheckout, cancelSubscription, cancelAllSubscriptionsForCustomers, deleteStripeCustomer, constructWebhookEvent, getNextBillingDate, getBillingHistory, getRecoveryPaymentEvidence, findCustomerIdsByEmail, listRefundablePaymentsByEmail, refundPayment };
+module.exports = { createCheckoutSession, createCustomPackageCheckout, cancelSubscription, cancelAllSubscriptionsForCustomers, deleteStripeCustomer, constructWebhookEvent, getNextBillingDate, getBillingHistory, getRecoveryPaymentEvidence, findCustomerIdsByEmail, getCustomerEmail, getSubscriptionStateByEmail, listRefundablePaymentsByEmail, refundPayment };
