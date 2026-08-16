@@ -23,6 +23,13 @@ function addMessage(id, { from, text, attachment }) {
   if (from === 'admin' && ticket.status === 'open') ticket.status = 'in_progress'; writeAll(store); return ticket;
 }
 function updateTicket(id, patch) { const ticket = getTicket(id); if (!ticket) return null; Object.assign(ticket, patch, { updatedAt: new Date().toISOString() }); writeAll(store); return ticket; }
+function deleteTicket(id) {
+  const index = store.findIndex(ticket => ticket.id === id);
+  if (index < 0) return null;
+  const [deleted] = store.splice(index, 1);
+  writeAll(store);
+  return deleted;
+}
 function stripNotesForUser(ticket) { return ticket ? { ...ticket, messages: ticket.messages.filter(message => message.from !== 'note') } : ticket; }
 
-module.exports = { bootstrap, createTicket, getTicketsByEmail, getAllTickets, getTicket, addMessage, updateTicket, stripNotesForUser };
+module.exports = { bootstrap, createTicket, getTicketsByEmail, getAllTickets, getTicket, addMessage, updateTicket, deleteTicket, stripNotesForUser };

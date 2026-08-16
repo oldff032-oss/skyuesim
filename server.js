@@ -419,6 +419,12 @@ app.patch('/api/admin/tickets/:id', adminAuth.requireAdmin, adminAuth.requireRol
   if (assignedTo !== undefined && assignedTo !== null && assignedTo !== '' && !adminStore.readAll().admins?.[assignedTo]) {
     return res.status(400).json({ error: 'Призначеного адміністратора не знайдено' });
   }
+  if (status === 'closed') {
+    const deleted = ticketStore.deleteTicket(req.params.id);
+    if (!deleted) return res.status(404).json({ error: 'Тікет не знайдено' });
+    auditStore.log({ adminEmail: req.admin.email, action: 'ticket_closed_and_deleted', target: `#${req.params.id}` });
+    return res.json({ ok: true, deleted: true });
+  }
   const updated = ticketStore.updateTicket(req.params.id, {
     ...(status && { status }),
     ...(priority && { priority }),

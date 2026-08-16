@@ -184,7 +184,10 @@
       const status = document.getElementById('statusSelect').value;
       const priority = document.getElementById('prioritySelect').value;
       const assignedTo = document.getElementById('assignedToSelect')?.value;
-      await adminFetch(`/api/admin/tickets/${ticketId}`, { method:'PATCH', body: JSON.stringify({ status, priority, assignedTo }) });
+      if(status === 'closed' && !confirm('Закрити й повністю видалити це звернення? Воно зникне і з адмінки, і з застосунку користувача.')) { load(); return; }
+      const response = await adminFetch(`/api/admin/tickets/${ticketId}`, { method:'PATCH', body: JSON.stringify({ status, priority, assignedTo }) });
+      if(!response.ok) { const data = await response.json().catch(() => ({})); alert(data.error || 'Не вдалося оновити звернення'); return; }
+      if(status === 'closed') { window.location.href = 'admin-tickets.html'; return; }
       load();
     }
 
