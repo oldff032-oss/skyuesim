@@ -244,10 +244,10 @@
     }
 
     async function prepareReferralReward(encodedEmail) {
-      const packageCode = prompt('Введіть packageCode top-up пакета на 1 ГБ з eSIM Access:');
-      if (!packageCode) return;
+      const selected = await selectCompatibleReferralTopup(encodedEmail);
+      if (!selected) return;
       try {
-        const response = await adminFetch(`/api/admin/referrals/${encodedEmail}/prepare-reward`, { method: 'POST', body: JSON.stringify({ packageCode: packageCode.trim() }) });
+        const response = await adminFetch(`/api/admin/referrals/${encodedEmail}/prepare-reward`, { method: 'POST', body: JSON.stringify({ packageCode: selected.packageCode }) });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || 'Не вдалося підготувати винагороду');
         alert('Готово. Користувач отримав статус: винагорода очікується 12–24 години.');
@@ -256,16 +256,38 @@
     }
 
     async function creditReferralReward(encodedEmail) {
-      const packageCode = prompt('Введіть packageCode top-up пакета на 1 ГБ. Він буде застосований до eSIM того, хто запросив друга:');
-      if (!packageCode) return;
-      if (!confirm('Підтвердити реальне поповнення eSIM на 1 ГБ? Цю дію не можна скасувати.')) return;
+      const selected = await selectCompatibleReferralTopup(encodedEmail);
+      if (!selected) return;
+      const priceText = selected.price == null ? 'ціна не вказана провайдером' : `${selected.price.toFixed(2)} ${selected.currencyCode}`;
+      if (!confirm(`Підтвердити реальне поповнення ${selected.beneficiary} пакетом ${selected.name} (${selected.volumeGb} ГБ, ${priceText})? Кошти будуть списані з балансу eSIM Access.`)) return;
       try {
-        const response = await adminFetch(`/api/admin/referrals/${encodedEmail}/credit-reward`, { method: 'POST', body: JSON.stringify({ packageCode: packageCode.trim() }) });
+        const response = await adminFetch(`/api/admin/referrals/${encodedEmail}/credit-reward`, { method: 'POST', body: JSON.stringify({ packageCode: selected.packageCode }) });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || 'Не вдалося нарахувати винагороду');
         alert(`Готово. 1 ГБ нараховано користувачу ${data.beneficiary}.`);
         await showUserDetails(encodedEmail); await load();
       } catch (error) { alert(error.message); }
+    }
+
+    async function selectCompatibleReferralTopup(encodedEmail) {
+      try {
+        const response = await adminFetch(`/api/admin/referrals/${encodedEmail}/compatible-topups`);
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Не вдалося знайти сумісні пакети');
+        const options = data.packages.map((item, index) => {
+          const price = item.price == null ? 'ціна —' : `${item.price.toFixed(2)} ${item.currencyCode}`;
+          const validity = item.duration ? `${item.duration} ${item.durationUnit || 'дн.'}` : 'строк —';
+          return `${index + 1}. ${item.name} · ${item.volumeGb} ГБ · ${validity} · ${price} · ${item.packageCode}`;
+        }).join('\n');
+        const choice = prompt(`Отримувач бонусу: ${data.beneficiary}\nICCID закінчується на ${data.iccidLast4}\n\nВибери номер сумісного пакета 1 ГБ:\n\n${options}`, '1');
+        if (choice === null) return null;
+        const selected = data.packages[Number(choice) - 1];
+        if (!selected) { alert('Невірний номер пакета.'); return null; }
+        return { ...selected, beneficiary: data.beneficiary };
+      } catch (error) {
+        alert(error.message || 'Помилка пошуку top-up пакетів');
+        return null;
+      }
     }
 
     async function adminUserAction(encodedEmail, action) {

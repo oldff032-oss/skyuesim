@@ -892,6 +892,39 @@ app.get('/api/admin/referrals', adminAuth.requireAdmin, adminAuth.requireRole('s
   res.json(Object.values(getAllUsers()).filter((user) => user.referredBy).map((user) => ({ email: user.email, referredBy: user.referredBy, status: user.referralRewardStatus || 'pending_first_payment', packageCode: user.referralRewardPackageCode || null, createdAt: user.createdAt || null })));
 });
 
+// Resolve the inviter first, then ask eSIM Access which 1 GB top-ups are
+// compatible with that exact ICCID. This removes manual package-code entry.
+app.get('/api/admin/referrals/:email/compatible-topups', adminAuth.requireAdmin, adminAuth.requireRole('super_admin', 'admin'), async (req, res) => {
+  const invited = getUser(req.params.email);
+  if (!invited?.referredBy) return res.status(404).json({ error: 'Для цього користувача не знайдено того, хто запросив' });
+  const beneficiary = getUser(invited.referredBy);
+  if (!beneficiary?.esim?.iccid) return res.status(409).json({ error: 'У того, хто запросив, немає активної eSIM з ICCID' });
+  try {
+    const packages = await listPackages({ type: 'TOPUP', iccid: beneficiary.esim.iccid });
+    const normalized = packages.map(item => {
+      const bytes = Number(item.volume || item.dataVolume || 0);
+      const volumeGb = bytes > 0 ? +(bytes / (1024 ** 3)).toFixed(2) : null;
+      const rawPrice = Number(item.price ?? 0);
+      return {
+        packageCode: item.packageCode || item.slug || null,
+        slug: item.slug || null,
+        name: item.name || item.description || item.packageCode || item.slug || 'Top-up',
+        location: item.location || null,
+        volumeGb,
+        duration: item.duration ?? null,
+        durationUnit: item.durationUnit || null,
+        currencyCode: item.currencyCode || 'USD',
+        price: Number.isFinite(rawPrice) && rawPrice > 0 ? +(rawPrice / 10000).toFixed(2) : null,
+      };
+    }).filter(item => item.packageCode && item.volumeGb != null && item.volumeGb >= 0.8 && item.volumeGb <= 1.2);
+    if (!normalized.length) return res.status(404).json({ error: 'eSIM Access не повернув сумісних пакетів приблизно на 1 ГБ для цієї eSIM' });
+    res.json({ beneficiary: beneficiary.email, iccidLast4: String(beneficiary.esim.iccid).slice(-4), packages: normalized });
+  } catch (error) {
+    console.error(`[referral topups] ${invited.referredBy}:`, error.message);
+    res.status(502).json({ error: error.message });
+  }
+});
+
 app.post('/api/admin/referrals/:email/prepare-reward', adminAuth.requireAdmin, adminAuth.requireRole('super_admin', 'admin'), async (req, res) => {
   const email = req.params.email;
   const user = getUser(email);
