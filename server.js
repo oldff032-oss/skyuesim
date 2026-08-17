@@ -44,6 +44,18 @@ function upsertPurchase(email, purchaseId, patch, defaults = {}) {
   return next;
 }
 
+async function syncPurchasesForUser(email) {
+  const user = getUser(email);
+  const imported = await listCompletedCheckoutPurchasesByEmail(email, user?.stripeCustomerId || null);
+  const currentPurchases = Array.isArray(user?.purchases) ? user.purchases : [];
+  imported.forEach((purchase, index) => {
+    const existing = currentPurchases.find(item => item.id === purchase.id);
+    const inferredStatus = !existing && user?.status === 'payment_ok_esim_failed' && index === 0 ? 'failed' : 'not_recorded';
+    upsertPurchase(email, purchase.id, { ...purchase, fulfillmentStatus:existing?.fulfillmentStatus || inferredStatus, fulfillmentError:existing?.fulfillmentError || (inferredStatus === 'failed' ? user?.lastEsimProvisionError || 'Оплату знайдено, QR/eSIM не була видана' : null) });
+  });
+  return imported.length;
+}
+
 // ВАЖЛИВО: вебхук Stripe має отримати "сирий" (не розпарсений) body,
 // тому для цього одного маршруту JSON-парсер вимикаємо.
 app.use('/api/webhook', express.raw({ type: 'application/json' }));
@@ -836,18 +848,31 @@ app.post('/api/admin/users/:email/sync-purchases', adminAuth.requireAdmin, admin
   const user = getUser(email);
   if (!user && !authStore.readAll().users?.[email]) return res.status(404).json({ error:'Користувача не знайдено' });
   try {
-    const imported = await listCompletedCheckoutPurchasesByEmail(email, user?.stripeCustomerId || null);
-    const currentPurchases = Array.isArray(user?.purchases) ? user.purchases : [];
-    imported.forEach((purchase, index) => {
-      const existing = currentPurchases.find(item => item.id === purchase.id);
-      const inferredStatus = !existing && user?.status === 'payment_ok_esim_failed' && index === 0 ? 'failed' : 'not_recorded';
-      upsertPurchase(email, purchase.id, { ...purchase, fulfillmentStatus:existing?.fulfillmentStatus || inferredStatus, fulfillmentError:existing?.fulfillmentError || (inferredStatus === 'failed' ? user?.lastEsimProvisionError || 'Оплату знайдено, QR/eSIM не була видана' : null) });
-    });
+    const imported = await syncPurchasesForUser(email);
     auditStore.log({ adminEmail:req.admin.email, action:'stripe_purchases_synchronized', target:email, details:{ imported:imported.length } });
     res.json({ ok:true, imported:imported.length, purchases:getUser(email)?.purchases || [] });
   } catch (error) {
     res.status(502).json({ error:`Не вдалося завантажити покупки зі Stripe: ${error.message}` });
   }
+});
+
+app.get('/api/admin/purchases', adminAuth.requireAdmin, adminAuth.requireRole('super_admin','admin','support','viewer'), (req, res) => {
+  const purchases = Object.values(getAllUsers()).flatMap(user => (user.purchases || []).map(purchase => ({ ...purchase, email:user.email, accountStatus:user.status || null })))
+    .sort((a,b) => new Date(b.paidAt || b.createdAt || 0) - new Date(a.paidAt || a.createdAt || 0));
+  res.json({ purchases, totals:{ purchases:purchases.length, paid:purchases.filter(item=>item.paymentStatus==='paid').length, failed:purchases.filter(item=>item.fulfillmentStatus==='failed').length, provisioned:purchases.filter(item=>item.fulfillmentStatus==='provisioned').length } });
+});
+
+app.post('/api/admin/purchases/sync-all', adminAuth.requireAdmin, adminAuth.requireRole('super_admin','admin'), async (req, res) => {
+  const emails = [...new Set([...Object.keys(authStore.readAll().users || {}), ...Object.keys(getAllUsers())])];
+  if (emails.length > 500) return res.status(409).json({ error:'Забагато користувачів для одного запуску. Зверніться до розробника для фонової синхронізації.' });
+  let imported = 0;
+  const errors = [];
+  for (const email of emails) {
+    try { imported += await syncPurchasesForUser(email); }
+    catch (error) { errors.push({ email, error:error.message }); }
+  }
+  auditStore.log({ adminEmail:req.admin.email, action:'all_stripe_purchases_synchronized', target:`${emails.length} users`, details:{ imported, errors:errors.length } });
+  res.json({ ok:true, users:emails.length, imported, errors });
 });
 
 app.post('/api/admin/users/:email/refund', adminAuth.requireAdmin, adminAuth.requireRole('super_admin'), async (req, res) => {

@@ -12,6 +12,15 @@ function requireAdminAuth(){
     if(auditLink) auditLink.style.display = 'none';
   }
   const nav = document.querySelector('.admin-nav');
+  if(nav && !document.getElementById('purchasesNavLink')){
+    const purchases = document.createElement('a');
+    purchases.id = 'purchasesNavLink';
+    purchases.href = 'admin-purchases.html';
+    purchases.textContent = '🧾 Покупки';
+    if(window.location.pathname.endsWith('/admin-purchases.html')) purchases.classList.add('active');
+    const operationsLink = [...nav.querySelectorAll('a')].find(link => link.getAttribute('href') === 'admin-operations.html');
+    nav.insertBefore(purchases, operationsLink || nav.querySelector('a[onclick="logout()"]') || null);
+  }
   if(nav && !document.getElementById('guideNavLink')){
     const guide = document.createElement('a');
     guide.id = 'guideNavLink';
@@ -47,4 +56,3 @@ function logout(){
   localStorage.removeItem('signal_admin_email');
   window.location.href = 'admin-login.html';
 }
-

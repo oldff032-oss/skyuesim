@@ -224,7 +224,7 @@
           <button class="btn ghost" style="width:auto;padding:9px 12px;font-size:12px;" onclick="notifyUser('${encodedEmail}','email')">Email</button>
           ${subscription.status === 'renewal_failed' ? `<button class="btn primary" style="width:auto;padding:9px 12px;font-size:12px;" onclick="adminUserAction('${encodedEmail}','retry-renewal')">Повторити автопоновлення</button>` : ''}
           <button class="btn ghost" style="width:auto;padding:9px 12px;font-size:12px;" onclick="adminUserAction('${encodedEmail}','sync-stripe-status')">Синхронізувати Stripe</button>
-          <button class="btn ghost" style="width:auto;padding:9px 12px;font-size:12px;" onclick="adminUserAction('${encodedEmail}','sync-purchases')">Завантажити покупки зі Stripe</button>
+          <button class="btn ghost" style="width:auto;padding:9px 12px;font-size:12px;" onclick="syncPurchasesAndOpen('${encodedEmail}')">Завантажити покупки зі Stripe</button>
           ${purchases.filter(item => item.fulfillmentStatus === 'failed').map(item => `<button class="btn primary" style="width:auto;padding:9px 12px;font-size:12px;" onclick="retryPurchaseProvision('${encodedEmail}','${encodeURIComponent(item.id)}')">Повторити видачу: ${String(item.packageName || item.plan || 'пакет').replace(/[&<>"']/g, '')}</button>`).join('')}
           ${localStorage.getItem('signal_admin_role') === 'super_admin' ? `<button class="btn ghost" style="width:auto;padding:9px 12px;font-size:12px;color:#f6b84a;" onclick="refundUserPayment('${encodedEmail}')">Повернути кошти</button>` : ''}
           ${localStorage.getItem('signal_admin_role') === 'super_admin' ? `<button class="btn" style="width:auto;padding:9px 12px;font-size:12px;background:var(--danger);border-color:var(--danger);" onclick="permanentlyDeleteUser()">Повністю видалити акаунт</button>` : ''}`;
@@ -274,6 +274,15 @@
         if (!response.ok) throw new Error(data.error || 'Не вдалося видати eSIM');
         alert(`eSIM видано. Замовлення: ${data.esim?.orderNo || 'створено'}`);
         await showUserDetails(encodedEmail); await load();
+      } catch (error) { alert(error.message); }
+    }
+
+    async function syncPurchasesAndOpen(encodedEmail) {
+      try {
+        const response = await adminFetch(`/api/admin/users/${encodedEmail}/sync-purchases`, { method:'POST' });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Не вдалося завантажити покупки');
+        window.location.href = `admin-purchases.html?email=${encodedEmail}`;
       } catch (error) { alert(error.message); }
     }
 
@@ -431,7 +440,10 @@
     document.getElementById('search').addEventListener('input', applyFilters);
     ['userStatusFilter','userPlanFilter','userUsageFilter'].forEach((id) => document.getElementById(id).addEventListener('change', applyFilters));
 
-    load();
+    load().then(() => {
+      const requestedEmail = new URLSearchParams(location.search).get('email');
+      if (requestedEmail) showUserDetails(encodeURIComponent(requestedEmail));
+    });
   </script>
 </body>
 </html>
