@@ -49,7 +49,7 @@ async function getNextBillingDate(subscriptionId) {
   return sub.current_period_end ? new Date(sub.current_period_end * 1000).toISOString() : null;
 }
 
-async function createCustomPackageCheckout({ email, packageCode, packageName, amountCents, currency = 'usd', dataLimitGb = null }) {
+async function createCustomPackageCheckout({ email, packageCode, packageName, amountCents, currency = 'usd', dataLimitGb = null, durationDays = null, location = '' }) {
   const session = await stripe.checkout.sessions.create({
     mode: 'payment',
     customer_email: email,
@@ -57,7 +57,7 @@ async function createCustomPackageCheckout({ email, packageCode, packageName, am
     line_items: [{ price_data: { currency, product_data: { name: packageName }, unit_amount: amountCents }, quantity: 1 }],
     success_url: `${process.env.FRONTEND_URL}/installing.html?email=${encodeURIComponent(email)}`,
     cancel_url: `${process.env.FRONTEND_URL}/profile.html`,
-    metadata: { plan: 'custom', email, packageCode, packageName, dataLimitGb: dataLimitGb == null ? '' : String(dataLimitGb) },
+    metadata: { plan: 'custom', email, packageCode, packageName, dataLimitGb: dataLimitGb == null ? '' : String(dataLimitGb), durationDays: durationDays == null ? '' : String(durationDays), location: String(location || '').slice(0,80) },
   });
   return session;
 }
@@ -149,6 +149,32 @@ async function getSubscriptionStateByEmail(email, knownCustomerId = null) {
   return { customerIds, subscriptions:unique, active };
 }
 
+async function listCompletedCheckoutPurchasesByEmail(email, knownCustomerId = null) {
+  const customerIds = await findCustomerIdsByEmail(email, knownCustomerId);
+  const sessionLists = await Promise.all(customerIds.map(customer => stripe.checkout.sessions.list({ customer, status:'complete', limit:100 })));
+  return [...new Map(sessionLists.flatMap(list => list.data).map(session => [session.id, session])).values()]
+    .filter(session => session.payment_status === 'paid')
+    .sort((a,b) => b.created - a.created)
+    .map(session => ({
+      id:session.id,
+      kind:session.metadata?.plan === 'custom' ? 'custom_package' : 'subscription',
+      plan:session.metadata?.plan || null,
+      packageCode:session.metadata?.packageCode || null,
+      packageName:session.metadata?.packageName || session.metadata?.plan || 'Stripe purchase',
+      dataLimitGb:session.metadata?.dataLimitGb ? Number(session.metadata.dataLimitGb) : ({basic:10,standard:20,unlimited:null}[session.metadata?.plan] ?? null),
+      durationDays:session.metadata?.durationDays ? Number(session.metadata.durationDays) : (session.metadata?.plan && session.metadata.plan !== 'custom' ? 30 : null),
+      location:session.metadata?.location || null,
+      amountCents:session.amount_total ?? null,
+      currency:session.currency || null,
+      stripeSessionId:session.id,
+      stripeCustomerId:typeof session.customer === 'string' ? session.customer : session.customer?.id || null,
+      stripeSubscriptionId:typeof session.subscription === 'string' ? session.subscription : session.subscription?.id || null,
+      stripePaymentIntentId:typeof session.payment_intent === 'string' ? session.payment_intent : session.payment_intent?.id || null,
+      paidAt:new Date(session.created * 1000).toISOString(),
+      paymentStatus:session.payment_status,
+    }));
+}
+
 // Read-only evidence for a Super Admin reviewing an account recovery request.
 // Only non-sensitive card metadata is returned; full card data never reaches us.
 async function getRecoveryPaymentEvidence(customerId) {
@@ -191,4 +217,4 @@ function constructWebhookEvent(rawBody, signature) {
   );
 }
 
-module.exports = { createCheckoutSession, createCustomPackageCheckout, cancelSubscription, cancelAllSubscriptionsForCustomers, deleteStripeCustomer, constructWebhookEvent, getNextBillingDate, getBillingHistory, getRecoveryPaymentEvidence, findCustomerIdsByEmail, getCustomerEmail, getSubscriptionStateByEmail, listRefundablePaymentsByEmail, refundPayment };
+module.exports = { createCheckoutSession, createCustomPackageCheckout, cancelSubscription, cancelAllSubscriptionsForCustomers, deleteStripeCustomer, constructWebhookEvent, getNextBillingDate, getBillingHistory, getRecoveryPaymentEvidence, findCustomerIdsByEmail, getCustomerEmail, getSubscriptionStateByEmail, listCompletedCheckoutPurchasesByEmail, listRefundablePaymentsByEmail, refundPayment };

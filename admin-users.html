@@ -174,6 +174,7 @@
         if (!res.ok) throw new Error(data.error || 'Не вдалося отримати дані користувача');
         const subscription = data.subscription || {};
         const esim = subscription.esim || {};
+        const purchases = Array.isArray(subscription.purchases) ? subscription.purchases : [];
         const lines = [
           `Email: ${data.email}`,
           `Зареєстрований: ${data.account?.createdAt ? new Date(data.account.createdAt).toLocaleString('uk-UA') : '—'}`,
@@ -187,6 +188,15 @@
           `Push-пристроїв: ${data.security?.pushDevices ?? 0}`,
           `Останнє автопоновлення: ${subscription.lastRenewalAt ? new Date(subscription.lastRenewalAt).toLocaleString('uk-UA') : '—'}`,
           `Помилка автопоновлення: ${subscription.renewalError || '—'}`,
+          '',
+          'ІСТОРІЯ ПОКУПОК',
+          ...(purchases.length ? purchases.flatMap((purchase, index) => [
+            `${index + 1}. ${purchase.packageName || purchase.plan || 'Пакет'}${purchase.location ? ` · ${purchase.location}` : ''}`,
+            `   Обсяг/строк: ${purchase.dataLimitGb ?? 'безліміт'} ГБ · ${purchase.durationDays ?? '—'} днів`,
+            `   Оплата: ${purchase.amountCents == null ? '—' : (purchase.amountCents / 100).toFixed(2)} ${(purchase.currency || '').toUpperCase()} · ${purchase.paymentStatus || '—'}`,
+            `   Видача eSIM: ${purchase.fulfillmentStatus || '—'}${purchase.fulfillmentError ? ` · ${purchase.fulfillmentError}` : ''}`,
+            `   packageCode: ${purchase.packageCode || 'тарифний код із Render'} · Stripe Session: ${purchase.stripeSessionId || purchase.id}`,
+          ]) : ['Покупок ще не записано (старі оплати можна перевірити через Stripe/повернення).']),
           '',
           'eSIM',
           `ICCID: ${esim.iccid || '—'}`,
@@ -214,6 +224,8 @@
           <button class="btn ghost" style="width:auto;padding:9px 12px;font-size:12px;" onclick="notifyUser('${encodedEmail}','email')">Email</button>
           ${subscription.status === 'renewal_failed' ? `<button class="btn primary" style="width:auto;padding:9px 12px;font-size:12px;" onclick="adminUserAction('${encodedEmail}','retry-renewal')">Повторити автопоновлення</button>` : ''}
           <button class="btn ghost" style="width:auto;padding:9px 12px;font-size:12px;" onclick="adminUserAction('${encodedEmail}','sync-stripe-status')">Синхронізувати Stripe</button>
+          <button class="btn ghost" style="width:auto;padding:9px 12px;font-size:12px;" onclick="adminUserAction('${encodedEmail}','sync-purchases')">Завантажити покупки зі Stripe</button>
+          ${purchases.filter(item => item.fulfillmentStatus === 'failed').map(item => `<button class="btn primary" style="width:auto;padding:9px 12px;font-size:12px;" onclick="retryPurchaseProvision('${encodedEmail}','${encodeURIComponent(item.id)}')">Повторити видачу: ${String(item.packageName || item.plan || 'пакет').replace(/[&<>"']/g, '')}</button>`).join('')}
           ${localStorage.getItem('signal_admin_role') === 'super_admin' ? `<button class="btn ghost" style="width:auto;padding:9px 12px;font-size:12px;color:#f6b84a;" onclick="refundUserPayment('${encodedEmail}')">Повернути кошти</button>` : ''}
           ${localStorage.getItem('signal_admin_role') === 'super_admin' ? `<button class="btn" style="width:auto;padding:9px 12px;font-size:12px;background:var(--danger);border-color:var(--danger);" onclick="permanentlyDeleteUser()">Повністю видалити акаунт</button>` : ''}`;
         document.getElementById('userDetailsModal').style.display = 'block';
@@ -237,15 +249,31 @@
       const amountCents = Math.round(Number(String(price).replace(',', '.')) * 100);
       if (!Number.isInteger(amountCents) || amountCents < 50) return alert('Вкажіть коректну ціну, мінімум $0.50.');
       const dataLimit = prompt('Обсяг пакета в ГБ (необов’язково):', '');
+      const durationDays = prompt('Строк дії пакета в днях (наприклад 7 або 30):', '');
+      if (durationDays === null) return;
+      const location = prompt('Країна або регіон пакета (наприклад Czech Republic):', '');
+      if (location === null) return;
       try {
         const response = await adminFetch(`/api/admin/users/${encodedEmail}/custom-package-checkout`, {
           method: 'POST',
-          body: JSON.stringify({ packageCode: packageCode.trim(), packageName: packageName.trim(), amountCents, currency: 'usd', dataLimitGb: dataLimit === '' ? null : Number(dataLimit) })
+          body: JSON.stringify({ packageCode: packageCode.trim(), packageName: packageName.trim(), amountCents, currency: 'usd', dataLimitGb: dataLimit === '' ? null : Number(dataLimit), durationDays: durationDays === '' ? null : Number(durationDays), location: location.trim() })
         });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || 'Не вдалося створити оплату');
         await navigator.clipboard?.writeText(data.url);
         prompt('Stripe-посилання створено й скопійовано. Надішли його користувачу:', data.url);
+      } catch (error) { alert(error.message); }
+    }
+
+    async function retryPurchaseProvision(encodedEmail, encodedPurchaseId) {
+      const email = decodeURIComponent(encodedEmail);
+      if (!confirm(`Повторити видачу саме цієї оплаченої eSIM для ${email}? Нова оплата не створюється, але вартість пакета може бути списана з балансу eSIM Access.`)) return;
+      try {
+        const response = await adminFetch(`/api/admin/users/${encodedEmail}/purchases/${encodedPurchaseId}/retry-provision`, { method:'POST' });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Не вдалося видати eSIM');
+        alert(`eSIM видано. Замовлення: ${data.esim?.orderNo || 'створено'}`);
+        await showUserDetails(encodedEmail); await load();
       } catch (error) { alert(error.message); }
     }
 

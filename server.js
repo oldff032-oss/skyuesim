@@ -9,7 +9,7 @@ const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const { generateRegistrationOptions, verifyRegistrationResponse } = require('@simplewebauthn/server');
 
-const { createCheckoutSession, createCustomPackageCheckout, cancelSubscription, cancelAllSubscriptionsForCustomers, deleteStripeCustomer, constructWebhookEvent, getNextBillingDate, getBillingHistory, getRecoveryPaymentEvidence, findCustomerIdsByEmail, getCustomerEmail, getSubscriptionStateByEmail, listRefundablePaymentsByEmail, refundPayment } = require('./stripeService');
+const { createCheckoutSession, createCustomPackageCheckout, cancelSubscription, cancelAllSubscriptionsForCustomers, deleteStripeCustomer, constructWebhookEvent, getNextBillingDate, getBillingHistory, getRecoveryPaymentEvidence, findCustomerIdsByEmail, getCustomerEmail, getSubscriptionStateByEmail, listCompletedCheckoutPurchasesByEmail, listRefundablePaymentsByEmail, refundPayment } = require('./stripeService');
 const crypto = require('crypto');
 const { provisionEsim, checkUsage, recoverEsim, topupEsim, listPackages, findRenewalTopup } = require('./esimService');
 const { bootstrap: bootstrapUsers, getUser, saveUser, deleteUser, getUserByStripeCustomerId, getAllUsers } = require('./db');
@@ -32,6 +32,17 @@ const renewalInvoicesInProgress = new Set();
 const coverageCache = new Map();
 const accessRecoveryRateLimit = new Map();
 app.use(cors());
+
+function upsertPurchase(email, purchaseId, patch, defaults = {}) {
+  const user = getUser(email) || {};
+  const purchases = Array.isArray(user.purchases) ? [...user.purchases] : [];
+  const index = purchases.findIndex(item => item.id === purchaseId);
+  const current = index >= 0 ? purchases[index] : { id:purchaseId, createdAt:new Date().toISOString(), ...defaults };
+  const next = { ...current, ...patch, updatedAt:new Date().toISOString() };
+  if (index >= 0) purchases[index] = next; else purchases.unshift(next);
+  saveUser(email, { purchases });
+  return next;
+}
 
 // ВАЖЛИВО: вебхук Stripe має отримати "сирий" (не розпарсений) body,
 // тому для цього одного маршруту JSON-парсер вимикаємо.
@@ -820,6 +831,25 @@ app.post('/api/admin/users/:email/sync-stripe-status', adminAuth.requireAdmin, a
   }
 });
 
+app.post('/api/admin/users/:email/sync-purchases', adminAuth.requireAdmin, adminAuth.requireRole('super_admin','admin'), async (req, res) => {
+  const email = String(req.params.email || '').trim().toLowerCase();
+  const user = getUser(email);
+  if (!user && !authStore.readAll().users?.[email]) return res.status(404).json({ error:'Користувача не знайдено' });
+  try {
+    const imported = await listCompletedCheckoutPurchasesByEmail(email, user?.stripeCustomerId || null);
+    const currentPurchases = Array.isArray(user?.purchases) ? user.purchases : [];
+    imported.forEach((purchase, index) => {
+      const existing = currentPurchases.find(item => item.id === purchase.id);
+      const inferredStatus = !existing && user?.status === 'payment_ok_esim_failed' && index === 0 ? 'failed' : 'not_recorded';
+      upsertPurchase(email, purchase.id, { ...purchase, fulfillmentStatus:existing?.fulfillmentStatus || inferredStatus, fulfillmentError:existing?.fulfillmentError || (inferredStatus === 'failed' ? user?.lastEsimProvisionError || 'Оплату знайдено, QR/eSIM не була видана' : null) });
+    });
+    auditStore.log({ adminEmail:req.admin.email, action:'stripe_purchases_synchronized', target:email, details:{ imported:imported.length } });
+    res.json({ ok:true, imported:imported.length, purchases:getUser(email)?.purchases || [] });
+  } catch (error) {
+    res.status(502).json({ error:`Не вдалося завантажити покупки зі Stripe: ${error.message}` });
+  }
+});
+
 app.post('/api/admin/users/:email/refund', adminAuth.requireAdmin, adminAuth.requireRole('super_admin'), async (req, res) => {
   const email = String(req.params.email || '').trim().toLowerCase();
   const { chargeId, amount, reason = 'requested_by_customer', confirmationEmail, requestId } = req.body || {};
@@ -970,7 +1000,7 @@ app.post('/api/admin/users/:email/notify', adminAuth.requireAdmin, adminAuth.req
 
 app.post('/api/admin/users/:email/custom-package-checkout', adminAuth.requireAdmin, adminAuth.requireRole('super_admin', 'admin'), async (req, res) => {
   const email = req.params.email;
-  const { packageCode, packageName, amountCents, currency = 'usd', dataLimitGb = null } = req.body || {};
+  const { packageCode, packageName, amountCents, currency = 'usd', dataLimitGb = null, durationDays = null, location = '' } = req.body || {};
   const user = getUser(email);
   if (!user) return res.status(404).json({ error: 'Користувача не знайдено' });
   if (user.esim?.orderNo && user.status === 'active') return res.status(409).json({ error: 'У користувача вже є активна eSIM. Продаж другого профілю буде додано окремо, щоб не замінити поточну eSIM.' });
@@ -979,7 +1009,7 @@ app.post('/api/admin/users/:email/custom-package-checkout', adminAuth.requireAdm
   if (!Number.isInteger(Number(amountCents)) || Number(amountCents) < 50 || Number(amountCents) > 1000000) return res.status(400).json({ error: 'Вкажіть ціну в центах: від $0.50 до $10,000' });
   if (!/^[a-z]{3}$/i.test(currency)) return res.status(400).json({ error: 'Некоректна валюта' });
   try {
-    const session = await createCustomPackageCheckout({ email, packageCode: String(packageCode), packageName: String(packageName).trim(), amountCents: Number(amountCents), currency: String(currency).toLowerCase(), dataLimitGb });
+    const session = await createCustomPackageCheckout({ email, packageCode: String(packageCode), packageName: String(packageName).trim(), amountCents: Number(amountCents), currency: String(currency).toLowerCase(), dataLimitGb, durationDays, location });
     auditStore.log({ adminEmail: req.admin.email, action: 'custom_package_checkout_created', target: email, details: { packageCode, amountCents, currency } });
     res.json({ ok: true, url: session.url });
   } catch (error) { res.status(502).json({ error: error.message }); }
@@ -1133,6 +1163,37 @@ app.post('/api/admin/users/:email/retry-esim', adminAuth.requireAdmin, adminAuth
   }
 });
 
+app.post('/api/admin/users/:email/purchases/:purchaseId/retry-provision', adminAuth.requireAdmin, adminAuth.requireRole('super_admin','admin'), async (req, res) => {
+  const email = String(req.params.email || '').trim().toLowerCase();
+  const purchaseId = String(req.params.purchaseId || '');
+  const user = getUser(email);
+  const purchase = (user?.purchases || []).find(item => item.id === purchaseId);
+  if (!purchase) return res.status(404).json({ error:'Покупку не знайдено' });
+  if (purchase.paymentStatus !== 'paid') return res.status(409).json({ error:'Stripe не підтвердив оплату цієї покупки' });
+  if (purchase.fulfillmentStatus !== 'failed') return res.status(409).json({ error:'Повторити можна лише невдалу видачу' });
+  if (user.status === 'canceled') return res.status(409).json({ error:'Підписку/акаунт скасовано. Спочатку перевірте оплату та статус у Stripe.' });
+  if (user.esim?.orderNo && user.status === 'active') return res.status(409).json({ error:'В акаунті вже є активна eSIM. Автоматична заміна могла б стерти її дані.' });
+  const retryKey = `${email}:${purchaseId}`;
+  if (esimRetriesInProgress.has(retryKey)) return res.status(409).json({ error:'Ця видача вже виконується' });
+  esimRetriesInProgress.add(retryKey);
+  upsertPurchase(email, purchaseId, { fulfillmentStatus:'provisioning', retryStartedAt:new Date().toISOString(), fulfillmentError:null });
+  try {
+    const esim = await provisionEsim({ email, plan:purchase.plan, packageCode:purchase.packageCode || '', dataLimitGb:purchase.dataLimitGb });
+    esim.dashboardQrExpiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+    saveUser(email, { status:'active', plan:purchase.plan, esim, lastEsimProvisionError:null });
+    upsertPurchase(email, purchaseId, { fulfillmentStatus:'provisioned', fulfilledAt:new Date().toISOString(), fulfillmentError:null, esimOrderNo:esim.orderNo || null, iccid:esim.iccid || null, esimTranNo:esim.esimTranNo || null });
+    auditStore.log({ adminEmail:req.admin.email, action:'paid_purchase_provision_retried', target:email, details:{ purchaseId, packageCode:purchase.packageCode, orderNo:esim.orderNo } });
+    res.json({ ok:true, purchaseId, esim });
+  } catch (error) {
+    saveUser(email, { status:'payment_ok_esim_failed', lastEsimProvisionError:error.message });
+    upsertPurchase(email, purchaseId, { fulfillmentStatus:'failed', failedAt:new Date().toISOString(), fulfillmentError:error.message, fulfillmentErrorCode:error.code || null });
+    auditStore.log({ adminEmail:req.admin.email, action:'paid_purchase_provision_retry_failed', target:email, details:{ purchaseId, packageCode:purchase.packageCode, error:error.message } });
+    res.status(502).json({ error:`eSIM Access: ${error.message}` });
+  } finally {
+    esimRetriesInProgress.delete(retryKey);
+  }
+});
+
 // Reconnect a profile that already exists at eSIM Access after local account
 // data was lost. This is read-only at the provider: it does not order or bill.
 app.post('/api/admin/users/:email/recover-esim', adminAuth.requireAdmin, adminAuth.requireRole('super_admin'), async (req, res) => {
@@ -1271,20 +1332,42 @@ app.post('/api/webhook', async (req, res) => {
     const session = event.data.object;
     const email = session.metadata.email;
     const plan = session.metadata.plan;
+    const packageCode = session.metadata.packageCode || '';
+    const dataLimitGb = session.metadata.dataLimitGb === '' || session.metadata.dataLimitGb == null
+      ? ({ basic:10, standard:20, unlimited:null }[plan] ?? null)
+      : Number(session.metadata.dataLimitGb);
+    const durationDays = session.metadata.durationDays ? Number(session.metadata.durationDays) : (plan === 'custom' ? null : 30);
+    const purchaseDefaults = {
+      kind: plan === 'custom' ? 'custom_package' : 'subscription',
+      plan,
+      packageCode: packageCode || null,
+      packageName: session.metadata.packageName || plan,
+      dataLimitGb,
+      durationDays,
+      location: session.metadata.location || null,
+      amountCents: session.amount_total ?? null,
+      currency: session.currency || null,
+      stripeSessionId: session.id,
+      stripeCustomerId: typeof session.customer === 'string' ? session.customer : session.customer?.id || null,
+      stripeSubscriptionId: typeof session.subscription === 'string' ? session.subscription : session.subscription?.id || null,
+      stripePaymentIntentId: typeof session.payment_intent === 'string' ? session.payment_intent : session.payment_intent?.id || null,
+      paidAt: new Date((session.created || Math.floor(Date.now()/1000)) * 1000).toISOString(),
+      paymentStatus: session.payment_status || 'paid',
+    };
+    const existingPurchase = (getUser(email)?.purchases || []).find(item => item.id === session.id);
 
     // Save Stripe ownership immediately after confirmed payment. Provisioning
     // can fail later, but the admin must still be able to find and refund it.
     saveUser(email, {
-      status: 'payment_confirmed',
+      ...(existingPurchase?.fulfillmentStatus === 'provisioned' ? {} : { status:'payment_confirmed' }),
       plan,
       stripeCustomerId: session.customer,
       ...(session.subscription ? { stripeSubscriptionId: session.subscription } : {}),
     });
+    if (existingPurchase?.fulfillmentStatus !== 'provisioned') upsertPurchase(email, session.id, { fulfillmentStatus:'provisioning', fulfillmentError:null }, purchaseDefaults);
 
-    try {
+    if (existingPurchase?.fulfillmentStatus !== 'provisioned') try {
       // Оплата підтверджена Stripe -> тепер видаємо реальну eSIM
-      const packageCode = session.metadata.packageCode || '';
-      const dataLimitGb = session.metadata.dataLimitGb === '' ? null : Number(session.metadata.dataLimitGb);
       const esim = await provisionEsim({ email, plan, packageCode, dataLimitGb });
       esim.dashboardQrExpiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
 
@@ -1295,11 +1378,13 @@ app.post('/api/webhook', async (req, res) => {
         ...(session.subscription ? { stripeSubscriptionId: session.subscription } : {}),
         esim,
       });
+      upsertPurchase(email, session.id, { fulfillmentStatus:'provisioned', fulfilledAt:new Date().toISOString(), fulfillmentError:null, esimOrderNo:esim.orderNo || null, iccid:esim.iccid || null, esimTranNo:esim.esimTranNo || null }, purchaseDefaults);
 
       console.log(`✅ Підписку і eSIM активовано для ${email}`);
     } catch (err) {
       console.error('Помилка видачі eSIM після оплати:', err);
-      saveUser(email, { status: 'payment_ok_esim_failed' });
+      saveUser(email, { status: 'payment_ok_esim_failed', lastEsimProvisionError:err.message });
+      upsertPurchase(email, session.id, { fulfillmentStatus:'failed', failedAt:new Date().toISOString(), fulfillmentError:err.message, fulfillmentErrorCode:err.code || null }, purchaseDefaults);
     }
   }
 
