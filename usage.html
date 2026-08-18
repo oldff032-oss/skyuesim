@@ -49,8 +49,9 @@
 
     function formatGb(value){
       const number = Number(value);
-      return Number.isFinite(number) ? `${number.toLocaleString('uk-UA', { maximumFractionDigits: 2 })} ГБ` : '—';
+      return Number.isFinite(number) ? `${number.toLocaleString('uk-UA', { minimumFractionDigits:2, maximumFractionDigits:4 })} ГБ` : '—';
     }
+    function formatBytes(value){const bytes=Number(value);if(!Number.isFinite(bytes)||bytes<0)return '—';if(bytes<1024)return `${Math.round(bytes).toLocaleString('uk-UA')} Б`;if(bytes<1024**2)return `${(bytes/1024).toLocaleString('uk-UA',{maximumFractionDigits:2})} КБ`;if(bytes<1024**3)return `${(bytes/1024**2).toLocaleString('uk-UA',{minimumFractionDigits:2,maximumFractionDigits:2})} МБ`;return `${(bytes/1024**3).toLocaleString('uk-UA',{minimumFractionDigits:2,maximumFractionDigits:4})} ГБ`;}
 
     async function load(){
       const loading = document.getElementById('loading');
@@ -73,6 +74,9 @@
         let activateTime = data.esim.activateTime;
         let remainingGb = data.esim.remainingGb ?? (limitGb == null ? null : Math.max(0, limitGb - usedGb));
         let lastUpdateTime = data.esim.lastUpdateTime;
+        let usedBytes = data.esim.usedBytes ?? Math.round(Number(usedGb||0)*(1024**3));
+        let totalBytes = data.esim.totalBytes ?? (limitGb==null?null:Math.round(Number(limitGb)*(1024**3)));
+        let remainingBytes = data.esim.remainingBytes ?? (totalBytes==null?null:Math.max(0,totalBytes-usedBytes));
 
         // Тягнемо СВІЖІ дані використання з eSIM Access (не з кешу)
         try{
@@ -86,11 +90,14 @@
             expiredTime = usageData.expiredTime || expiredTime;
             activateTime = usageData.activateTime || activateTime;
             lastUpdateTime = usageData.lastUpdateTime || lastUpdateTime;
+            usedBytes = usageData.usedBytes;
+            totalBytes = usageData.totalBytes;
+            remainingBytes = usageData.remainingBytes;
           }
         }catch(e){ /* якщо не вдалось оновити — показуємо останнє відоме значення */ }
 
-        const pct = limitGb ? Math.min(100, Math.round((usedGb / limitGb) * 100)) : 0;
-        const isLow = limitGb && pct >= 80;
+        const pct = totalBytes ? Math.min(100, Math.round((usedBytes / totalBytes) * 100)) : 0;
+        const isLow = totalBytes && pct >= 80;
         let trafficAlertHtml = '';
         if(limitGb){
           try{
@@ -145,15 +152,18 @@
           ${trafficAlertHtml || (isLow ? `<div class="card" style="border-color:var(--danger);"><p style="color:var(--danger); font-size:13px; display:flex; align-items:center; gap:8px;">⚠️ Використано понад 80% трафіку тарифу</p></div>` : '')}
 
           <div class="card">
-            <div class="usage-top"><span>Використано</span><b>${limitGb ? `${formatGb(usedGb)} / ${formatGb(limitGb)}` : 'Безліміт'}</b></div>
+            <div class="usage-top"><span>Використано</span><b>${formatBytes(usedBytes)}${totalBytes!=null?` / ${formatBytes(totalBytes)}`:' · безліміт'}</b></div>
             ${limitGb ? `<div class="usage-track"><div class="usage-fill" style="width:${pct}%; ${isLow ? 'background:linear-gradient(90deg,#f5a623,var(--danger));' : ''}"></div></div>` : ''}
-            ${remainingGb != null ? `<p class="muted" style="margin-top:12px;">Залишилось: <b style="color:var(--text);">${formatGb(remainingGb)}</b></p>` : ''}
+            ${remainingBytes != null ? `<p class="muted" style="margin-top:12px;">Залишилось: <b style="color:var(--text);">${formatBytes(remainingBytes)}</b></p>` : ''}
+            <p class="muted" style="margin-top:8px;font-size:11px;word-break:break-word;">Точне значення провайдера: ${Number(usedBytes||0).toLocaleString('uk-UA')} байт використано${totalBytes!=null?` із ${Number(totalBytes).toLocaleString('uk-UA')} байт`:''}.</p>
             ${apn ? `<p class="muted" style="margin-top:14px;">📡 Мережа: <span style="color:var(--text);">${apn}</span></p>` : ''}
             <p class="muted" style="margin-top:8px;font-size:11px;">${lastUpdateTime ? `Дані оновлено: ${providerDate(lastUpdateTime)?.toLocaleString('uk-UA') || '—'}` : 'Дані оновлюються провайдером протягом кількох годин.'}</p>
+            <button class="btn ghost" style="margin-top:12px;padding:9px 12px;font-size:12px" onclick="load()">Оновити дані оператора</button>
           </div>
 
           ${daysLeftHtml}
           ${historyHtml}
+          <div class="card"><div style="font-family:'Space Grotesk',sans-serif;font-weight:700;">Що зазвичай витрачає найбільше</div><div style="display:grid;gap:9px;margin-top:13px;font-size:13px;"><div>🔴 <b>Дуже багато:</b> YouTube/Netflix у HD, TikTok, Reels, відеодзвінки, завантаження великих файлів.</div><div>🟠 <b>Середньо:</b> Instagram зі стрічкою та Stories, музика, карти й резервні копії фото.</div><div>🟢 <b>Мало:</b> текстові повідомлення Telegram/Viber, email без великих вкладень, звичайні вебсторінки.</div></div><div style="margin-top:14px;padding:11px 12px;border-radius:10px;background:rgba(59,130,246,.10);border:1px solid rgba(59,130,246,.24);font-size:12px;line-height:1.55;"><b>Фактичні витрати за програмами показує телефон:</b><br>iPhone: Налаштування → Стільникові дані → список програм.<br>Android: Налаштування → Мережа та інтернет → Використання даних → Мобільні дані за програмами.</div><p class="muted" style="font-size:11px;margin-top:10px;line-height:1.5;">Сигнал показує точний загальний обсяг, який повідомив оператор. Розподіл між Telegram, Instagram та іншими програмами недоступний вебзастосунку й тому не підміняється вигаданими цифрами.</p></div>
           <div id="billingCard" class="card"><p class="muted">Завантажуємо дату списання...</p></div>
           ${forecastHtml}`;
 
@@ -179,4 +189,3 @@
   </script>
 </body>
 </html>
-

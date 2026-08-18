@@ -45,12 +45,14 @@
     if(!sessionToken || !email){ window.location.href = 'login.html'; }
 
     let currentUser = null;
+    let qrCountdownTimer = null;
     const isAppleMobile = /iPhone|iPad|iPod/i.test(navigator.userAgent);
 
     function formatGb(value){
       const number = Number(value);
-      return Number.isFinite(number) ? `${number.toLocaleString('uk-UA', { maximumFractionDigits: 2 })} ГБ` : '—';
+      return Number.isFinite(number) ? `${number.toLocaleString('uk-UA', { minimumFractionDigits:2, maximumFractionDigits:4 })} ГБ` : '—';
     }
+    function formatBytes(value){const bytes=Number(value);if(!Number.isFinite(bytes)||bytes<0)return '—';if(bytes<1024)return `${Math.round(bytes).toLocaleString('uk-UA')} Б`;if(bytes<1024**2)return `${(bytes/1024).toLocaleString('uk-UA',{maximumFractionDigits:2})} КБ`;if(bytes<1024**3)return `${(bytes/1024**2).toLocaleString('uk-UA',{minimumFractionDigits:2,maximumFractionDigits:2})} МБ`;return `${(bytes/1024**3).toLocaleString('uk-UA',{minimumFractionDigits:2,maximumFractionDigits:4})} ГБ`;}
 
     function copyActivationCode(){
       const code = currentUser?.esim?.activationCode;
@@ -99,6 +101,7 @@
     }
 
     async function render(){
+      if(qrCountdownTimer){ clearInterval(qrCountdownTimer); qrCountdownTimer = null; }
       document.getElementById('loading').style.display = 'none';
       const content = document.getElementById('content');
       content.style.display = 'block';
@@ -115,6 +118,9 @@
         let usedGb = currentUser.esim.usedGb || 0;
         let remainingGb = currentUser.esim.remainingGb ?? (limitGb == null ? null : Math.max(0, limitGb - usedGb));
         let lastUpdateTime = currentUser.esim.lastUpdateTime;
+        let usedBytes=currentUser.esim.usedBytes??Math.round(Number(usedGb||0)*(1024**3));
+        let totalBytes=currentUser.esim.totalBytes??(limitGb==null?null:Math.round(Number(limitGb)*(1024**3)));
+        let remainingBytes=currentUser.esim.remainingBytes??(totalBytes==null?null:Math.max(0,totalBytes-usedBytes));
         try{
           const usageRes = await fetch(`${API_URL}/api/usage?email=${encodeURIComponent(email)}`);
           const usageData = await usageRes.json();
@@ -123,9 +129,10 @@
             limitGb = usageData.totalGb ?? limitGb;
             remainingGb = usageData.remainingGb;
             lastUpdateTime = usageData.lastUpdateTime || lastUpdateTime;
+            usedBytes=usageData.usedBytes;totalBytes=usageData.totalBytes;remainingBytes=usageData.remainingBytes;
           }
         }catch(e){}
-        const pct = limitGb ? Math.min(100, Math.round((usedGb / limitGb) * 100)) : 0;
+        const pct = totalBytes ? Math.min(100, Math.round((usedBytes / totalBytes) * 100)) : 0;
         const planLabel = limitGb != null
           ? `${(planNames[currentUser.plan] || currentUser.plan).split(' · ')[0]} · ${formatGb(limitGb)}`
           : (planNames[currentUser.plan] || currentUser.plan);
@@ -139,8 +146,8 @@
         const updateText = lastUpdateTime ? `Дані оновлено: ${new Date(lastUpdateTime).toLocaleString('uk-UA')}` : 'Дані оновлюються провайдером протягом кількох годин.';
         const qrExpiresAt = currentUser.esim.dashboardQrExpiresAt ? new Date(currentUser.esim.dashboardQrExpiresAt).getTime() : 0;
         const showFirstInstallQr = Boolean(currentUser.esim.qrCodeUrl && qrExpiresAt && Date.now() < qrExpiresAt);
-        const trafficHeadline = limitGb == null ? 'Безлімітний інтернет' : `${formatGb(remainingGb ?? 0)} залишилось`;
-        const trafficSubtitle = limitGb == null ? 'Твій тариф активний без обмеження трафіку' : `Використано ${formatGb(usedGb)} з ${formatGb(limitGb)}`;
+        const trafficHeadline = totalBytes == null ? 'Безлімітний інтернет' : `${formatBytes(remainingBytes ?? 0)} залишилось`;
+        const trafficSubtitle = totalBytes == null ? `Використано ${formatBytes(usedBytes)} · тариф без обмеження` : `Використано ${formatBytes(usedBytes)} з ${formatBytes(totalBytes)}`;
 
         content.innerHTML = `
           ${currentUser.displayName ? `<p class="lead" style="margin-top:20px;">Привіт, <b style="color:var(--text);">${escapeHtml(currentUser.displayName)}</b> 👋</p>` : ''}
@@ -153,9 +160,9 @@
               <span class="status-pill on"><span class="dot"></span>Активовано</span>
             </div>
             <div style="margin-top:14px;">
-              <div class="usage-top"><span>Використано трафіку</span><b>${limitGb ? `${formatGb(usedGb)} / ${formatGb(limitGb)}` : 'Безліміт'}</b></div>
+              <div class="usage-top"><span>Використано трафіку</span><b>${formatBytes(usedBytes)}${totalBytes!=null?` / ${formatBytes(totalBytes)}`:' · безліміт'}</b></div>
               ${limitGb ? `<div class="usage-track"><div class="usage-fill" style="width:${pct}%;"></div></div>` : ''}
-              ${remainingGb != null ? `<p class="muted" style="margin-top:10px;">Залишилось: <b style="color:var(--text);">${formatGb(remainingGb)}</b></p>` : ''}
+              ${remainingBytes != null ? `<p class="muted" style="margin-top:10px;">Залишилось: <b style="color:var(--text);">${formatBytes(remainingBytes)}</b></p>` : ''}
               <p class="muted" style="margin-top:8px;font-size:11px;">${updateText}</p>
             </div>
           </div>
@@ -165,13 +172,17 @@
           <a class="btn ghost" href="plans.html" style="margin-top:16px;">Змінити тариф</a>`;
 
         document.getElementById('qrWrap').innerHTML = showFirstInstallQr ? `
-          <div class="card">
-            <p class="muted">Відскануй QR-код камерою телефону, щоб додати eSIM. Він доступний на головній ще 5 хвилин:</p>
-            ${currentUser.esim.qrCodeUrl ? `<img src="${currentUser.esim.qrCodeUrl}" alt="QR" style="width:150px; height:150px; border-radius:12px; margin-top:10px; background:#fff; padding:8px;" />` : ''}
+          <div class="card" style="margin-top:14px;border-color:rgba(34,211,238,.42);background:linear-gradient(145deg,rgba(34,211,238,.10),rgba(139,92,246,.12));">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;"><div style="font-family:'Space Grotesk',sans-serif;font-weight:700;">QR-код для встановлення eSIM</div><span id="qrCountdown" class="status-pill on">05:00</span></div>
+            <div style="margin-top:13px;padding:11px 13px;border-radius:10px;background:rgba(255,190,60,.10);border:1px solid rgba(255,190,60,.28);color:#ffd382;font-size:12px;line-height:1.5;"><b>⚠️ Важливо:</b> не надсилай цей QR-код іншим людям і не публікуй його. Він дає доступ до встановлення твоєї eSIM.</div>
+            <p class="muted" style="margin-top:13px;line-height:1.5;">Відскануй QR-код пристроєм, на який хочеш встановити eSIM. На головному екрані він автоматично зникне через 5 хвилин.</p>
+            ${currentUser.esim.qrCodeUrl ? `<img src="${escapeHtml(currentUser.esim.qrCodeUrl)}" alt="QR-код встановлення eSIM" style="width:180px;height:180px;object-fit:contain;border-radius:14px;margin:14px auto 0;display:block;background:#fff;padding:9px;" />` : ''}
             ${installAction}
-            <p class="muted" style="margin-top:12px;">Або введи вручну (Налаштування → Стільниковий зв'язок → Додати eSIM вручну):</p>
-            <code class="qr">${currentUser.esim.activationCode}</code>
+            <p class="muted" style="margin-top:14px;font-size:12px;line-height:1.5;">Після зникнення QR завжди можна знайти у <b style="color:var(--text);">Профіль → Керування eSIM</b>.</p>
           </div>` : `
+          <a href="esim-management.html" class="card" style="display:block;margin-top:14px;text-decoration:none;border-color:rgba(139,92,246,.30);">
+            <div style="display:flex;align-items:center;gap:13px;"><div style="font-size:27px;">📱</div><div><div style="font-family:'Space Grotesk',sans-serif;font-weight:700;">QR-код прибрано з головного екрана</div><p class="muted" style="margin-top:5px;line-height:1.45;">З міркувань безпеки п’ять хвилин минули. Відкрити знову: <b style="color:var(--text);">Профіль → Керування eSIM</b>.</p></div><span style="margin-left:auto;color:var(--cyan);font-size:20px;">→</span></div>
+          </a>
           <a href="usage.html" class="card" style="display:block;margin-top:14px;overflow:hidden;text-decoration:none;background:linear-gradient(135deg,rgba(34,211,238,.16),rgba(139,92,246,.2));border-color:rgba(34,211,238,.34);">
             <div style="display:flex;align-items:center;gap:16px;">
               <div style="width:88px;height:88px;border-radius:50%;display:grid;place-items:center;flex:none;background:conic-gradient(#22d3ee ${pct * 3.6}deg,rgba(255,255,255,.13) 0);">
@@ -185,7 +196,10 @@
             </div>
             <div style="display:flex;justify-content:space-between;align-items:center;margin-top:16px;padding-top:12px;border-top:1px solid rgba(255,255,255,.12);color:#67e8f9;font-size:13px;font-weight:700;"><span>Деталі використання</span><span>→</span></div>
           </a>`;
-        if(showFirstInstallQr) setTimeout(() => render(), Math.max(1000, qrExpiresAt - Date.now() + 100));
+        if(showFirstInstallQr){
+          const updateCountdown=()=>{const remaining=Math.max(0,qrExpiresAt-Date.now()),totalSeconds=Math.ceil(remaining/1000),minutes=Math.floor(totalSeconds/60),seconds=totalSeconds%60,element=document.getElementById('qrCountdown');if(element)element.textContent=`${String(minutes).padStart(2,'0')}:${String(seconds).padStart(2,'0')}`;if(remaining<=0){clearInterval(qrCountdownTimer);qrCountdownTimer=null;render();}};
+          updateCountdown(); qrCountdownTimer=setInterval(updateCountdown,1000);
+        }
       } else if(currentUser.status === 'pending_payment'){
         content.innerHTML = `<div class="card" style="margin-top:20px;"><span class="status-pill off"><span class="dot pulse"></span>Очікуємо підтвердження оплати...</span></div>`;
       } else if(currentUser.status === 'canceled'){
@@ -207,4 +221,3 @@
   </script>
 </body>
 </html>
-

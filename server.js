@@ -1240,10 +1240,17 @@ app.post('/api/admin/users/:email/resync-esim', adminAuth.requireAdmin, adminAut
   if (!user?.esim?.orderNo) return res.status(404).json({ error: 'Активну eSIM не знайдено' });
   try {
     const usage = await checkUsage(user.esim.orderNo);
-    const usedGb = +(usage.usedBytes / (1024 ** 3)).toFixed(2);
-    const totalGb = usage.totalBytes ? +(usage.totalBytes / (1024 ** 3)).toFixed(2) : user.esim.dataLimitGb;
-    const remainingGb = totalGb == null ? null : Math.max(0, +(totalGb - usedGb).toFixed(2));
-    saveUser(email, { esim: { ...user.esim, usedGb, dataLimitGb: totalGb, remainingGb, lastUpdateTime: usage.lastUpdateTime || new Date().toISOString() } });
+    const usedBytes = Math.max(0, Math.trunc(Number(usage.usedBytes) || 0));
+    const providerTotalBytes = usage.totalBytes == null ? null : Math.max(0, Math.trunc(Number(usage.totalBytes) || 0));
+    const fallbackTotalBytes = user.esim.dataLimitGb == null ? null : Math.round(Number(user.esim.dataLimitGb) * (1024 ** 3));
+    const totalBytes = providerTotalBytes ?? fallbackTotalBytes;
+    const remainingBytes = totalBytes == null ? null : Math.max(0, totalBytes - usedBytes);
+    // Keep raw integer bytes as the source of truth. GB values remain only for
+    // compatibility with older clients and are never rounded to two decimals.
+    const usedGb = usedBytes / (1024 ** 3);
+    const totalGb = totalBytes == null ? null : totalBytes / (1024 ** 3);
+    const remainingGb = remainingBytes == null ? null : remainingBytes / (1024 ** 3);
+    saveUser(email, { esim: { ...user.esim, usedBytes, totalBytes, remainingBytes, usedGb, dataLimitGb: totalGb, remainingGb, lastUpdateTime: usage.lastUpdateTime || new Date().toISOString() } });
     auditStore.log({ adminEmail: req.admin.email, action: 'esim_usage_resynced', target: email });
     res.json({ ok: true, usedGb, totalGb, remainingGb });
   } catch (error) { res.status(502).json({ error: error.message }); }
@@ -1620,14 +1627,19 @@ app.get('/api/usage', async (req, res) => {
     if (user.status === 'blocked') return res.status(403).json({ error: 'Акаунт заблоковано' });
 
     const usage = await checkUsage(user.esim.orderNo);
-    const usedGb = +(usage.usedBytes / (1024 ** 3)).toFixed(2);
-    const totalGb = usage.totalBytes ? +(usage.totalBytes / (1024 ** 3)).toFixed(2) : user.esim.dataLimitGb;
-    const remainingGb = totalGb == null ? null : Math.max(0, +(totalGb - usedGb).toFixed(2));
+    const usedBytes = Math.max(0, Math.trunc(Number(usage.usedBytes) || 0));
+    const providerTotalBytes = usage.totalBytes == null ? null : Math.max(0, Math.trunc(Number(usage.totalBytes) || 0));
+    const fallbackTotalBytes = user.esim.dataLimitGb == null ? null : Math.round(Number(user.esim.dataLimitGb) * (1024 ** 3));
+    const totalBytes = providerTotalBytes ?? fallbackTotalBytes;
+    const remainingBytes = totalBytes == null ? null : Math.max(0, totalBytes - usedBytes);
+    const usedGb = usedBytes / (1024 ** 3);
+    const totalGb = totalBytes == null ? null : totalBytes / (1024 ** 3);
+    const remainingGb = remainingBytes == null ? null : remainingBytes / (1024 ** 3);
 
     // Зберігаємо оновлені дані, щоб дашборд теж їх бачив без повторного запиту
     const history = [...(user.esim.usageHistory || [])];
     const day = new Date().toISOString().slice(0, 10);
-    const snapshot = { day, usedGb, remainingGb, totalGb };
+    const snapshot = { day, usedBytes, totalBytes, remainingBytes, usedGb, remainingGb, totalGb };
     const existingIndex = history.findIndex((item) => item.day === day);
     if (existingIndex >= 0) history[existingIndex] = snapshot;
     else history.push(snapshot);
@@ -1636,17 +1648,20 @@ app.get('/api/usage', async (req, res) => {
       esim: {
         ...user.esim,
         usedGb,
+        usedBytes,
         dataLimitGb: totalGb,
+        totalBytes,
         apn: usage.apn ?? user.esim.apn,
         expiredTime: usage.expiredTime ?? user.esim.expiredTime,
         activateTime: usage.activateTime ?? user.esim.activateTime,
         lastUpdateTime: usage.lastUpdateTime ?? user.esim.lastUpdateTime,
         remainingGb,
+        remainingBytes,
         usageHistory,
       },
     });
 
-    res.json({ usedGb, totalGb, remainingGb, esimStatus: usage.esimStatus, apn: usage.apn, expiredTime: usage.expiredTime, activateTime: usage.activateTime, lastUpdateTime: usage.lastUpdateTime });
+    res.json({ usedBytes, totalBytes, remainingBytes, usedGb, totalGb, remainingGb, source:'esim_access_operator', esimStatus: usage.esimStatus, apn: usage.apn, expiredTime: usage.expiredTime, activateTime: usage.activateTime, lastUpdateTime: usage.lastUpdateTime });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message });
