@@ -14,6 +14,11 @@ const TWO_FACTOR_TTL_MS = 10 * 60 * 1000;
 
 function normalizeEmail(email) { return String(email || '').trim().toLowerCase(); }
 function codeHash(challengeId, code) { return crypto.createHash('sha256').update(`${challengeId}:${code}`).digest('hex'); }
+function backupCodeHash(email, code) { return crypto.createHash('sha256').update(`${normalizeEmail(email)}:${String(code||'').replace(/[^a-z0-9]/gi,'').toUpperCase()}`).digest('hex'); }
+function createBackupCodes(email) {
+  const codes=Array.from({length:10},()=>{const raw=crypto.randomBytes(4).toString('hex').toUpperCase();return `${raw.slice(0,4)}-${raw.slice(4)}`;});
+  return {codes,hashes:codes.map(code=>backupCodeHash(email,code))};
+}
 function issueSession(store, email, admin) {
   const token = crypto.randomBytes(32).toString('hex');
   admin.lastLoginAt = new Date().toISOString();
@@ -75,7 +80,19 @@ async function login(email, password) {
 }
 
 function completeLogin(challengeId, code) {
-  const store=readAll(); const challenge=consumeChallenge(store,challengeId,code,'login'); const admin=store.admins[challenge.email];
+  const store=readAll();
+  let challenge;
+  const normalizedBackup=String(code||'').replace(/[^a-z0-9]/gi,'').toUpperCase();
+  if(normalizedBackup.length===8){
+    challenge=store.twoFactorChallenges?.[challengeId];
+    if(!challenge||challenge.purpose!=='login'||challenge.expiresAt<Date.now())throw Object.assign(new Error('Спроба входу завершилася. Введіть пароль ще раз'),{code:'TWO_FACTOR_EXPIRED'});
+    const adminForCode=store.admins[challenge.email];
+    const hash=backupCodeHash(challenge.email,normalizedBackup);
+    const index=(adminForCode?.backupCodeHashes||[]).findIndex(item=>item===hash);
+    if(index<0){challenge.attempts=Number(challenge.attempts||0)+1;if(challenge.attempts>=5)delete store.twoFactorChallenges[challengeId];writeAll(store);throw Object.assign(new Error(challenge.attempts>=5?'Забагато спроб. Введіть пароль ще раз':'Резервний код недійсний або вже використаний'),{code:'BACKUP_CODE_INVALID'});}
+    adminForCode.backupCodeHashes.splice(index,1);delete store.twoFactorChallenges[challengeId];writeAll(store);
+  }else challenge=consumeChallenge(store,challengeId,code,'login');
+  const admin=store.admins[challenge.email];
   if(!admin || admin.blocked || !admin.twoFactorEnabled) throw Object.assign(new Error('Вхід більше недоступний'),{code:'INVALID'});
   return issueSession(store,challenge.email,admin);
 }
@@ -90,10 +107,12 @@ function completeTwoFactorChange(email, enabled, challengeId, code) {
   if(item.email!==email) throw new Error('Код належить іншому обліковому запису');
   const admin=store.admins[email]; if(!admin) throw new Error('Адміністратора не знайдено');
   admin.twoFactorEnabled=Boolean(enabled); admin.twoFactorChangedAt=new Date().toISOString();
-  if(!enabled) revokeSessions(store,email);
-  writeAll(store); return {enabled:Boolean(admin.twoFactorEnabled)};
+  let backupCodes=[];
+  if(enabled){const generated=createBackupCodes(email);backupCodes=generated.codes;admin.backupCodeHashes=generated.hashes;}
+  else {admin.backupCodeHashes=[];revokeSessions(store,email);}
+  writeAll(store); return {enabled:Boolean(admin.twoFactorEnabled),backupCodes};
 }
-function twoFactorStatus(email){ const admin=readAll().admins[normalizeEmail(email)]; return {enabled:Boolean(admin?.twoFactorEnabled),email:normalizeEmail(email)}; }
+function twoFactorStatus(email){ const admin=readAll().admins[normalizeEmail(email)]; return {enabled:Boolean(admin?.twoFactorEnabled),email:normalizeEmail(email),backupCodesRemaining:(admin?.backupCodeHashes||[]).length}; }
 
 function getSession(token) {
   const store = readAll();
@@ -182,10 +201,23 @@ function resetTwoFactor({email,actorEmail}){
   const store=readAll();email=normalizeEmail(email);actorEmail=normalizeEmail(actorEmail);const admin=store.admins[email];
   if(!admin)throw Object.assign(new Error('Адміністратора не знайдено'),{code:'NOT_FOUND'});
   if(email===actorEmail)throw Object.assign(new Error('Власну 2FA потрібно вимикати кодом у розділі «Безпека»'),{code:'SELF_ACTION'});
-  if(admin.role==='super_admin')throw Object.assign(new Error('2FA іншого Super Admin не можна скидати'),{code:'PROTECTED_ADMIN'});
   admin.twoFactorEnabled=false;admin.twoFactorChangedAt=new Date().toISOString();revokeSessions(store,email);
+  admin.backupCodeHashes=[];
   for(const [id,item] of Object.entries(store.twoFactorChallenges||{}))if(item.email===email)delete store.twoFactorChallenges[id];
   writeAll(store);return {email,enabled:false};
 }
 
-module.exports = { bootstrap, login, completeLogin, twoFactorStatus, startTwoFactorChange, completeTwoFactorChange, resetTwoFactor, requireAdmin, requireRole, createAdmin, listAdmins, setAdminBlocked, deleteAdmin };
+async function emergencyResetTwoFactor({email,password,recoverySecret}){
+  const expected=String(process.env.ADMIN_RECOVERY_SECRET||'');
+  if(expected.length<20)throw Object.assign(new Error('Аварійне відновлення не налаштовано на сервері'),{code:'RECOVERY_NOT_CONFIGURED'});
+  const supplied=String(recoverySecret||'');
+  const expectedBuffer=Buffer.from(expected),suppliedBuffer=Buffer.from(supplied);
+  if(expectedBuffer.length!==suppliedBuffer.length||!crypto.timingSafeEqual(expectedBuffer,suppliedBuffer))throw Object.assign(new Error('Невірні дані відновлення'),{code:'RECOVERY_INVALID'});
+  const store=readAll();email=normalizeEmail(email);const admin=store.admins[email];
+  if(!admin||admin.role!=='super_admin'||admin.blocked||!(await bcrypt.compare(String(password||''),admin.passwordHash)))throw Object.assign(new Error('Невірні дані відновлення'),{code:'RECOVERY_INVALID'});
+  admin.twoFactorEnabled=false;admin.backupCodeHashes=[];admin.twoFactorChangedAt=new Date().toISOString();revokeSessions(store,email);
+  for(const [id,item] of Object.entries(store.twoFactorChallenges||{}))if(item.email===email)delete store.twoFactorChallenges[id];
+  writeAll(store);return {email,enabled:false};
+}
+
+module.exports = { bootstrap, login, completeLogin, twoFactorStatus, startTwoFactorChange, completeTwoFactorChange, resetTwoFactor, emergencyResetTwoFactor, requireAdmin, requireRole, createAdmin, listAdmins, setAdminBlocked, deleteAdmin };

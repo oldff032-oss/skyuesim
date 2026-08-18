@@ -1,68 +1,11 @@
-<!DOCTYPE html>
-<html lang="uk">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Вхід — E7 Admin</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css">
-</head>
-<body>
-  <div class="wrap" style="max-width:380px;">
-    <div class="brand"><div class="mark">🛠️</div><span>Сигнал Admin</span></div>
-    <h1 style="margin-top:20px; font-size:22px;">Вхід в адмін-панель</h1>
-    <p class="lead">Тільки для команди підтримки</p>
-
-    <div class="field-group">
-      <label class="field-label">Email</label>
-      <input type="email" id="email" placeholder="admin@example.com" />
-    </div>
-    <div class="field-group">
-      <label class="field-label">Пароль</label>
-      <input type="password" id="password" placeholder="••••••••" />
-    </div>
-    <div id="twoFactorBox" style="display:none">
-      <div class="glass" style="padding:14px;margin-top:15px"><b>Двофакторне підтвердження</b><p class="muted" id="twoFactorHint" style="font-size:12px;margin-top:6px">Код надіслано на email адміністратора.</p></div>
-      <div class="field-group"><label class="field-label">6-значний код</label><input inputmode="numeric" autocomplete="one-time-code" maxlength="6" id="twoFactorCode" placeholder="000000" /></div>
-    </div>
-    <div class="err-text" id="err" style="display:none;"></div>
-
-    <button class="btn" id="loginBtn" style="margin-top:20px;" onclick="doLogin()">Увійти</button>
-  </div>
-
-  <script src="config.js"></script>
-  <script>
-    let challengeId=null;
-    function finishLogin(data){localStorage.setItem('signal_admin_token',data.token);localStorage.setItem('signal_admin_role',data.role);localStorage.setItem('signal_admin_email',data.email);window.location.href='admin-dashboard.html'}
-    async function doLogin(){
-      const email = document.getElementById('email').value.trim();
-      const password = document.getElementById('password').value;
-      const err = document.getElementById('err');
-      const btn = document.getElementById('loginBtn');
-      err.style.display = 'none';
-
-      if(!email || !password){ err.textContent = 'Заповни email і пароль'; err.style.display='flex'; return; }
-
-      btn.classList.add('loading');
-      try{
-        const res = await fetch(`${API_URL}/api/admin/login`, {
-          method:'POST', headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({ email, password })
-        });
-        const data = await res.json();
-        if(!res.ok) throw new Error(data.error);
-        if(data.requiresTwoFactor){challengeId=data.challengeId;document.getElementById('twoFactorBox').style.display='block';document.getElementById('email').disabled=true;document.getElementById('password').disabled=true;document.getElementById('loginBtn').textContent='Підтвердити код';document.getElementById('loginBtn').onclick=verifyTwoFactor;document.getElementById('twoFactorHint').textContent=`Код надіслано на ${data.email}. Він діє 10 хвилин.`;document.getElementById('twoFactorCode').focus();btn.classList.remove('loading');return}
-        finishLogin(data);
-      }catch(e){
-        err.textContent = e.message;
-        err.style.display = 'flex';
-        btn.classList.remove('loading');
-      }
-    }
-    async function verifyTwoFactor(){const code=document.getElementById('twoFactorCode').value.trim(),err=document.getElementById('err'),btn=document.getElementById('loginBtn');err.style.display='none';if(!/^\d{6}$/.test(code)){err.textContent='Введіть 6 цифр із листа';err.style.display='flex';return}btn.classList.add('loading');try{const res=await fetch(`${API_URL}/api/admin/login/2fa`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({challengeId,code})}),data=await res.json();if(!res.ok)throw new Error(data.error);finishLogin(data)}catch(e){err.textContent=e.message;err.style.display='flex';btn.classList.remove('loading')}}
-    document.getElementById('password').addEventListener('keydown', e => { if(e.key==='Enter') doLogin(); });
-    document.getElementById('twoFactorCode').addEventListener('keydown',e=>{if(e.key==='Enter')verifyTwoFactor()});
-  </script>
-</body>
-</html>
+<!DOCTYPE html><html lang="uk"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Вхід — Signal Admin</title><link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet"><link rel="stylesheet" href="style.css"><style>.help-link{display:inline-block;margin-top:12px;color:#8da8ff;font-size:13px;cursor:pointer}.recovery{display:none;margin-top:15px;padding:16px}.recovery h3{margin-top:0;font-size:15px}.recovery .field-group{margin-top:12px}.recovery-note{font-size:12px;line-height:1.55}.secondary{background:transparent;border:1px solid var(--border)}</style></head><body><div class="wrap" style="max-width:400px"><div class="brand"><div class="mark">🛠️</div><span>Сигнал Admin</span></div><h1 style="margin-top:20px;font-size:22px">Вхід в адмін-панель</h1><p class="lead">Тільки для команди підтримки</p><div class="field-group"><label class="field-label">Email</label><input type="email" id="email" placeholder="admin@example.com"></div><div class="field-group"><label class="field-label">Пароль</label><input type="password" id="password" placeholder="••••••••"></div><div id="twoFactorBox" style="display:none"><div class="glass" style="padding:14px;margin-top:15px"><b>Двофакторне підтвердження</b><p class="muted" id="twoFactorHint" style="font-size:12px;margin-top:6px">Код надіслано на email адміністратора.</p></div><div class="field-group"><label class="field-label">6-значний або резервний код</label><input autocomplete="one-time-code" maxlength="9" id="twoFactorCode" placeholder="000000 або XXXX-XXXX"></div><a class="help-link" onclick="showRecoveryHelp()">Немає доступу до email або 2FA?</a></div><div id="err" class="err-text" style="display:none"></div><button class="btn" id="loginBtn" style="margin-top:20px" onclick="doLogin()">Увійти</button><a class="help-link" id="initialHelp" onclick="showRecoveryHelp()">Не можете пройти 2FA?</a>
+<section id="recoveryBox" class="glass recovery"><h3>Відновлення доступу</h3><div class="recovery-note muted"><b>Є резервний код?</b> Спочатку введіть email і пароль, а на кроці 2FA введіть одноразовий код формату XXXX-XXXX.<br><br><b>Є інший Super Admin?</b> Він може відкрити «Команда» і скинути вашу 2FA.<br><br><b>Ви єдиний Super Admin?</b> Використайте аварійний секрет, заздалегідь збережений на Render.</div><div class="field-group"><label class="field-label">Email Super Admin</label><input type="email" id="recoveryEmail" placeholder="owner@example.com"></div><div class="field-group"><label class="field-label">Пароль</label><input type="password" id="recoveryPassword" placeholder="Поточний пароль"></div><div class="field-group"><label class="field-label">Аварійний секрет Render</label><input type="password" id="recoverySecret" autocomplete="off" placeholder="ADMIN_RECOVERY_SECRET"></div><button class="btn secondary" id="recoveryBtn" onclick="emergencyRecover()">Аварійно скинути 2FA</button><p id="recoveryResult" class="muted recovery-note"></p></section></div><script src="config.js"></script><script>
+let challengeId=null;
+function finishLogin(data){localStorage.setItem('signal_admin_token',data.token);localStorage.setItem('signal_admin_role',data.role);localStorage.setItem('signal_admin_email',data.email);location.href='admin-dashboard.html'}
+function showError(message){const err=document.getElementById('err');err.textContent=message;err.style.display='flex'}
+async function doLogin(){const email=document.getElementById('email').value.trim(),password=document.getElementById('password').value,btn=document.getElementById('loginBtn');document.getElementById('err').style.display='none';if(!email||!password)return showError('Заповни email і пароль');btn.classList.add('loading');try{const res=await fetch(`${API_URL}/api/admin/login`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password})}),data=await res.json();if(!res.ok)throw Error(data.error);if(data.requiresTwoFactor){challengeId=data.challengeId;document.getElementById('twoFactorBox').style.display='block';document.getElementById('initialHelp').style.display='none';document.getElementById('email').disabled=true;document.getElementById('password').disabled=true;btn.textContent='Підтвердити код';btn.onclick=verifyTwoFactor;document.getElementById('twoFactorHint').textContent=`Код надіслано на ${data.email}. Також можна використати резервний код.`;document.getElementById('twoFactorCode').focus();return}finishLogin(data)}catch(e){showError(e.message)}finally{btn.classList.remove('loading')}}
+async function verifyTwoFactor(){const code=document.getElementById('twoFactorCode').value.trim().toUpperCase(),btn=document.getElementById('loginBtn');document.getElementById('err').style.display='none';if(!/^\d{6}$/.test(code)&&!/^[A-F0-9]{4}-?[A-F0-9]{4}$/.test(code))return showError('Введіть 6 цифр або резервний код XXXX-XXXX');btn.classList.add('loading');try{const res=await fetch(`${API_URL}/api/admin/login/2fa`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({challengeId,code})}),data=await res.json();if(!res.ok)throw Error(data.error);finishLogin(data)}catch(e){showError(e.message)}finally{btn.classList.remove('loading')}}
+function showRecoveryHelp(){const box=document.getElementById('recoveryBox');box.style.display=box.style.display==='block'?'none':'block';document.getElementById('recoveryEmail').value=document.getElementById('email').value.trim()}
+async function emergencyRecover(){const button=document.getElementById('recoveryBtn'),result=document.getElementById('recoveryResult'),email=document.getElementById('recoveryEmail').value.trim(),password=document.getElementById('recoveryPassword').value,recoverySecret=document.getElementById('recoverySecret').value;if(!email||!password||!recoverySecret){result.textContent='Заповніть усі три поля.';return}if(!confirm('Аварійно вимкнути 2FA і завершити всі сесії цього Super Admin?'))return;button.disabled=true;result.textContent='Перевірка…';try{const response=await fetch(`${API_URL}/api/admin/login/recover-2fa`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password,recoverySecret})}),data=await response.json();if(!response.ok)throw Error(data.error);result.textContent=data.message;document.getElementById('email').disabled=false;document.getElementById('password').disabled=false;document.getElementById('email').value=email;document.getElementById('password').value='';document.getElementById('twoFactorBox').style.display='none';challengeId=null;document.getElementById('loginBtn').textContent='Увійти';document.getElementById('loginBtn').onclick=doLogin}catch(e){result.textContent=e.message}finally{button.disabled=false}}
+document.getElementById('password').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin()});document.getElementById('twoFactorCode').addEventListener('keydown',e=>{if(e.key==='Enter')verifyTwoFactor()});
+</script></body></html>

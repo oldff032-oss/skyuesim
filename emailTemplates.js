@@ -47,4 +47,8 @@ function broadcast({ title, message, audience = 'customers', senderEmail = '' })
   });
 }
 
-module.exports = { escapeHtml, layout, supportReply, ticketAssignment, purchaseReceipt, twoFactorCode, broadcast };
+function adminSecurityAlert({ title, message }) {
+  return layout({eyebrow:'БЕЗПЕКА АДМІН-ПАНЕЛІ',title,intro:'Зафіксовано важливу зміну способу входу.',content:`<div style="background:#fff4f4;border-left:4px solid #ef4444;border-radius:12px;padding:18px;color:#3b2a2a;font-size:14px;line-height:1.7">${escapeHtml(message)}</div>`,footer:'Якщо це зробили не ви, негайно зв’яжіться з Super Admin, змініть пароль і перевірте журнал дій.<br><br><strong>Команда Сигнал · Безпека</strong>'});
+}
+
+module.exports = { escapeHtml, layout, supportReply, ticketAssignment, purchaseReceipt, twoFactorCode, broadcast, adminSecurityAlert };

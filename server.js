@@ -33,6 +33,7 @@ const esimRetriesInProgress = new Set();
 const renewalInvoicesInProgress = new Set();
 const coverageCache = new Map();
 const accessRecoveryRateLimit = new Map();
+const adminRecoveryRateLimit = new Map();
 app.use(cors());
 
 function upsertPurchase(email, purchaseId, patch, defaults = {}) {
@@ -571,6 +572,15 @@ app.post('/api/admin/login/2fa', (req,res)=>{
   catch(error){res.status(401).json({error:error.message,code:error.code});}
 });
 
+app.post('/api/admin/login/recover-2fa',async(req,res)=>{
+  const email=String(req.body?.email||'').trim().toLowerCase();
+  const key=`${req.ip}:${email}`;const now=Date.now();const recent=(adminRecoveryRateLimit.get(key)||[]).filter(time=>now-time<15*60*1000);
+  if(recent.length>=5)return res.status(429).json({error:'Забагато спроб. Повторіть через 15 хвилин'});
+  recent.push(now);adminRecoveryRateLimit.set(key,recent);
+  try{const result=await adminAuth.emergencyResetTwoFactor({email,password:req.body?.password,recoverySecret:req.body?.recoverySecret});auditStore.log({adminEmail:result.email,action:'admin_2fa_emergency_reset',target:result.email,details:{ip:req.ip}});sendEmail({to:result.email,subject:'Аварійне скидання 2FA — Сигнал',html:emailTemplates.adminSecurityAlert({title:'Двофакторний захист аварійно скинуто',message:'Усі активні сесії завершено. Увійдіть знову та негайно підключіть 2FA, після чого збережіть нові резервні коди.'})}).catch(error=>console.error('[admin recovery email]',error.message));res.json({ok:true,message:'2FA скинуто. Увійдіть з паролем і одразу підключіть її знову.'});}
+  catch(error){auditStore.log({adminEmail:email||'unknown',action:'admin_2fa_emergency_reset_failed',target:email,details:{code:error.code,ip:req.ip}});res.status(error.code==='RECOVERY_NOT_CONFIGURED'?503:401).json({error:error.message,code:error.code});}
+});
+
 app.get('/api/admin/me', adminAuth.requireAdmin, (req, res) => {
   res.json(req.admin);
 });
@@ -642,7 +652,7 @@ app.patch('/api/admin/team/:email/block', adminAuth.requireAdmin, adminAuth.requ
   }
 });
 
-app.post('/api/admin/team/:email/reset-2fa',adminAuth.requireAdmin,adminAuth.requireRole('super_admin'),(req,res)=>{try{const result=adminAuth.resetTwoFactor({email:req.params.email,actorEmail:req.admin.email});auditStore.log({adminEmail:req.admin.email,action:'admin_2fa_reset',target:result.email});res.json({ok:true,...result});}catch(error){res.status(400).json({error:error.message,code:error.code});}});
+app.post('/api/admin/team/:email/reset-2fa',adminAuth.requireAdmin,adminAuth.requireRole('super_admin'),(req,res)=>{try{const result=adminAuth.resetTwoFactor({email:req.params.email,actorEmail:req.admin.email});auditStore.log({adminEmail:req.admin.email,action:'admin_2fa_reset',target:result.email});sendEmail({to:result.email,subject:'Вашу 2FA скинув Super Admin — Сигнал',html:emailTemplates.adminSecurityAlert({title:'Двофакторний захист скинуто',message:`Super Admin ${req.admin.email} скинув вашу 2FA та завершив усі активні сесії. Увійдіть знову й одразу підключіть захист.`})}).catch(error=>console.error('[2fa reset email]',error.message));res.json({ok:true,...result});}catch(error){res.status(400).json({error:error.message,code:error.code});}});
 
 app.delete('/api/admin/team/:email', adminAuth.requireAdmin, adminAuth.requireRole('super_admin'), (req, res) => {
   try {
