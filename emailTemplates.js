@@ -30,4 +30,9 @@ function purchaseReceipt({ purchase, receiptUrl, fulfillmentStatus }) {
   return layout({ eyebrow:'ПІДТВЕРДЖЕННЯ ОПЛАТИ', title:'Дякуємо за покупку!', intro:'Оплату успішно проведено. Чек збережено у вашому акаунті.', content:`<div style="background:#f6f8fc;border-radius:12px;padding:18px 20px;font-size:14px;line-height:1.85"><strong>Покупка:</strong> ${escapeHtml(plan)}<br>${detail ? `<strong>Пакет:</strong> ${escapeHtml(detail)}<br>` : ''}<strong>Сума:</strong> ${escapeHtml(amount)}<br><strong>Дата:</strong> ${escapeHtml(new Date(purchase.paidAt || Date.now()).toLocaleString('uk-UA'))}<br><strong>Номер:</strong> ${escapeHtml(purchase.id)}<br><strong>Статус:</strong> ${escapeHtml(provision)}</div>`, action:{label:receiptUrl ? 'Відкрити чек Stripe' : 'Переглянути історію оплат',url:receiptUrl || '/payments.html'}, footer:'Чек також доступний у застосунку: Профіль → Історія оплат.<br><br>З повагою,<br><strong>Команда Сигнал</strong>' });
 }
 
-module.exports = { escapeHtml, layout, supportReply, ticketAssignment, purchaseReceipt };
+function twoFactorCode({ code, purpose = 'login' }) {
+  const title = purpose === 'enable' ? 'Підтвердьте ввімкнення 2FA' : purpose === 'disable' ? 'Підтвердьте вимкнення 2FA' : 'Підтвердьте вхід в адмін-панель';
+  return layout({eyebrow:'БЕЗПЕКА АДМІН-ПАНЕЛІ',title,intro:'Введіть цей одноразовий код у вікні підтвердження.',content:`<div style="font-size:34px;font-weight:800;letter-spacing:9px;text-align:center;background:#f3f5fb;border-radius:14px;padding:18px;color:#172033">${escapeHtml(code)}</div><p style="color:#68758b;font-size:13px;line-height:1.6;margin-top:16px">Код діє 10 хвилин і допускає не більше п’яти спроб. Нікому його не повідомляйте.</p>`,footer:'Якщо ви не виконували цю дію, змініть пароль адміністратора та повідомте Super Admin.<br><br><strong>Команда Сигнал · Безпека</strong>'});
+}
+
+module.exports = { escapeHtml, layout, supportReply, ticketAssignment, purchaseReceipt, twoFactorCode };

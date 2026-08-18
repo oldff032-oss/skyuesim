@@ -54,7 +54,7 @@
 
       <div id="loading" class="shimmer" style="height:150px; margin-top:16px;"></div>
       <table class="admin-table" id="table" style="display:none;">
-        <thead><tr><th>Email</th><th>Роль</th><th>Статус</th><th>Останній вхід</th><th>Дії</th></tr></thead>
+        <thead><tr><th>Email</th><th>Роль</th><th>Статус</th><th>2FA</th><th>Останній вхід</th><th>Дії</th></tr></thead>
         <tbody id="tbody"></tbody>
       </table>
     </main>
@@ -83,15 +83,16 @@
           const status = a.blocked ? '<span class="status-pill off"><span class="dot"></span>Заблокований</span>' : '<span class="status-pill on"><span class="dot"></span>Активний</span>';
           const actions = protectedAdmin ? '<span class="muted">—</span>' : `
             <button class="btn ghost" style="padding:7px 10px;font-size:12px;" onclick="setAdminBlocked('${encodeURIComponent(a.email)}', ${a.blocked})">${a.blocked ? 'Розблокувати' : 'Заблокувати'}</button>
-            <button class="btn ghost" style="padding:7px 10px;font-size:12px;color:var(--danger);" onclick="deleteAdmin('${encodeURIComponent(a.email)}')">Видалити</button>`;
+            ${a.twoFactorEnabled?`<button class="btn ghost" style="padding:7px 10px;font-size:12px" onclick="resetTwoFactor('${encodeURIComponent(a.email)}')">Скинути 2FA</button>`:''}<button class="btn ghost" style="padding:7px 10px;font-size:12px;color:var(--danger);" onclick="deleteAdmin('${encodeURIComponent(a.email)}')">Видалити</button>`;
           return `<tr>
             <td>${escapeHtml(a.email)}</td>
             <td><span class="role-badge ${a.role}">${escapeHtml(a.role)}</span></td>
             <td>${status}</td>
+            <td>${a.twoFactorEnabled?'<span class="status-pill on"><span class="dot"></span>Увімкнено</span>':'<span class="status-pill off"><span class="dot"></span>Вимкнено</span>'}</td>
             <td class="muted">${a.lastLoginAt ? new Date(a.lastLoginAt).toLocaleString('uk-UA') : 'Ще не входив'}</td>
             <td style="display:flex;gap:6px;flex-wrap:wrap;">${actions}</td>
           </tr>`;
-        }).join('') || '<tr><td colspan="5" class="muted">Немає адміністраторів</td></tr>';
+        }).join('') || '<tr><td colspan="6" class="muted">Немає адміністраторів</td></tr>';
       }catch(e){ document.getElementById('loading').style.display = 'none'; }
     }
 
@@ -127,6 +128,12 @@
       }catch(e){ alert(e.message || 'Помилка зміни статусу адміністратора'); }
     }
 
+    async function resetTwoFactor(encodedEmail){
+      const email=decodeURIComponent(encodedEmail);
+      if(!confirm(`Скинути 2FA для ${email}? Усі його активні входи буде завершено.`))return;
+      try{const res=await adminFetch(`/api/admin/team/${encodedEmail}/reset-2fa`,{method:'POST'}),data=await res.json();if(!res.ok)throw new Error(data.error||'Не вдалося скинути 2FA');alert('2FA скинуто. Працівник має увійти паролем і ввімкнути захист знову.');load()}catch(e){alert(e.message)}
+    }
+
     async function deleteAdmin(encodedEmail){
       const email = decodeURIComponent(encodedEmail);
       if(!confirm(`Видалити адміністратора ${email}? Доступ буде втрачено назавжди.`)) return;
@@ -140,4 +147,3 @@
   </script>
 </body>
 </html>
-

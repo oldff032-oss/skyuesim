@@ -22,6 +22,10 @@
       <label class="field-label">Пароль</label>
       <input type="password" id="password" placeholder="••••••••" />
     </div>
+    <div id="twoFactorBox" style="display:none">
+      <div class="glass" style="padding:14px;margin-top:15px"><b>Двофакторне підтвердження</b><p class="muted" id="twoFactorHint" style="font-size:12px;margin-top:6px">Код надіслано на email адміністратора.</p></div>
+      <div class="field-group"><label class="field-label">6-значний код</label><input inputmode="numeric" autocomplete="one-time-code" maxlength="6" id="twoFactorCode" placeholder="000000" /></div>
+    </div>
     <div class="err-text" id="err" style="display:none;"></div>
 
     <button class="btn" id="loginBtn" style="margin-top:20px;" onclick="doLogin()">Увійти</button>
@@ -29,6 +33,8 @@
 
   <script src="config.js"></script>
   <script>
+    let challengeId=null;
+    function finishLogin(data){localStorage.setItem('signal_admin_token',data.token);localStorage.setItem('signal_admin_role',data.role);localStorage.setItem('signal_admin_email',data.email);window.location.href='admin-dashboard.html'}
     async function doLogin(){
       const email = document.getElementById('email').value.trim();
       const password = document.getElementById('password').value;
@@ -46,18 +52,17 @@
         });
         const data = await res.json();
         if(!res.ok) throw new Error(data.error);
-        localStorage.setItem('signal_admin_token', data.token);
-        localStorage.setItem('signal_admin_role', data.role);
-        localStorage.setItem('signal_admin_email', data.email);
-        window.location.href = 'admin-dashboard.html';
+        if(data.requiresTwoFactor){challengeId=data.challengeId;document.getElementById('twoFactorBox').style.display='block';document.getElementById('email').disabled=true;document.getElementById('password').disabled=true;document.getElementById('loginBtn').textContent='Підтвердити код';document.getElementById('loginBtn').onclick=verifyTwoFactor;document.getElementById('twoFactorHint').textContent=`Код надіслано на ${data.email}. Він діє 10 хвилин.`;document.getElementById('twoFactorCode').focus();btn.classList.remove('loading');return}
+        finishLogin(data);
       }catch(e){
         err.textContent = e.message;
         err.style.display = 'flex';
         btn.classList.remove('loading');
       }
     }
+    async function verifyTwoFactor(){const code=document.getElementById('twoFactorCode').value.trim(),err=document.getElementById('err'),btn=document.getElementById('loginBtn');err.style.display='none';if(!/^\d{6}$/.test(code)){err.textContent='Введіть 6 цифр із листа';err.style.display='flex';return}btn.classList.add('loading');try{const res=await fetch(`${API_URL}/api/admin/login/2fa`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({challengeId,code})}),data=await res.json();if(!res.ok)throw new Error(data.error);finishLogin(data)}catch(e){err.textContent=e.message;err.style.display='flex';btn.classList.remove('loading')}}
     document.getElementById('password').addEventListener('keydown', e => { if(e.key==='Enter') doLogin(); });
+    document.getElementById('twoFactorCode').addEventListener('keydown',e=>{if(e.key==='Enter')verifyTwoFactor()});
   </script>
 </body>
 </html>
-

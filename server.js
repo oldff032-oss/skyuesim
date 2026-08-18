@@ -553,6 +553,12 @@ app.post('/api/admin/login', async (req, res) => {
   try {
     const { email, password } = req.body;
     const result = await adminAuth.login(email, password);
+    if (result.requiresTwoFactor) {
+      const delivery=await sendEmail({to:result.email,subject:'Код входу в адмін-панель — Сигнал',html:emailTemplates.twoFactorCode({code:result.code,purpose:'login'})});
+      if(delivery?.mocked) throw Object.assign(new Error('2FA не може надіслати код: RESEND_API_KEY не налаштовано'),{code:'EMAIL_NOT_CONFIGURED'});
+      auditStore.log({adminEmail:result.email,action:'admin_2fa_code_sent'});
+      return res.json({requiresTwoFactor:true,challengeId:result.challengeId,email:result.email,expiresIn:result.expiresIn});
+    }
     auditStore.log({ adminEmail: result.email, action: 'admin_login' });
     res.json(result);
   } catch (err) {
@@ -560,8 +566,23 @@ app.post('/api/admin/login', async (req, res) => {
   }
 });
 
+app.post('/api/admin/login/2fa', (req,res)=>{
+  try{const result=adminAuth.completeLogin(String(req.body?.challengeId||''),String(req.body?.code||''));auditStore.log({adminEmail:result.email,action:'admin_login_2fa'});res.json(result);}
+  catch(error){res.status(401).json({error:error.message,code:error.code});}
+});
+
 app.get('/api/admin/me', adminAuth.requireAdmin, (req, res) => {
   res.json(req.admin);
+});
+
+app.get('/api/admin/security/2fa',adminAuth.requireAdmin,(req,res)=>res.json(adminAuth.twoFactorStatus(req.admin.email)));
+app.post('/api/admin/security/2fa/request',adminAuth.requireAdmin,async(req,res)=>{
+  try{const enabled=Boolean(req.body?.enabled),result=adminAuth.startTwoFactorChange(req.admin.email,enabled);const delivery=await sendEmail({to:req.admin.email,subject:`${enabled?'Увімкнення':'Вимкнення'} двофакторного захисту — Сигнал`,html:emailTemplates.twoFactorCode({code:result.code,purpose:enabled?'enable':'disable'})});if(delivery?.mocked)throw new Error('RESEND_API_KEY не налаштовано');auditStore.log({adminEmail:req.admin.email,action:'admin_2fa_change_requested',details:{enabled}});res.json({challengeId:result.challengeId,expiresIn:result.expiresIn});}
+  catch(error){res.status(400).json({error:error.message,code:error.code});}
+});
+app.post('/api/admin/security/2fa/confirm',adminAuth.requireAdmin,(req,res)=>{
+  try{const enabled=Boolean(req.body?.enabled),result=adminAuth.completeTwoFactorChange(req.admin.email,enabled,String(req.body?.challengeId||''),String(req.body?.code||''));auditStore.log({adminEmail:req.admin.email,action:enabled?'admin_2fa_enabled':'admin_2fa_disabled'});res.json({ok:true,...result,loggedOut:!enabled});}
+  catch(error){res.status(400).json({error:error.message,code:error.code});}
 });
 
 app.get('/api/admin/push/public-key', adminAuth.requireAdmin, (req,res)=>{
@@ -620,6 +641,8 @@ app.patch('/api/admin/team/:email/block', adminAuth.requireAdmin, adminAuth.requ
     res.status(400).json({ error: err.message, code: err.code });
   }
 });
+
+app.post('/api/admin/team/:email/reset-2fa',adminAuth.requireAdmin,adminAuth.requireRole('super_admin'),(req,res)=>{try{const result=adminAuth.resetTwoFactor({email:req.params.email,actorEmail:req.admin.email});auditStore.log({adminEmail:req.admin.email,action:'admin_2fa_reset',target:result.email});res.json({ok:true,...result});}catch(error){res.status(400).json({error:error.message,code:error.code});}});
 
 app.delete('/api/admin/team/:email', adminAuth.requireAdmin, adminAuth.requireRole('super_admin'), (req, res) => {
   try {
