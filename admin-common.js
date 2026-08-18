@@ -20,6 +20,7 @@ function requireAdminAuth(){
     const diagnostics=document.createElement('a');diagnostics.id='diagnosticsNavLink';diagnostics.href='admin-diagnostics.html';diagnostics.textContent='🩺 Діагностика';if(location.pathname.endsWith('/admin-diagnostics.html'))diagnostics.classList.add('active');nav.insertBefore(diagnostics,nav.querySelector('a[onclick="logout()"]')||null);
   }
   if(nav && role === 'super_admin' && !document.getElementById('errorGuideNavLink')){const guide=document.createElement('a');guide.id='errorGuideNavLink';guide.href='admin-error-guide.html';guide.textContent='📘 Помилки';if(location.pathname.endsWith('/admin-error-guide.html'))guide.classList.add('active');nav.insertBefore(guide,nav.querySelector('a[onclick="logout()"]')||null);}
+  if(nav && role === 'super_admin' && !document.getElementById('emailBroadcastsNavLink')){const mail=document.createElement('a');mail.id='emailBroadcastsNavLink';mail.href='admin-email-broadcasts.html';mail.textContent='✉️ Email-розсилки';if(location.pathname.endsWith('/admin-email-broadcasts.html'))mail.classList.add('active');nav.insertBefore(mail,nav.querySelector('a[onclick="logout()"]')||null);}
   if(nav && !document.getElementById('purchasesNavLink')){
     const purchases = document.createElement('a');
     purchases.id = 'purchasesNavLink';

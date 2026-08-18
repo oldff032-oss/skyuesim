@@ -35,4 +35,16 @@ function twoFactorCode({ code, purpose = 'login' }) {
   return layout({eyebrow:'БЕЗПЕКА АДМІН-ПАНЕЛІ',title,intro:'Введіть цей одноразовий код у вікні підтвердження.',content:`<div style="font-size:34px;font-weight:800;letter-spacing:9px;text-align:center;background:#f3f5fb;border-radius:14px;padding:18px;color:#172033">${escapeHtml(code)}</div><p style="color:#68758b;font-size:13px;line-height:1.6;margin-top:16px">Код діє 10 хвилин і допускає не більше п’яти спроб. Нікому його не повідомляйте.</p>`,footer:'Якщо ви не виконували цю дію, змініть пароль адміністратора та повідомте Super Admin.<br><br><strong>Команда Сигнал · Безпека</strong>'});
 }
 
-module.exports = { escapeHtml, layout, supportReply, ticketAssignment, purchaseReceipt, twoFactorCode };
+function broadcast({ title, message, audience = 'customers', senderEmail = '' }) {
+  const isStaff = audience === 'staff';
+  const safeMessage = escapeHtml(message).replace(/\n/g, '<br>');
+  return layout({
+    eyebrow: isStaff ? 'ВНУТРІШНЯ РОЗСИЛКА · КОМАНДА' : 'НОВИНИ ДЛЯ КЛІЄНТІВ',
+    title,
+    intro: isStaff ? 'Важливе повідомлення для працівників адмін-панелі.' : 'Нове повідомлення від команди Сигнал.',
+    content:`<div style="background:${isStaff?'#f1efff':'#f6f8fc'};border-left:4px solid ${isStaff?'#7c3aed':'#2563eb'};border-radius:12px;padding:20px;color:#26344c;font-size:15px;line-height:1.75">${safeMessage}</div>${isStaff&&senderEmail?`<p style="margin:16px 2px 0;color:#78859a;font-size:12px">Надіслав Super Admin: ${escapeHtml(senderEmail)}</p>`:''}`,
+    footer: isStaff ? 'Це внутрішній службовий лист для команди. Не пересилайте його стороннім.<br><br><strong>Команда Сигнал</strong>' : 'Ви отримали цей лист як користувач Сигнал.<br><br>З повагою,<br><strong>Команда Сигнал</strong>',
+  });
+}
+
+module.exports = { escapeHtml, layout, supportReply, ticketAssignment, purchaseReceipt, twoFactorCode, broadcast };

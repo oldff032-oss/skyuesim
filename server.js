@@ -25,7 +25,7 @@ const operationsStore = require('./operationsStore');
 const diagnosticsStore = require('./diagnosticsStore');
 const translationService = require('./translationService');
 const { isConfigured: isPushConfigured, sendToEmail } = require('./pushService');
-const { sendEmail, getReceivedEmail, verifyInboundSignature } = require('./emailService');
+const { sendEmail, getReceivedEmail, verifyInboundSignature, isEmailConfigured } = require('./emailService');
 const emailTemplates = require('./emailTemplates');
 
 const app = express();
@@ -866,6 +866,73 @@ app.post('/api/admin/notify-bulk', adminAuth.requireAdmin, adminAuth.requireRole
   let delivered=0;
   for(const user of users){ try { const localizedTitle=await translationService.forEmail(user.email,title||'Сигнал',getUser); const localizedMessage=await translationService.forEmail(user.email,String(message),getUser); if(channel==='push') delivered += await sendToEmail(user.email,{title:localizedTitle,body:localizedMessage,url:'/dashboard.html',tag:'bulk-message'}); else { await sendEmail({to:user.email,subject:localizedTitle,html:`<p>${localizedMessage.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])).replace(/\n/g,'<br>')}</p>`}); delivered++; } } catch(e){} }
   auditStore.log({adminEmail:req.admin.email,action:'bulk_notification_sent',target:`${users.length} users`,details:{channel,status,plan,minUsage,delivered}}); res.json({ok:true,recipients:users.length,delivered});
+});
+
+function uniqueEmails(values) {
+  return [...new Set(values.map(value=>String(value||'').trim().toLowerCase()).filter(value=>/^\S+@\S+\.\S+$/.test(value)))];
+}
+
+async function deliverBroadcast({ recipients, subject, html }) {
+  const delivered=[];
+  const failed=[];
+  for(let offset=0;offset<recipients.length;offset+=5){
+    const batch=recipients.slice(offset,offset+5);
+    const results=await Promise.allSettled(batch.map(email=>sendEmail({to:email,subject,html})));
+    results.forEach((result,index)=>{
+      const email=batch[index];
+      if(result.status==='fulfilled'&&!result.value?.mocked) delivered.push(email);
+      else failed.push({email,error:result.status==='rejected'?String(result.reason?.message||result.reason).slice(0,240):'Email-сервіс працює в тестовому режимі'});
+    });
+  }
+  return {delivered,failed};
+}
+
+app.get('/api/admin/email-broadcasts',adminAuth.requireAdmin,adminAuth.requireRole('super_admin'),(req,res)=>{
+  const staff=adminAuth.listAdmins().filter(admin=>!admin.blocked);
+  const users=Object.entries(getAllUsers()).map(([email,user])=>({...user,email:user.email||email}));
+  res.json({
+    configured:isEmailConfigured(),
+    counts:{staff:uniqueEmails(staff.map(admin=>admin.email)).length,superAdmins:staff.filter(admin=>admin.role==='super_admin').length,customers:uniqueEmails(users.map(user=>user.email)).length,activeCustomers:uniqueEmails(users.filter(user=>user.status==='active').map(user=>user.email)).length},
+    staffByRole:staff.reduce((summary,admin)=>({...summary,[admin.role]:(summary[admin.role]||0)+1}),{}),
+    history:(operationsStore.store().emailBroadcasts||[]).slice(0,100),
+  });
+});
+
+app.post('/api/admin/email-broadcasts/:audience',adminAuth.requireAdmin,adminAuth.requireRole('super_admin'),async(req,res)=>{
+  const audience=String(req.params.audience||'');
+  const title=String(req.body?.title||'').trim();
+  const message=String(req.body?.message||'').trim();
+  if(!['staff','customers'].includes(audience)) return res.status(400).json({error:'Невідома аудиторія розсилки'});
+  if(title.length<3||title.length>120) return res.status(400).json({error:'Заголовок має містити від 3 до 120 символів'});
+  if(!message||message.length>5000) return res.status(400).json({error:'Текст має містити від 1 до 5000 символів'});
+  if(!isEmailConfigured()) return res.status(503).json({error:'Email-розсилку не налаштовано: додайте RESEND_API_KEY та підтверджену адресу RESEND_FROM_EMAIL'});
+
+  let recipients=[];
+  let filter='all';
+  if(audience==='staff'){
+    recipients=uniqueEmails(adminAuth.listAdmins().filter(admin=>!admin.blocked).map(admin=>admin.email));
+  } else {
+    const users=Object.entries(getAllUsers()).map(([email,user])=>({...user,email:user.email||email}));
+    filter=['all','active','single'].includes(req.body?.filter)?req.body.filter:'all';
+    if(filter==='active') recipients=uniqueEmails(users.filter(user=>user.status==='active').map(user=>user.email));
+    else if(filter==='single'){
+      const requested=String(req.body?.email||'').trim().toLowerCase();
+      const found=users.find(user=>String(user.email||'').toLowerCase()===requested);
+      if(!found) return res.status(404).json({error:'Користувача з таким email не знайдено'});
+      recipients=[found.email];
+    } else recipients=uniqueEmails(users.map(user=>user.email));
+  }
+  if(!recipients.length) return res.status(400).json({error:'У вибраній аудиторії немає отримувачів'});
+
+  const html=emailTemplates.broadcast({title,message,audience,senderEmail:req.admin.email});
+  const delivery=await deliverBroadcast({recipients,subject:`${title} — Сигнал`,html});
+  const record={id:`mail_${Date.now().toString(36)}`,audience,filter,title,message,sender:req.admin.email,createdAt:new Date().toISOString(),recipientCount:recipients.length,deliveredCount:delivery.delivered.length,failedCount:delivery.failed.length,failures:delivery.failed.slice(0,20)};
+  const state=operationsStore.store();
+  (state.emailBroadcasts||=[]).unshift(record);
+  state.emailBroadcasts=state.emailBroadcasts.slice(0,200);
+  operationsStore.save();
+  auditStore.log({adminEmail:req.admin.email,action:'email_broadcast_sent',target:audience,details:{id:record.id,filter,recipients:recipients.length,delivered:delivery.delivered.length,failed:delivery.failed.length}});
+  res.json({ok:delivery.failed.length===0,...record});
 });
 app.delete('/api/admin/announcements/:id', adminAuth.requireAdmin, adminAuth.requireRole('super_admin','admin'), (req,res)=>{ const s=operationsStore.store(); s.announcements=s.announcements.filter(a=>a.id!==req.params.id); operationsStore.save(); auditStore.log({adminEmail:req.admin.email,action:'announcement_deleted',target:req.params.id}); res.json({ok:true}); });
 app.post('/api/admin/users/:email/note', adminAuth.requireAdmin, adminAuth.requireRole('super_admin','admin','support'), (req,res)=>{ const text=String(req.body?.text||'').trim(); if(!text) return res.status(400).json({error:'Введіть нотатку'}); const s=operationsStore.store(); (s.notes[req.params.email] ||= []).push({text:text.slice(0,1000),by:req.admin.email,createdAt:new Date().toISOString()}); operationsStore.save(); auditStore.log({adminEmail:req.admin.email,action:'user_note_added',target:req.params.email}); res.json({ok:true}); });

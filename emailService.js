@@ -54,7 +54,11 @@ async function sendVerificationCode(email, code) {
   return await response.json();
 }
 
-module.exports = { sendVerificationCode, sendEmail, getReceivedEmail, verifyInboundSignature };
+function isEmailConfigured() {
+  return Boolean(process.env.RESEND_API_KEY && process.env.RESEND_API_KEY !== 'your_resend_api_key_here');
+}
+
+module.exports = { sendVerificationCode, sendEmail, getReceivedEmail, verifyInboundSignature, isEmailConfigured };
 
 // ---- Вхідна пошта (реальні відповіді користувачів на тікети) ----
 // Resend спочатку шле вебхук лише з метаданими — повний текст листа
@@ -123,4 +127,3 @@ async function sendEmail({ to, subject, html, replyTo }) {
   }
   return await response.json();
 }
-
