@@ -227,6 +227,7 @@
           <button class="btn ghost" style="width:auto;padding:9px 12px;font-size:12px;" onclick="syncPurchasesAndOpen('${encodedEmail}')">Завантажити покупки зі Stripe</button>
           ${purchases.filter(item => item.fulfillmentStatus === 'failed').map(item => `<button class="btn primary" style="width:auto;padding:9px 12px;font-size:12px;" onclick="retryPurchaseProvision('${encodedEmail}','${encodeURIComponent(item.id)}')">Повторити видачу: ${String(item.packageName || item.plan || 'пакет').replace(/[&<>"']/g, '')}</button>`).join('')}
           ${localStorage.getItem('signal_admin_role') === 'super_admin' ? `<button class="btn ghost" style="width:auto;padding:9px 12px;font-size:12px;color:#f6b84a;" onclick="refundUserPayment('${encodedEmail}')">Повернути кошти</button>` : ''}
+          ${localStorage.getItem('signal_admin_role') === 'super_admin' ? `<button class="btn ghost" style="width:auto;padding:9px 12px;font-size:12px;" onclick="location.href='admin-diagnostics.html?email=${encodedEmail}'">Логи користувача</button>` : ''}
           ${localStorage.getItem('signal_admin_role') === 'super_admin' ? `<button class="btn" style="width:auto;padding:9px 12px;font-size:12px;background:var(--danger);border-color:var(--danger);" onclick="permanentlyDeleteUser()">Повністю видалити акаунт</button>` : ''}`;
         document.getElementById('userDetailsModal').style.display = 'block';
       } catch (error) {

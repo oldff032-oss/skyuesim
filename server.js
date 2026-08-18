@@ -9,7 +9,7 @@ const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const { generateRegistrationOptions, verifyRegistrationResponse } = require('@simplewebauthn/server');
 
-const { createCheckoutSession, createCustomPackageCheckout, cancelSubscription, cancelAllSubscriptionsForCustomers, deleteStripeCustomer, constructWebhookEvent, getNextBillingDate, getBillingHistory, getRecoveryPaymentEvidence, findCustomerIdsByEmail, getCustomerEmail, getSubscriptionStateByEmail, listCompletedCheckoutPurchasesByEmail, listRefundablePaymentsByEmail, refundPayment } = require('./stripeService');
+const { createCheckoutSession, createCustomPackageCheckout, cancelSubscription, cancelAllSubscriptionsForCustomers, deleteStripeCustomer, constructWebhookEvent, getNextBillingDate, getBillingHistory, getRecoveryPaymentEvidence, findCustomerIdsByEmail, getCustomerEmail, getSubscriptionStateByEmail, listCompletedCheckoutPurchasesByEmail, getCheckoutPurchaseDetails, listRefundablePaymentsByEmail, refundPayment } = require('./stripeService');
 const crypto = require('crypto');
 const { provisionEsim, checkUsage, recoverEsim, topupEsim, listPackages, findRenewalTopup } = require('./esimService');
 const { bootstrap: bootstrapUsers, getUser, saveUser, deleteUser, getUserByStripeCustomerId, getAllUsers } = require('./db');
@@ -22,6 +22,7 @@ const auditStore = require('./auditStore');
 const adminAuth = require('./adminAuthService');
 const pushStore = require('./pushStore');
 const operationsStore = require('./operationsStore');
+const diagnosticsStore = require('./diagnosticsStore');
 const translationService = require('./translationService');
 const { isConfigured: isPushConfigured, sendToEmail } = require('./pushService');
 const { sendEmail, getReceivedEmail, verifyInboundSignature } = require('./emailService');
@@ -54,6 +55,11 @@ async function syncPurchasesForUser(email) {
     upsertPurchase(email, purchase.id, { ...purchase, fulfillmentStatus:existing?.fulfillmentStatus || inferredStatus, fulfillmentError:existing?.fulfillmentError || (inferredStatus === 'failed' ? user?.lastEsimProvisionError || 'Оплату знайдено, QR/eSIM не була видана' : null) });
   });
   return imported.length;
+}
+
+function notifySuperAdminsAboutTicket(ticket) {
+  const recipients = adminAuth.listAdmins().filter(admin=>!admin.blocked&&admin.role==='super_admin');
+  for(const admin of recipients) sendToEmail(`admin:${admin.email}`, { title:'Нове звернення в підтримку', body:`Тікет #${ticket.id}: ${ticket.subject}`, url:`/admin-ticket.html?id=${ticket.id}`, tag:`admin-ticket-${ticket.id}` }).catch(()=>{});
 }
 
 // ВАЖЛИВО: вебхук Stripe має отримати "сирий" (не розпарсений) body,
@@ -168,6 +174,13 @@ app.put('/api/account/profile', requireUserSession, async (req, res) => {
 app.get('/api/account/preferences', requireUserSession, (req, res) => {
   const preferences = getUser(req.userEmail)?.preferences || {};
   res.json({ trafficAlertThresholds: preferences.trafficAlertThresholds || [50, 80, 95], language: getUser(req.userEmail)?.language || 'uk' });
+});
+
+app.post('/api/account/diagnostics', requireUserSession, (req, res) => {
+  const { type, severity, page, message, context } = req.body || {};
+  if (!type || String(type).length > 80) return res.status(400).json({ error:'Некоректний тип події' });
+  diagnosticsStore.add({ email:req.userEmail, source:'client', type, severity, page, message, context });
+  res.status(202).json({ ok:true });
 });
 
 async function localizedAnnouncements(email) {
@@ -431,6 +444,7 @@ app.post('/api/auth/access-recovery', (req, res) => {
     message: `Ім’я: ${name}\nСтарий email: ${possibleEmail}\nДоступний контактний email: ${contactEmail}\nICCID / UID eSIM: ${esimId || 'не вказано'}\nДані про покупку: ${purchaseHint || 'не вказано'}\n\n${description}`,
     recoveryRequest: { name, possibleEmail, contactEmail, esimId: esimId || null, purchaseHint: purchaseHint || null, description },
   });
+  notifySuperAdminsAboutTicket(ticket);
   auditStore.log({ action: 'access_recovery_requested', target: `#${ticket.id}` });
   res.status(201).json({ ok: true, ticketId: ticket.id });
 });
@@ -464,6 +478,7 @@ app.post('/api/support/tickets', async (req, res) => {
     }
 
     const ticket = ticketStore.createTicket({ email, category: category || 'Інше', subject, message, attachment });
+    notifySuperAdminsAboutTicket(ticket);
     res.json(ticket);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -523,13 +538,34 @@ app.get('/api/admin/me', adminAuth.requireAdmin, (req, res) => {
   res.json(req.admin);
 });
 
+app.get('/api/admin/push/public-key', adminAuth.requireAdmin, (req,res)=>{
+  if(!isPushConfigured()) return res.status(503).json({error:'Push не налаштовано на сервері'});
+  res.json({publicKey:process.env.VAPID_PUBLIC_KEY});
+});
+app.post('/api/admin/push/subscribe', adminAuth.requireAdmin, (req,res)=>{
+  try{ pushStore.saveSubscription(`admin:${req.admin.email}`,req.body?.subscription); res.json({ok:true}); }
+  catch(error){ res.status(400).json({error:error.message}); }
+});
+app.get('/api/admin/push/status', adminAuth.requireAdmin, (req,res)=>{
+  const endpoint=String(req.query.endpoint||''),key=`admin:${req.admin.email}`;
+  res.json({configured:isPushConfigured(),registered:endpoint?pushStore.subscriptionsFor(key).some(item=>item.endpoint===endpoint):false,devices:pushStore.subscriptionsFor(key).length});
+});
+app.post('/api/admin/push/test', adminAuth.requireAdmin, async(req,res)=>{
+  try{const delivered=await sendToEmail(`admin:${req.admin.email}`,{title:'Адмін-сповіщення працюють',body:'Ви отримуватимете нові та призначені звернення.',url:'/admin-tickets.html',tag:'admin-push-test'});res.json({ok:true,delivered});}
+  catch(error){res.status(503).json({error:error.message});}
+});
+
+app.get('/api/admin/diagnostics', adminAuth.requireAdmin, adminAuth.requireRole('super_admin'), (req,res)=>{
+  res.json({events:diagnosticsStore.list({email:req.query.email||'',type:req.query.type||'',severity:req.query.severity||'',limit:req.query.limit||200})});
+});
+
 // Керування командою — тільки Super Admin
 app.get('/api/admin/team', adminAuth.requireAdmin, adminAuth.requireRole('super_admin'), (req, res) => {
   res.json(adminAuth.listAdmins());
 });
 
-app.get('/api/admin/assignees', adminAuth.requireAdmin, (req, res) => {
-  res.json(adminAuth.listAdmins().filter((admin) => !admin.blocked && ['super_admin', 'admin', 'support'].includes(admin.role)).map((admin) => ({ email: admin.email, role: admin.role })));
+app.get('/api/admin/assignees', adminAuth.requireAdmin, adminAuth.requireRole('super_admin'), (req, res) => {
+  res.json(adminAuth.listAdmins().filter((admin) => !admin.blocked && admin.role === 'admin').map((admin) => ({ email: admin.email, role: admin.role })));
 });
 
 app.post('/api/admin/team', adminAuth.requireAdmin, adminAuth.requireRole('super_admin'), async (req, res) => {
@@ -573,12 +609,14 @@ app.delete('/api/admin/team/:email', adminAuth.requireAdmin, adminAuth.requireRo
 // Перегляд тікетів — доступний усім ролям, крім нічого (навіть Viewer читає)
 app.get('/api/admin/tickets', adminAuth.requireAdmin, (req, res) => {
   const { status, priority, search } = req.query;
-  res.json(ticketStore.getAllTickets({ status, priority, search }));
+  const tickets = ticketStore.getAllTickets({ status, priority, search });
+  res.json(req.admin.role === 'admin' ? tickets.filter(ticket => ticket.assignedTo === req.admin.email) : tickets);
 });
 
 app.get('/api/admin/tickets/:id', adminAuth.requireAdmin, async (req, res) => {
   const ticket = ticketStore.getTicket(req.params.id);
   if (!ticket) return res.status(404).json({ error: 'Тікет не знайдено' });
+  if (req.admin.role === 'admin' && ticket.assignedTo !== req.admin.email) return res.status(403).json({ error:'Це звернення не призначене вам' });
   const userSubscription = getUser(ticket.email);
   let recoveryVerification = null;
   if (ticket.category === 'access_recovery' && req.admin.role === 'super_admin') {
@@ -640,8 +678,13 @@ app.post('/api/admin/tickets/:id/create-recovery-link', adminAuth.requireAdmin, 
 // Зміна статусу/пріоритету — заборонено для Viewer
 app.patch('/api/admin/tickets/:id', adminAuth.requireAdmin, adminAuth.requireRole('super_admin', 'admin', 'support'), (req, res) => {
   const { status, priority, assignedTo } = req.body;
-  if (assignedTo !== undefined && assignedTo !== null && assignedTo !== '' && !adminStore.readAll().admins?.[assignedTo]) {
-    return res.status(400).json({ error: 'Призначеного адміністратора не знайдено' });
+  const ticket = ticketStore.getTicket(req.params.id);
+  if (!ticket) return res.status(404).json({ error:'Тікет не знайдено' });
+  if (req.admin.role === 'admin' && ticket.assignedTo !== req.admin.email) return res.status(403).json({ error:'Це звернення не призначене вам' });
+  if (assignedTo !== undefined && req.admin.role !== 'super_admin') return res.status(403).json({ error:'Виконавця може змінити лише Super Admin' });
+  const assignedAdmin = assignedTo ? adminStore.readAll().admins?.[assignedTo] : null;
+  if (assignedTo && (!assignedAdmin || assignedAdmin.blocked || assignedAdmin.role !== 'admin')) {
+    return res.status(400).json({ error: 'Можна призначити лише активного адміністратора з роллю Admin' });
   }
   if (status === 'closed') {
     const deleted = ticketStore.deleteTicket(req.params.id);
@@ -649,13 +692,19 @@ app.patch('/api/admin/tickets/:id', adminAuth.requireAdmin, adminAuth.requireRol
     auditStore.log({ adminEmail: req.admin.email, action: 'ticket_closed_and_deleted', target: `#${req.params.id}` });
     return res.json({ ok: true, deleted: true });
   }
+  const previousAssignee = ticket.assignedTo || null;
+  const assignmentChanged = assignedTo !== undefined && (assignedTo || null) !== previousAssignee;
+  const assignmentEvent = assignmentChanged ? { from:previousAssignee, to:assignedTo || null, by:req.admin.email, createdAt:new Date().toISOString() } : null;
   const updated = ticketStore.updateTicket(req.params.id, {
     ...(status && { status }),
     ...(priority && { priority }),
     ...(assignedTo !== undefined && { assignedTo: assignedTo || null }),
+    ...(assignmentEvent && { assignmentHistory:[...(ticket.assignmentHistory || []), assignmentEvent] }),
   });
   if (!updated) return res.status(404).json({ error: 'Тікет не знайдено' });
-  auditStore.log({ adminEmail: req.admin.email, action: 'ticket_updated', target: `#${req.params.id}`, details: { status, priority, assignedTo } });
+  auditStore.log({ adminEmail: req.admin.email, action: assignmentChanged ? 'ticket_assigned' : 'ticket_updated', target: `#${req.params.id}`, details: { status, priority, assignedTo, previousAssignee } });
+  if (assignmentChanged && assignedTo) sendEmail({ to:assignedTo, subject:`Вам призначено звернення #${updated.id}`, html:`<p>Super Admin призначив вам звернення <strong>#${updated.id}</strong>.</p><p>Користувач: ${updated.email}</p><p>Тема: ${String(updated.subject || '').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}</p><p>Відкрийте розділ «Підтримка» в адмін-панелі.</p>` }).catch(error=>console.error('[ticket assignment email]', error.message));
+  if (assignmentChanged && assignedTo) sendToEmail(`admin:${assignedTo}`, { title:'Вам призначено звернення', body:`Тікет #${updated.id}: ${updated.subject}`, url:`/admin-ticket.html?id=${updated.id}`, tag:`assigned-ticket-${updated.id}` }).catch(()=>{});
   res.json(updated);
 });
 
@@ -665,6 +714,7 @@ app.post('/api/admin/tickets/:id/reply', adminAuth.requireAdmin, adminAuth.requi
     const { message, attachment } = req.body;
     const ticket = ticketStore.getTicket(req.params.id);
     if (!ticket) return res.status(404).json({ error: 'Тікет не знайдено' });
+    if (req.admin.role === 'admin' && ticket.assignedTo !== req.admin.email) return res.status(403).json({ error:'Це звернення не призначене вам' });
 
     const updated = ticketStore.addMessage(req.params.id, { from: 'admin', text: message, attachment });
     const customerMessage = await translationService.forEmail(ticket.email, message, getUser);
@@ -706,6 +756,7 @@ app.post('/api/admin/tickets/:id/note', adminAuth.requireAdmin, adminAuth.requir
   const { text } = req.body;
   const ticket = ticketStore.getTicket(req.params.id);
   if (!ticket) return res.status(404).json({ error: 'Тікет не знайдено' });
+  if (req.admin.role === 'admin' && ticket.assignedTo !== req.admin.email) return res.status(403).json({ error:'Це звернення не призначене вам' });
   const updated = ticketStore.addMessage(req.params.id, { from: 'note', text });
   auditStore.log({ adminEmail: req.admin.email, action: 'ticket_note_added', target: `#${req.params.id}` });
   res.json(updated);
@@ -862,6 +913,27 @@ app.get('/api/admin/purchases', adminAuth.requireAdmin, adminAuth.requireRole('s
   res.json({ purchases, totals:{ purchases:purchases.length, paid:purchases.filter(item=>item.paymentStatus==='paid').length, failed:purchases.filter(item=>item.fulfillmentStatus==='failed').length, provisioned:purchases.filter(item=>item.fulfillmentStatus==='provisioned').length } });
 });
 
+app.get('/api/admin/purchases/:purchaseId', adminAuth.requireAdmin, adminAuth.requireRole('super_admin','admin','support'), async (req, res) => {
+  const purchaseId = String(req.params.purchaseId || '');
+  const owner = Object.values(getAllUsers()).find(user => (user.purchases || []).some(purchase => purchase.id === purchaseId));
+  const purchase = owner?.purchases?.find(item => item.id === purchaseId);
+  if (!owner || !purchase) return res.status(404).json({ error:'Покупку не знайдено' });
+  try {
+    const stripe = await getCheckoutPurchaseDetails(purchase.stripeSessionId || purchase.id);
+    const timeline = [
+      { type:'payment', title:'Stripe підтвердив оплату', at:purchase.paidAt || purchase.createdAt, detail:`${purchase.amountCents == null ? '—' : (purchase.amountCents/100).toFixed(2)} ${(purchase.currency||'').toUpperCase()}` },
+      ...(purchase.retryStartedAt ? [{ type:'retry', title:'Адміністратор повторив видачу', at:purchase.retryStartedAt, detail:null }] : []),
+      ...(purchase.failedAt ? [{ type:'failed', title:'Видача eSIM завершилась помилкою', at:purchase.failedAt, detail:purchase.fulfillmentError || null }] : []),
+      ...(purchase.fulfilledAt ? [{ type:'provisioned', title:'eSIM успішно видано', at:purchase.fulfilledAt, detail:`Order ${purchase.esimOrderNo || '—'} · ICCID ${purchase.iccid || '—'}` }] : []),
+      ...stripe.refunds.map(refund => ({ type:'refund', title:`Повернення ${refund.status}`, at:refund.createdAt, detail:`${(refund.amount/100).toFixed(2)} ${refund.currency.toUpperCase()} · ${refund.id}` })),
+      ...(stripe.subscription?.canceledAt ? [{ type:'canceled', title:'Stripe-підписку скасовано', at:stripe.subscription.canceledAt, detail:stripe.subscription.id }] : []),
+    ].filter(item=>item.at).sort((a,b)=>new Date(a.at)-new Date(b.at));
+    res.json({ email:owner.email, accountStatus:owner.status || null, purchase, stripe, timeline });
+  } catch (error) {
+    res.status(502).json({ error:`Не вдалося отримати деталі Stripe: ${error.message}` });
+  }
+});
+
 app.post('/api/admin/purchases/sync-all', adminAuth.requireAdmin, adminAuth.requireRole('super_admin','admin'), async (req, res) => {
   const emails = [...new Set([...Object.keys(authStore.readAll().users || {}), ...Object.keys(getAllUsers())])];
   if (emails.length > 500) return res.status(409).json({ error:'Забагато користувачів для одного запуску. Зверніться до розробника для фонової синхронізації.' });
@@ -954,6 +1026,7 @@ app.delete('/api/admin/users/:email', adminAuth.requireAdmin, adminAuth.requireR
     const authRemoval = authService.deleteAccountAuth(email);
     const pushSubscriptions = pushStore.removeAllForEmail(email);
     const tickets = ticketStore.deleteTicketsByEmail(email);
+    const diagnosticEvents = diagnosticsStore.removeForEmail(email);
 
     const operations = operationsStore.store();
     delete operations.notes?.[email];
@@ -973,7 +1046,7 @@ app.delete('/api/admin/users/:email', adminAuth.requireAdmin, adminAuth.requireR
       adminEmail: req.admin.email,
       action: 'user_account_permanently_deleted',
       target: email,
-      details: { stripeSubscriptionCanceled, stripeCustomerDeleted, sessions: authRemoval.sessions, pushSubscriptions, tickets },
+      details: { stripeSubscriptionCanceled, stripeCustomerDeleted, sessions: authRemoval.sessions, pushSubscriptions, tickets, diagnosticEvents },
     });
     res.json({
       ok: true,
@@ -1558,6 +1631,7 @@ storage.init().then(() => Promise.all([
   auditStore.bootstrap(),
   operationsStore.bootstrap(),
   translationService.bootstrap(),
+  diagnosticsStore.bootstrap(),
 ])).then(() => adminAuth.bootstrap()).then(() => {
   app.listen(PORT, () => {
     console.log(`Signal backend running on http://localhost:${PORT}`);

@@ -175,6 +175,29 @@ async function listCompletedCheckoutPurchasesByEmail(email, knownCustomerId = nu
     }));
 }
 
+async function getCheckoutPurchaseDetails(sessionId) {
+  const session = await stripe.checkout.sessions.retrieve(sessionId);
+  let subscription = null, invoice = null, paymentIntent = null, charge = null;
+  if (session.subscription) {
+    subscription = await stripe.subscriptions.retrieve(typeof session.subscription === 'string' ? session.subscription : session.subscription.id, { expand:['latest_invoice.payment_intent'] });
+    invoice = subscription.latest_invoice && typeof subscription.latest_invoice !== 'string' ? subscription.latest_invoice : null;
+    paymentIntent = invoice?.payment_intent && typeof invoice.payment_intent !== 'string' ? invoice.payment_intent : null;
+  }
+  if (!paymentIntent && session.payment_intent) paymentIntent = await stripe.paymentIntents.retrieve(typeof session.payment_intent === 'string' ? session.payment_intent : session.payment_intent.id, { expand:['latest_charge'] });
+  const chargeRef = paymentIntent?.latest_charge || invoice?.charge || null;
+  if (chargeRef) charge = typeof chargeRef === 'string' ? await stripe.charges.retrieve(chargeRef) : chargeRef;
+  const refunds = charge ? await stripe.refunds.list({ charge:charge.id, limit:100 }) : { data:[] };
+  return {
+    checkout:{ id:session.id, mode:session.mode, status:session.status, paymentStatus:session.payment_status, createdAt:new Date(session.created*1000).toISOString(), expiresAt:session.expires_at?new Date(session.expires_at*1000).toISOString():null, amountTotal:session.amount_total, currency:session.currency, customerEmail:session.customer_details?.email || session.customer_email || null, customerName:session.customer_details?.name || null },
+    subscription:subscription ? { id:subscription.id, status:subscription.status, cancelAtPeriodEnd:subscription.cancel_at_period_end, currentPeriodEnd:subscription.current_period_end?new Date(subscription.current_period_end*1000).toISOString():null, canceledAt:subscription.canceled_at?new Date(subscription.canceled_at*1000).toISOString():null } : null,
+    invoice:invoice ? { id:invoice.id, status:invoice.status, amountPaid:invoice.amount_paid, currency:invoice.currency, hostedInvoiceUrl:invoice.hosted_invoice_url || null, pdfUrl:invoice.invoice_pdf || null } : null,
+    paymentIntent:paymentIntent ? { id:paymentIntent.id, status:paymentIntent.status, amount:paymentIntent.amount, amountReceived:paymentIntent.amount_received, currency:paymentIntent.currency } : null,
+    charge:charge ? { id:charge.id, status:charge.status, paid:charge.paid, amount:charge.amount, amountRefunded:charge.amount_refunded, refunded:charge.refunded, currency:charge.currency, receiptUrl:charge.receipt_url || null, card:{ brand:charge.payment_method_details?.card?.brand || null, last4:charge.payment_method_details?.card?.last4 || null, country:charge.payment_method_details?.card?.country || null }, billingName:charge.billing_details?.name || null, billingEmail:charge.billing_details?.email || null } : null,
+    refunds:refunds.data.map(refund => ({ id:refund.id, status:refund.status, amount:refund.amount, currency:refund.currency, reason:refund.reason || null, createdAt:new Date(refund.created*1000).toISOString(), failureReason:refund.failure_reason || null })),
+    metadata:session.metadata || {},
+  };
+}
+
 // Read-only evidence for a Super Admin reviewing an account recovery request.
 // Only non-sensitive card metadata is returned; full card data never reaches us.
 async function getRecoveryPaymentEvidence(customerId) {
@@ -217,4 +240,4 @@ function constructWebhookEvent(rawBody, signature) {
   );
 }
 
-module.exports = { createCheckoutSession, createCustomPackageCheckout, cancelSubscription, cancelAllSubscriptionsForCustomers, deleteStripeCustomer, constructWebhookEvent, getNextBillingDate, getBillingHistory, getRecoveryPaymentEvidence, findCustomerIdsByEmail, getCustomerEmail, getSubscriptionStateByEmail, listCompletedCheckoutPurchasesByEmail, listRefundablePaymentsByEmail, refundPayment };
+module.exports = { createCheckoutSession, createCustomPackageCheckout, cancelSubscription, cancelAllSubscriptionsForCustomers, deleteStripeCustomer, constructWebhookEvent, getNextBillingDate, getBillingHistory, getRecoveryPaymentEvidence, findCustomerIdsByEmail, getCustomerEmail, getSubscriptionStateByEmail, listCompletedCheckoutPurchasesByEmail, getCheckoutPurchaseDetails, listRefundablePaymentsByEmail, refundPayment };

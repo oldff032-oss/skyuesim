@@ -72,7 +72,7 @@
 
       <div id="loading" class="shimmer" style="height:200px; margin-top:16px;"></div>
       <table class="admin-table" id="table" style="display:none;">
-        <thead><tr><th>ID</th><th>Користувач</th><th>Тема</th><th>Категорія</th><th>Пріоритет</th><th>Статус</th><th>Оновлено</th></tr></thead>
+        <thead><tr><th>ID</th><th>Користувач</th><th>Тема</th><th>Категорія</th><th>Відповідальний</th><th>Пріоритет</th><th>Статус</th><th>Оновлено</th></tr></thead>
         <tbody id="tbody"></tbody>
       </table>
     </main>
@@ -120,10 +120,11 @@
             <td><div class="user-cell"><div class="avatar">${t.email[0].toUpperCase()}</div><div><div class="name">${t.email.split('@')[0]}</div><div class="email">${t.email}</div></div></div></td>
             <td>${t.subject}</td>
             <td>${t.category === 'access_recovery' ? '🔐 Відновлення доступу' : t.category}</td>
+            <td>${t.assignedTo || '<span class="muted">Не призначено</span>'}</td>
             <td><span class="prio-dot ${t.priority}">${t.priority}</span></td>
             <td><span class="status-badge ${t.status}">${statusLabels[t.status]||t.status}</span></td>
             <td class="muted">${new Date(t.updatedAt).toLocaleString('uk-UA')}</td>
-          </tr>`).join('') || '<tr><td colspan="7" class="muted">Нічого не знайдено</td></tr>';
+          </tr>`).join('') || '<tr><td colspan="8" class="muted">Нічого не знайдено</td></tr>';
       }catch(e){}
     }
 

@@ -21,6 +21,41 @@ if (window.location.pathname.endsWith('/app-tools.html')) {
   document.head.appendChild(coverageScript);
 }
 
+// Privacy-safe client diagnostics. Never sends form values, request bodies,
+// auth headers, PINs, tokens, QR data or full URLs/query strings.
+const signalOriginalFetch = window.fetch.bind(window);
+let signalDiagnosticCount = 0;
+function signalReportDiagnostic(type, severity, message, context = {}) {
+  const token = localStorage.getItem('signal_session_token');
+  if (!token || typeof API_URL === 'undefined' || signalDiagnosticCount >= 100) return;
+  signalDiagnosticCount += 1;
+  signalOriginalFetch(`${API_URL}/api/account/diagnostics`, {
+    method:'POST',
+    headers:{'Content-Type':'application/json','x-session-token':token},
+    body:JSON.stringify({type,severity,page:location.pathname,message:String(message||'').slice(0,300),context}),
+  }).catch(()=>{});
+}
+window.fetch = async function(input, init = {}) {
+  const started = performance.now();
+  const rawUrl = typeof input === 'string' ? input : input?.url || '';
+  let path = 'unknown';
+  try { path = new URL(rawUrl, location.origin).pathname; } catch {}
+  if (path === '/api/account/diagnostics') return signalOriginalFetch(input, init);
+  try {
+    const response = await signalOriginalFetch(input, init);
+    if (response.status >= 400) signalReportDiagnostic('api_error','warning',`API returned ${response.status}`,{path,method:String(init.method||'GET').toUpperCase(),status:response.status,durationMs:Math.round(performance.now()-started)});
+    return response;
+  } catch (error) {
+    signalReportDiagnostic('network_error','error','Network request failed',{path,method:String(init.method||'GET').toUpperCase(),durationMs:Math.round(performance.now()-started),online:navigator.onLine});
+    throw error;
+  }
+};
+window.addEventListener('error',event=>signalReportDiagnostic('javascript_error','error',event.message||'JavaScript error',{file:event.filename?String(event.filename).split('/').pop():null,line:event.lineno||null,column:event.colno||null}));
+window.addEventListener('unhandledrejection',event=>signalReportDiagnostic('promise_rejection','error',event.reason?.message||'Unhandled promise rejection',{}));
+window.addEventListener('offline',()=>signalReportDiagnostic('connection','warning','Device went offline',{online:false}));
+window.addEventListener('online',()=>signalReportDiagnostic('connection','info','Device is online',{online:true}));
+window.addEventListener('load',()=>signalReportDiagnostic('page_view','info','Page opened',{online:navigator.onLine,userAgent:navigator.userAgent.slice(0,160)}));
+
 const signalEscapeHtml = (value) => String(value || '').replace(/[&<>"']/g, char => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[char]));
 async function checkAppAnnouncements() {
   if (typeof API_URL === 'undefined' || !document.body) return;

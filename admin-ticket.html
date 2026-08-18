@@ -161,6 +161,8 @@
                     ${['normal','priority','high','critical'].map(p => `<option value="${p}" ${p===ticket.priority?'selected':''}>${p}</option>`).join('')}
                   </select>
                 </div>
+                <div class="side-row"><div class="k">Відповідальний</div><div class="v">${escapeHtml(ticket.assignedTo || 'Не призначено')}</div></div>
+                ${(ticket.assignmentHistory || []).length ? `<div class="side-row"><div class="k">Історія передачі</div><div class="v">${ticket.assignmentHistory.slice().reverse().map(item => `${new Date(item.createdAt).toLocaleString('uk-UA')}<br>${escapeHtml(item.from || 'без виконавця')} → ${escapeHtml(item.to || 'не призначено')}<br><span class="muted">Super Admin: ${escapeHtml(item.by)}</span>`).join('<hr style="border:0;border-top:1px solid var(--border);margin:7px 0">')}</div></div>` : ''}
               </div>
 
               <div class="glass glass-card" style="margin-top:14px;">
@@ -242,7 +244,7 @@
     }
 
     async function loadAssignees(ticket){
-      if(localStorage.getItem('signal_admin_role') === 'viewer') return;
+      if(localStorage.getItem('signal_admin_role') !== 'super_admin') return;
       try{
         const res = await adminFetch('/api/admin/assignees'); const admins = await res.json();
         if(!res.ok) return;

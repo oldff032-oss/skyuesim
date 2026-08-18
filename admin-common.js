@@ -12,6 +12,12 @@ function requireAdminAuth(){
     if(auditLink) auditLink.style.display = 'none';
   }
   const nav = document.querySelector('.admin-nav');
+  if(nav && !document.getElementById('adminNotificationsNavLink')){
+    const notifications=document.createElement('a');notifications.id='adminNotificationsNavLink';notifications.href='admin-notifications.html';notifications.textContent='🔔 Сповіщення';if(location.pathname.endsWith('/admin-notifications.html'))notifications.classList.add('active');nav.insertBefore(notifications,nav.querySelector('a[onclick="logout()"]')||null);
+  }
+  if(nav && role === 'super_admin' && !document.getElementById('diagnosticsNavLink')){
+    const diagnostics=document.createElement('a');diagnostics.id='diagnosticsNavLink';diagnostics.href='admin-diagnostics.html';diagnostics.textContent='🩺 Діагностика';if(location.pathname.endsWith('/admin-diagnostics.html'))diagnostics.classList.add('active');nav.insertBefore(diagnostics,nav.querySelector('a[onclick="logout()"]')||null);
+  }
   if(nav && !document.getElementById('purchasesNavLink')){
     const purchases = document.createElement('a');
     purchases.id = 'purchasesNavLink';
