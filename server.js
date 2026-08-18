@@ -26,6 +26,7 @@ const diagnosticsStore = require('./diagnosticsStore');
 const translationService = require('./translationService');
 const { isConfigured: isPushConfigured, sendToEmail } = require('./pushService');
 const { sendEmail, getReceivedEmail, verifyInboundSignature } = require('./emailService');
+const emailTemplates = require('./emailTemplates');
 
 const app = express();
 const esimRetriesInProgress = new Set();
@@ -43,6 +44,31 @@ function upsertPurchase(email, purchaseId, patch, defaults = {}) {
   if (index >= 0) purchases[index] = next; else purchases.unshift(next);
   saveUser(email, { purchases });
   return next;
+}
+
+async function deliverPurchaseReceipt(email, purchaseId, defaults = {}, suppliedReceiptUrl = null) {
+  const stored = (getUser(email)?.purchases || []).find(item => item.id === purchaseId);
+  if (stored?.receiptEmailSentAt) return { duplicate:true, receiptUrl:stored.receiptUrl || suppliedReceiptUrl || null };
+  let receiptUrl = suppliedReceiptUrl || stored?.receiptUrl || null;
+  try {
+    if (!receiptUrl && String(purchaseId).startsWith('cs_')) {
+      const details = await getCheckoutPurchaseDetails(purchaseId);
+      receiptUrl = details.charge?.receiptUrl || details.invoice?.hostedInvoiceUrl || details.invoice?.pdfUrl || null;
+    }
+    const purchase = upsertPurchase(email, purchaseId, { receiptUrl }, defaults);
+    const delivery = await sendEmail({
+      to:email,
+      subject:`Ваш чек за ${purchase.packageName || purchase.plan || 'eSIM-пакет'} — Сигнал`,
+      html:emailTemplates.purchaseReceipt({purchase,receiptUrl,fulfillmentStatus:purchase.fulfillmentStatus}),
+    });
+    if (delivery?.mocked) throw new Error('RESEND_API_KEY не налаштовано');
+    upsertPurchase(email, purchaseId, {receiptUrl,receiptEmailSentAt:new Date().toISOString(),receiptEmailError:null}, defaults);
+    return {sent:true,receiptUrl};
+  } catch (error) {
+    upsertPurchase(email, purchaseId, {receiptUrl,receiptEmailError:error.message,receiptEmailLastAttemptAt:new Date().toISOString()}, defaults);
+    console.error(`[purchase receipt] ${email} ${purchaseId}:`, error.message);
+    return {sent:false,receiptUrl,error:error.message};
+  }
 }
 
 async function syncPurchasesForUser(email) {
@@ -676,7 +702,7 @@ app.post('/api/admin/tickets/:id/create-recovery-link', adminAuth.requireAdmin, 
 });
 
 // Зміна статусу/пріоритету — заборонено для Viewer
-app.patch('/api/admin/tickets/:id', adminAuth.requireAdmin, adminAuth.requireRole('super_admin', 'admin', 'support'), (req, res) => {
+app.patch('/api/admin/tickets/:id', adminAuth.requireAdmin, adminAuth.requireRole('super_admin', 'admin', 'support'), async (req, res) => {
   const { status, priority, assignedTo } = req.body;
   const ticket = ticketStore.getTicket(req.params.id);
   if (!ticket) return res.status(404).json({ error:'Тікет не знайдено' });
@@ -703,9 +729,16 @@ app.patch('/api/admin/tickets/:id', adminAuth.requireAdmin, adminAuth.requireRol
   });
   if (!updated) return res.status(404).json({ error: 'Тікет не знайдено' });
   auditStore.log({ adminEmail: req.admin.email, action: assignmentChanged ? 'ticket_assigned' : 'ticket_updated', target: `#${req.params.id}`, details: { status, priority, assignedTo, previousAssignee } });
-  if (assignmentChanged && assignedTo) sendEmail({ to:assignedTo, subject:`Вам призначено звернення #${updated.id}`, html:`<p>Super Admin призначив вам звернення <strong>#${updated.id}</strong>.</p><p>Користувач: ${updated.email}</p><p>Тема: ${String(updated.subject || '').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}</p><p>Відкрийте розділ «Підтримка» в адмін-панелі.</p>` }).catch(error=>console.error('[ticket assignment email]', error.message));
-  if (assignmentChanged && assignedTo) sendToEmail(`admin:${assignedTo}`, { title:'Вам призначено звернення', body:`Тікет #${updated.id}: ${updated.subject}`, url:`/admin-ticket.html?id=${updated.id}`, tag:`assigned-ticket-${updated.id}` }).catch(()=>{});
-  res.json(updated);
+  let delivery = null;
+  if (assignmentChanged && assignedTo) {
+    const [emailResult, pushResult] = await Promise.allSettled([
+      sendEmail({ to:assignedTo, subject:`Вам призначено звернення #${updated.id} — Сигнал`, html:emailTemplates.ticketAssignment({ticketId:updated.id,customerEmail:updated.email,subject:updated.subject}) }),
+      sendToEmail(`admin:${assignedTo}`, { title:'Вам призначено звернення', body:`Тікет #${updated.id}: ${updated.subject}`, url:`/admin-ticket.html?id=${updated.id}`, tag:`assigned-ticket-${updated.id}` }),
+    ]);
+    delivery = { email:emailResult.status === 'fulfilled' && !emailResult.value?.mocked, push:pushResult.status === 'fulfilled' ? pushResult.value : 0 };
+    auditStore.log({adminEmail:req.admin.email,action:'ticket_assignment_notified',target:assignedTo,details:{ticketId:updated.id,...delivery}});
+  }
+  res.json({...updated,...(delivery?{notificationDelivery:delivery}:{})});
 });
 
 // Відповідь клієнту (реальний email) — заборонено для Viewer
@@ -733,12 +766,7 @@ app.post('/api/admin/tickets/:id/reply', adminAuth.requireAdmin, adminAuth.requi
       await sendEmail({
         to: ticket.email,
         subject: `[Сигнал Підтримка #${ticket.id}] ${ticket.subject}`,
-        html: `
-          <div style="font-family: sans-serif; max-width: 480px;">
-            <p>${customerMessage.replace(/[&<>]/g, (char) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;' }[char])).replace(/\n/g, '<br>')}</p>
-            <hr style="border:none; border-top:1px solid #eee; margin:20px 0;">
-            <p style="color:#888; font-size:12px;">Ticket ID: #${ticket.id}. Можеш відповісти прямо на цей email — відповідь автоматично додасться в тікет.</p>
-          </div>`,
+        html: emailTemplates.supportReply({ ticketId:ticket.id, subject:ticket.subject, message:customerMessage }),
         replyTo: process.env.RESEND_INBOUND_ADDRESS || undefined,
       });
     } catch (emailErr) {
@@ -1484,6 +1512,7 @@ app.post('/api/webhook', async (req, res) => {
       saveUser(email, { status: 'payment_ok_esim_failed', lastEsimProvisionError:err.message });
       upsertPurchase(email, session.id, { fulfillmentStatus:'failed', failedAt:new Date().toISOString(), fulfillmentError:err.message, fulfillmentErrorCode:err.code || null }, purchaseDefaults);
     }
+    await deliverPurchaseReceipt(email, session.id, purchaseDefaults);
   }
 
   if (event.type === 'customer.subscription.deleted') {
@@ -1505,7 +1534,23 @@ app.post('/api/webhook', async (req, res) => {
     const invoice = event.data.object;
     // The first invoice is fulfilled by checkout.session.completed. Only a
     // real subscription cycle should top up the existing profile.
-    if (invoice.billing_reason === 'subscription_cycle') await processSubscriptionRenewal(invoice);
+    if (invoice.billing_reason === 'subscription_cycle') {
+      const renewalResult = await processSubscriptionRenewal(invoice);
+      const customerId = typeof invoice.customer === 'string' ? invoice.customer : invoice.customer?.id;
+      const user = getUserByStripeCustomerId(customerId);
+      if (user?.email) {
+        const renewalPurchase = {
+          kind:'subscription_renewal', plan:user.plan, packageName:`Поновлення тарифу ${user.plan}`,
+          amountCents:invoice.amount_paid ?? null, currency:invoice.currency || null,
+          stripeCustomerId:customerId || null, stripeInvoiceId:invoice.id,
+          paidAt:new Date((invoice.created || Math.floor(Date.now()/1000))*1000).toISOString(),
+          paymentStatus:invoice.status || 'paid', fulfillmentStatus:renewalResult?.ok ? 'provisioned' : 'failed',
+          fulfillmentError:renewalResult?.ok ? null : renewalResult?.error || null,
+        };
+        upsertPurchase(user.email, invoice.id, {}, renewalPurchase);
+        await deliverPurchaseReceipt(user.email, invoice.id, renewalPurchase, invoice.hosted_invoice_url || invoice.invoice_pdf || null);
+      }
+    }
   }
 
   if (event.type === 'invoice.payment_failed') {
@@ -1644,8 +1689,17 @@ storage.init().then(() => Promise.all([
 app.get('/api/account/billing-history', requireUserSession, async (req, res) => {
   try {
     const user = getUser(req.userEmail);
-    if (!user?.stripeCustomerId) return res.json({ invoices: [] });
-    res.json({ invoices: await getBillingHistory(user.stripeCustomerId) });
+    const local = (user?.purchases || []).map(purchase => ({
+      id:purchase.id, createdAt:purchase.paidAt || purchase.createdAt, amount:Number(purchase.amountCents || 0)/100,
+      currency:purchase.currency || 'usd', status:purchase.paymentStatus || 'paid',
+      fulfillmentStatus:purchase.fulfillmentStatus || null, name:purchase.packageName || purchase.plan || 'eSIM-пакет',
+      detail:[purchase.location, purchase.dataLimitGb == null ? null : `${purchase.dataLimitGb} ГБ`, purchase.durationDays ? `${purchase.durationDays} днів` : null].filter(Boolean).join(' · '),
+      receiptUrl:purchase.receiptUrl || null, receiptEmailSentAt:purchase.receiptEmailSentAt || null,
+    }));
+    const stripeInvoices = user?.stripeCustomerId ? await getBillingHistory(user.stripeCustomerId) : [];
+    const combined = [...local, ...stripeInvoices.filter(invoice => !local.some(item => item.id === invoice.id))]
+      .sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt));
+    res.json({ invoices:combined });
   } catch (error) {
     console.error('Billing history:', error.message);
     res.status(502).json({ error: 'Не вдалося завантажити історію оплат' });

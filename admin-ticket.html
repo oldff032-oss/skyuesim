@@ -216,7 +216,9 @@
       const assignedTo = document.getElementById('assignedToSelect')?.value;
       if(status === 'closed' && !confirm('Закрити й повністю видалити це звернення? Воно зникне і з адмінки, і з застосунку користувача.')) { load(); return; }
       const response = await adminFetch(`/api/admin/tickets/${ticketId}`, { method:'PATCH', body: JSON.stringify({ status, priority, assignedTo }) });
-      if(!response.ok) { const data = await response.json().catch(() => ({})); alert(data.error || 'Не вдалося оновити звернення'); return; }
+      const data = await response.json().catch(() => ({}));
+      if(!response.ok) { alert(data.error || 'Не вдалося оновити звернення'); return; }
+      if(data.notificationDelivery) alert(`Звернення передано. Email: ${data.notificationDelivery.email?'надіслано':'не доставлено'}; push: ${data.notificationDelivery.push?'доставлено на '+data.notificationDelivery.push+' пристр.':'немає активного пристрою'}.`);
       if(status === 'closed') { window.location.href = 'admin-tickets.html'; return; }
       load();
     }
