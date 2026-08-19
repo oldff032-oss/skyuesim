@@ -61,5 +61,36 @@ function save(name, value) {
   next.catch(error => console.error(`[storage] could not persist ${name}:`, error.message));
 }
 
-module.exports = { init, load, save };
+function snapshot(names) {
+  return Object.fromEntries(names.map(name => [name, JSON.parse(JSON.stringify(states.get(name) ?? null))]));
+}
 
+async function saveNow(name, value) {
+  states.set(name, value);
+  if (!pool) return writeLocal(name, value);
+  const previous = writes.get(name) || Promise.resolve();
+  await previous.catch(() => undefined);
+  await pool.query('INSERT INTO public.app_state (key, value, updated_at) VALUES ($1, $2::jsonb, NOW()) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()', [name, JSON.stringify(value)]);
+}
+
+async function restoreMany(entries) {
+  const pairs = Object.entries(entries);
+  if (!pool) {
+    for (const [name, value] of pairs) writeLocal(name, value);
+    pairs.forEach(([name, value]) => states.set(name, value));
+    return;
+  }
+  const client = await pool.connect();
+  try {
+    await Promise.all([...writes.values()].map(promise => promise.catch(() => undefined)));
+    await client.query('BEGIN');
+    for (const [name, value] of pairs) await client.query('INSERT INTO public.app_state (key, value, updated_at) VALUES ($1, $2::jsonb, NOW()) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()', [name, JSON.stringify(value)]);
+    await client.query('COMMIT');
+    pairs.forEach(([name, value]) => states.set(name, value));
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally { client.release(); }
+}
+
+module.exports = { init, load, save, snapshot, saveNow, restoreMany };

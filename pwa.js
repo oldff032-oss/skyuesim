@@ -63,12 +63,21 @@ async function checkAppAnnouncements() {
   const email = localStorage.getItem('signal_email');
   const endpoint = token ? '/api/account/announcements' : '/api/announcements';
   try {
-    const response = await fetch(`${API_URL}${endpoint}${!token && email ? `?email=${encodeURIComponent(email)}` : ''}`, {
+    let response = await fetch(`${API_URL}${endpoint}${!token && email ? `?email=${encodeURIComponent(email)}` : ''}`, {
       headers: token ? { 'x-session-token': token } : {},
       cache: 'no-store',
     });
+    if (response.status === 401 && token) response = await fetch(`${API_URL}/api/announcements`, { cache:'no-store' });
     if (!response.ok) return;
     const { announcements = [] } = await response.json();
+    const securityIncident = announcements.find(item => item.type === 'security' && item.audience === 'all');
+    const existingSecurity = document.getElementById('signal-security-incident-screen');
+    if (!securityIncident) existingSecurity?.remove();
+    if (securityIncident && !existingSecurity) {
+      document.body.insertAdjacentHTML('beforeend', `<div id="signal-security-incident-screen" style="position:fixed;inset:0;z-index:2147483647;background:radial-gradient(circle at 50% 0,#482044 0,#131326 42%,#05060d 100%);color:#f7f8ff;display:grid;place-items:center;padding:24px;text-align:center;font-family:Inter,-apple-system,sans-serif"><div style="width:min(100%,560px)"><div style="width:92px;height:92px;margin:auto;border-radius:28px;display:grid;place-items:center;background:linear-gradient(145deg,#ff4d6d,#7557ff);box-shadow:0 0 60px rgba(255,77,109,.4);font-size:48px">🛡️</div><div style="margin-top:22px;font-size:11px;font-weight:800;letter-spacing:2px;color:#ff9bac">ЗАХИСТ SIGNAL АКТИВОВАНО</div><h1 style="font-size:30px;line-height:1.25;margin:10px 0 0">${signalEscapeHtml(securityIncident.title || 'Важливе повідомлення безпеки')}</h1><p style="color:#c7cada;line-height:1.7;margin:16px auto 0;max-width:500px">${signalEscapeHtml(securityIncident.message).replace(/\n/g,'<br>')}</p><div style="margin-top:20px;padding:13px;border:1px solid rgba(255,255,255,.13);border-radius:13px;background:rgba(255,255,255,.05);font-size:13px;color:#aeb5c9">Ваш акаунт не вимкнено. Нікому не повідомляйте пароль, PIN, резервні коди або коди з email.</div><button type="button" onclick="location.reload()" style="margin-top:20px;padding:12px 20px;border:0;border-radius:11px;background:linear-gradient(135deg,#ff4d6d,#7658ff);color:#fff;font-weight:800">Перевірити стан системи</button><p style="color:#7f879d;font-size:12px;margin-top:16px">Екран автоматично оновлюється кожні 30 секунд.</p></div></div>`);
+      return;
+    }
+    if (securityIncident) return;
     const maintenance = announcements.find(item => item.type === 'maintenance' && item.audience === 'all');
     const existingMaintenance = document.getElementById('signal-maintenance-screen');
     if (!maintenance) existingMaintenance?.remove();

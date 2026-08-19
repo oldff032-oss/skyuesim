@@ -21,6 +21,8 @@ function requireAdminAuth(){
   }
   if(nav && role === 'super_admin' && !document.getElementById('errorGuideNavLink')){const guide=document.createElement('a');guide.id='errorGuideNavLink';guide.href='admin-error-guide.html';guide.textContent='📘 Помилки';if(location.pathname.endsWith('/admin-error-guide.html'))guide.classList.add('active');nav.insertBefore(guide,nav.querySelector('a[onclick="logout()"]')||null);}
   if(nav && role === 'super_admin' && !document.getElementById('emailBroadcastsNavLink')){const mail=document.createElement('a');mail.id='emailBroadcastsNavLink';mail.href='admin-email-broadcasts.html';mail.textContent='✉️ Email-розсилки';if(location.pathname.endsWith('/admin-email-broadcasts.html'))mail.classList.add('active');nav.insertBefore(mail,nav.querySelector('a[onclick="logout()"]')||null);}
+  if(nav && role === 'super_admin' && !document.getElementById('backupNavLink')){const backup=document.createElement('a');backup.id='backupNavLink';backup.href='admin-backup.html';backup.textContent='🗄️ Резервні копії';if(location.pathname.endsWith('/admin-backup.html'))backup.classList.add('active');nav.insertBefore(backup,nav.querySelector('a[onclick="logout()"]')||null);}
+  if(nav && role === 'super_admin' && !document.getElementById('incidentNavLink')){const incident=document.createElement('a');incident.id='incidentNavLink';incident.href='admin-security-incident.html';incident.textContent='🚨 Захист системи';if(location.pathname.endsWith('/admin-security-incident.html'))incident.classList.add('active');nav.insertBefore(incident,nav.querySelector('a[onclick="logout()"]')||null);}
   if(nav && !document.getElementById('purchasesNavLink')){
     const purchases = document.createElement('a');
     purchases.id = 'purchasesNavLink';

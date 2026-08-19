@@ -27,6 +27,7 @@ const translationService = require('./translationService');
 const { isConfigured: isPushConfigured, sendToEmail } = require('./pushService');
 const { sendEmail, getReceivedEmail, verifyInboundSignature, isEmailConfigured } = require('./emailService');
 const emailTemplates = require('./emailTemplates');
+const backupService = require('./backupService');
 
 const app = express();
 const esimRetriesInProgress = new Set();
@@ -34,6 +35,9 @@ const renewalInvoicesInProgress = new Set();
 const coverageCache = new Map();
 const accessRecoveryRateLimit = new Map();
 const adminRecoveryRateLimit = new Map();
+const pendingBackupRestores = new Map();
+const securityAttemptTracker = new Map();
+const BACKUP_STATE_KEYS = ['users.json','auth.json','admins.json','tickets.json','audit-log.json','operations.json','push-subscriptions.json','diagnostics.json','translations.json'];
 app.use(cors());
 
 function upsertPurchase(email, purchaseId, patch, defaults = {}) {
@@ -89,6 +93,28 @@ function notifySuperAdminsAboutTicket(ticket) {
   for(const admin of recipients) sendToEmail(`admin:${admin.email}`, { title:'Нове звернення в підтримку', body:`Тікет #${ticket.id}: ${ticket.subject}`, url:`/admin-ticket.html?id=${ticket.id}`, tag:`admin-ticket-${ticket.id}` }).catch(()=>{});
 }
 
+function securityFingerprint(req) {
+  return crypto.createHash('sha256').update(`${process.env.SECURITY_EVENT_SALT||process.env.ADMIN_RECOVERY_SECRET||'signal'}:${req.ip||'unknown'}`).digest('hex').slice(0,12);
+}
+function notifySuperAdminsSecurity(event,count) {
+  const state=operationsStore.store();
+  if(state.lastSecurityNotificationAt&&Date.now()-new Date(state.lastSecurityNotificationAt).getTime()<15*60*1000)return;
+  state.lastSecurityNotificationAt=new Date().toISOString();operationsStore.save();
+  const recipients=adminAuth.listAdmins().filter(admin=>!admin.blocked&&admin.role==='super_admin');
+  for(const admin of recipients){
+    sendToEmail(`admin:${admin.email}`,{title:'🚨 Підозріла активність у Signal',body:`Зафіксовано ${count} невдалих спроб: ${event.surface}. Відкрийте «Захист системи».`,url:'/admin-security-incident.html',tag:'security-incident'}).catch(()=>{});
+    sendEmail({to:admin.email,subject:'🚨 Підозріла активність — Signal Admin',html:emailTemplates.adminSecurityAlert({title:'Виявлено підозрілу активність',message:`За 15 хвилин зафіксовано ${count} невдалих спроб у зоні «${event.surface}». Анонімний відбиток джерела: ${event.fingerprint}. Перевірте розділ «Захист системи» та за потреби ввімкніть повноекранне попередження.`})}).catch(()=>{});
+  }
+}
+function recordSecurityFailure(req,surface,code,email='') {
+  const fingerprint=securityFingerprint(req),now=Date.now(),key=`${surface}:${fingerprint}`;
+  const attempts=(securityAttemptTracker.get(key)||[]).filter(time=>now-time<15*60*1000);attempts.push(now);securityAttemptTracker.set(key,attempts);
+  const alertThreshold=['admin_emergency_recovery','backup_restore'].includes(surface)?1:5;
+  const event={id:`sec_${now.toString(36)}_${crypto.randomBytes(3).toString('hex')}`,createdAt:new Date(now).toISOString(),surface:String(surface).slice(0,80),code:String(code||'FAILED').slice(0,80),email:String(email||'').trim().toLowerCase().slice(0,254)||null,fingerprint,count15m:attempts.length,severity:attempts.length>=alertThreshold?'critical':attempts.length>=3?'warning':'info'};
+  const state=operationsStore.store();(state.securityEvents||=[]).unshift(event);state.securityEvents=state.securityEvents.slice(0,500);operationsStore.save();
+  if(attempts.length===alertThreshold)notifySuperAdminsSecurity(event,attempts.length);
+}
+
 // ВАЖЛИВО: вебхук Stripe має отримати "сирий" (не розпарсений) body,
 // тому для цього одного маршруту JSON-парсер вимикаємо.
 app.use('/api/webhook', express.raw({ type: 'application/json' }));
@@ -119,6 +145,7 @@ app.post('/api/auth/verify-code', (req, res) => {
     const result = authService.verifyCode(email, code);
     res.json(result);
   } catch (err) {
+    recordSecurityFailure(req,'email_verification_code',err.code,req.body?.email);
     res.status(400).json({ error: err.message, code: err.code });
   }
 });
@@ -144,6 +171,7 @@ app.post('/api/auth/login', async (req, res) => {
     }
     res.json(result);
   } catch (err) {
+    if(['INVALID_CREDENTIALS','INVALID','BLOCKED'].includes(err.code))recordSecurityFailure(req,'user_login',err.code,req.body?.email);
     res.status(401).json({ error: err.message, code: err.code });
   }
 });
@@ -187,7 +215,7 @@ app.post('/api/account/passkeys/register/verify', requireUserSession, async (req
 });
 app.get('/api/account/lock', requireUserSession, (req,res)=>{const u=getUser(req.userEmail);res.json({enabled:Boolean(u?.appLock?.enabled),hasPin:Boolean(u?.appLock?.pinHash),hasPasskey:Boolean(u?.passkeys?.length)});});
 app.put('/api/account/lock', requireUserSession, async (req,res)=>{const pin=String(req.body?.pin||''); if(!/^\d{6}$/.test(pin))return res.status(400).json({error:'PIN має містити рівно 6 цифр'}); saveUser(req.userEmail,{appLock:{enabled:true,pinHash:await bcrypt.hash(pin,10)}});res.json({ok:true});});
-app.post('/api/account/lock/pin', requireUserSession, async (req,res)=>{const hash=getUser(req.userEmail)?.appLock?.pinHash; if(!hash||!await bcrypt.compare(String(req.body?.pin||''),hash))return res.status(401).json({error:'Невірний PIN'});res.json({ok:true});});
+app.post('/api/account/lock/pin', requireUserSession, async (req,res)=>{const hash=getUser(req.userEmail)?.appLock?.pinHash;if(!hash||!await bcrypt.compare(String(req.body?.pin||''),hash)){recordSecurityFailure(req,'app_pin','INVALID_PIN',req.userEmail);return res.status(401).json({error:'Невірний PIN'});}res.json({ok:true});});
 
 app.put('/api/account/profile', requireUserSession, async (req, res) => {
   try {
@@ -563,13 +591,14 @@ app.post('/api/admin/login', async (req, res) => {
     auditStore.log({ adminEmail: result.email, action: 'admin_login' });
     res.json(result);
   } catch (err) {
+    if(['INVALID','BLOCKED'].includes(err.code))recordSecurityFailure(req,'admin_login',err.code,req.body?.email);
     res.status(401).json({ error: err.message, code: err.code });
   }
 });
 
 app.post('/api/admin/login/2fa', (req,res)=>{
   try{const result=adminAuth.completeLogin(String(req.body?.challengeId||''),String(req.body?.code||''));auditStore.log({adminEmail:result.email,action:'admin_login_2fa'});res.json(result);}
-  catch(error){res.status(401).json({error:error.message,code:error.code});}
+  catch(error){recordSecurityFailure(req,'admin_2fa',error.code);res.status(401).json({error:error.message,code:error.code});}
 });
 
 app.post('/api/admin/login/recover-2fa',async(req,res)=>{
@@ -577,8 +606,8 @@ app.post('/api/admin/login/recover-2fa',async(req,res)=>{
   const key=`${req.ip}:${email}`;const now=Date.now();const recent=(adminRecoveryRateLimit.get(key)||[]).filter(time=>now-time<15*60*1000);
   if(recent.length>=5)return res.status(429).json({error:'Забагато спроб. Повторіть через 15 хвилин'});
   recent.push(now);adminRecoveryRateLimit.set(key,recent);
-  try{const result=await adminAuth.emergencyResetTwoFactor({email,password:req.body?.password,recoverySecret:req.body?.recoverySecret});auditStore.log({adminEmail:result.email,action:'admin_2fa_emergency_reset',target:result.email,details:{ip:req.ip}});sendEmail({to:result.email,subject:'Аварійне скидання 2FA — Сигнал',html:emailTemplates.adminSecurityAlert({title:'Двофакторний захист аварійно скинуто',message:'Усі активні сесії завершено. Увійдіть знову та негайно підключіть 2FA, після чого збережіть нові резервні коди.'})}).catch(error=>console.error('[admin recovery email]',error.message));res.json({ok:true,message:'2FA скинуто. Увійдіть з паролем і одразу підключіть її знову.'});}
-  catch(error){auditStore.log({adminEmail:email||'unknown',action:'admin_2fa_emergency_reset_failed',target:email,details:{code:error.code,ip:req.ip}});res.status(error.code==='RECOVERY_NOT_CONFIGURED'?503:401).json({error:error.message,code:error.code});}
+  try{const result=await adminAuth.emergencyResetTwoFactor({email,password:req.body?.password,recoverySecret:req.body?.recoverySecret});auditStore.log({adminEmail:result.email,action:'admin_2fa_emergency_reset',target:result.email,details:{fingerprint:securityFingerprint(req)}});sendEmail({to:result.email,subject:'Аварійне скидання 2FA — Сигнал',html:emailTemplates.adminSecurityAlert({title:'Двофакторний захист аварійно скинуто',message:'Усі активні сесії завершено. Увійдіть знову та негайно підключіть 2FA, після чого збережіть нові резервні коди.'})}).catch(error=>console.error('[admin recovery email]',error.message));res.json({ok:true,message:'2FA скинуто. Увійдіть з паролем і одразу підключіть її знову.'});}
+  catch(error){if(error.code!=='RECOVERY_NOT_CONFIGURED')recordSecurityFailure(req,'admin_emergency_recovery',error.code,email);auditStore.log({adminEmail:email||'unknown',action:'admin_2fa_emergency_reset_failed',target:email,details:{code:error.code,fingerprint:securityFingerprint(req)}});res.status(error.code==='RECOVERY_NOT_CONFIGURED'?503:401).json({error:error.message,code:error.code});}
 });
 
 app.get('/api/admin/me', adminAuth.requireAdmin, (req, res) => {
@@ -868,6 +897,25 @@ app.post('/api/admin/announcements', adminAuth.requireAdmin, adminAuth.requireRo
   }
   auditStore.log({adminEmail:req.admin.email,action:'announcement_created',target:normalizedAudience,details:{id:announcement.id,type:announcement.type,sendPush,pushRecipients,pushDelivered}}); res.json({...announcement,pushRecipients,pushDelivered,pushConfigured:isPushConfigured()});
 });
+app.get('/api/admin/security-incident',adminAuth.requireAdmin,adminAuth.requireRole('super_admin'),(req,res)=>{
+  const state=operationsStore.store(),active=(state.announcements||[]).find(item=>item.type==='security'&&(!item.expiresAt||new Date(item.expiresAt)>new Date()));
+  const events=state.securityEvents||[],since=Date.now()-24*60*60*1000;
+  res.json({active:active||null,events:events.slice(0,100),counts:{last24h:events.filter(item=>new Date(item.createdAt).getTime()>=since).length,critical24h:events.filter(item=>item.severity==='critical'&&new Date(item.createdAt).getTime()>=since).length},pushConfigured:isPushConfigured(),emailConfigured:isEmailConfigured()});
+});
+app.post('/api/admin/security-incident/activate',adminAuth.requireAdmin,adminAuth.requireRole('super_admin'),async(req,res)=>{
+  const title=String(req.body?.title||'Важливе повідомлення безпеки').trim().slice(0,100),message=String(req.body?.message||'Ми перевіряємо безпеку системи. Ваш акаунт залишається активним. Не повідомляйте нікому пароль, PIN або коди підтвердження.').trim().slice(0,1000);
+  const durationMinutes=Math.min(1440,Math.max(15,Number(req.body?.durationMinutes)||120)),expiresAt=new Date(Date.now()+durationMinutes*60000).toISOString(),state=operationsStore.store();
+  state.announcements=(state.announcements||[]).filter(item=>item.type!=='security');
+  const incident={id:`security_${Date.now().toString(36)}`,title,message,audience:'all',type:'security',startsAt:new Date().toISOString(),expiresAt,createdBy:req.admin.email};state.announcements.unshift(incident);operationsStore.save();
+  let delivered=0;const recipients=Object.keys(authStore.readAll().users||{});
+  if(req.body?.sendPush&&isPushConfigured())for(const email of recipients){try{delivered+=await sendToEmail(email,{title:`🛡️ ${title}`,body:message,url:'/dashboard.html',tag:'security-incident-user'})}catch{}}
+  auditStore.log({adminEmail:req.admin.email,action:'security_incident_activated',target:incident.id,details:{durationMinutes,pushRecipients:recipients.length,pushDelivered:delivered}});res.json({ok:true,incident,pushRecipients:recipients.length,pushDelivered:delivered});
+});
+app.post('/api/admin/security-incident/deactivate',adminAuth.requireAdmin,adminAuth.requireRole('super_admin'),(req,res)=>{const state=operationsStore.store(),removed=(state.announcements||[]).filter(item=>item.type==='security').length;state.announcements=(state.announcements||[]).filter(item=>item.type!=='security');operationsStore.save();auditStore.log({adminEmail:req.admin.email,action:'security_incident_deactivated',details:{removed}});res.json({ok:true,removed});});
+app.post('/api/admin/security-incident/revoke-user-sessions',adminAuth.requireAdmin,adminAuth.requireRole('super_admin'),(req,res)=>{
+  if(String(req.body?.adminEmail||'').trim().toLowerCase()!==req.admin.email||String(req.body?.confirmation||'')!=='ЗАВЕРШИТИ СЕСІЇ')return res.status(400).json({error:'Введіть точний email і фразу ЗАВЕРШИТИ СЕСІЇ'});
+  const auth=authStore.readAll(),revoked=Object.keys(auth.sessions||{}).length;auth.sessions={};authStore.writeAll(auth);auditStore.log({adminEmail:req.admin.email,action:'all_user_sessions_revoked',details:{revoked}});res.json({ok:true,revoked});
+});
 app.post('/api/admin/notify-bulk', adminAuth.requireAdmin, adminAuth.requireRole('super_admin','admin'), async (req,res) => {
   const { channel, title, message, status, plan, minUsage } = req.body || {};
   if(!['push','email'].includes(channel) || !message) return res.status(400).json({error:'Оберіть канал і введіть текст'});
@@ -944,13 +992,52 @@ app.post('/api/admin/email-broadcasts/:audience',adminAuth.requireAdmin,adminAut
   auditStore.log({adminEmail:req.admin.email,action:'email_broadcast_sent',target:audience,details:{id:record.id,filter,recipients:recipients.length,delivered:delivery.delivered.length,failed:delivery.failed.length}});
   res.json({ok:delivery.failed.length===0,...record});
 });
-app.delete('/api/admin/announcements/:id', adminAuth.requireAdmin, adminAuth.requireRole('super_admin','admin'), (req,res)=>{ const s=operationsStore.store(); s.announcements=s.announcements.filter(a=>a.id!==req.params.id); operationsStore.save(); auditStore.log({adminEmail:req.admin.email,action:'announcement_deleted',target:req.params.id}); res.json({ok:true}); });
+app.delete('/api/admin/announcements/:id', adminAuth.requireAdmin, adminAuth.requireRole('super_admin','admin'), (req,res)=>{ const s=operationsStore.store(),found=s.announcements.find(a=>a.id===req.params.id);if(found?.type==='security'&&req.admin.role!=='super_admin')return res.status(403).json({error:'Режим безпеки може вимкнути лише Super Admin'});s.announcements=s.announcements.filter(a=>a.id!==req.params.id); operationsStore.save(); auditStore.log({adminEmail:req.admin.email,action:'announcement_deleted',target:req.params.id}); res.json({ok:true}); });
 app.post('/api/admin/users/:email/note', adminAuth.requireAdmin, adminAuth.requireRole('super_admin','admin','support'), (req,res)=>{ const text=String(req.body?.text||'').trim(); if(!text) return res.status(400).json({error:'Введіть нотатку'}); const s=operationsStore.store(); (s.notes[req.params.email] ||= []).push({text:text.slice(0,1000),by:req.admin.email,createdAt:new Date().toISOString()}); operationsStore.save(); auditStore.log({adminEmail:req.admin.email,action:'user_note_added',target:req.params.email}); res.json({ok:true}); });
 app.post('/api/admin/blacklist', adminAuth.requireAdmin, adminAuth.requireRole('super_admin','admin'), (req,res)=>{ const {type,value}=req.body||{}; if(!['emails','iccids'].includes(type)||!value) return res.status(400).json({error:'Некоректні дані'}); const list=operationsStore.store().blacklist[type]; if(!list.includes(value)) list.push(value); operationsStore.save(); auditStore.log({adminEmail:req.admin.email,action:'blacklist_added',target:value}); res.json({ok:true}); });
 app.delete('/api/admin/blacklist/:type/:value', adminAuth.requireAdmin, adminAuth.requireRole('super_admin','admin'), (req,res)=>{ const list=operationsStore.store().blacklist[req.params.type]; if(!list) return res.status(400).json({error:'Некоректний список'}); operationsStore.store().blacklist[req.params.type]=list.filter(v=>v!==req.params.value); operationsStore.save(); res.json({ok:true}); });
 app.post('/api/admin/templates', adminAuth.requireAdmin, adminAuth.requireRole('super_admin','admin','support'), (req,res)=>{ const {title,text}=req.body||{}; if(!title||!text) return res.status(400).json({error:'Вкажіть назву і текст'}); const template={id:Date.now().toString(36),title:String(title).slice(0,100),text:String(text).slice(0,2000),by:req.admin.email}; operationsStore.store().templates.unshift(template); operationsStore.save(); res.json(template); });
 app.delete('/api/admin/templates/:id', adminAuth.requireAdmin, adminAuth.requireRole('super_admin','admin','support'), (req,res)=>{ const s=operationsStore.store(); s.templates=s.templates.filter(t=>t.id!==req.params.id); operationsStore.save(); res.json({ok:true}); });
-app.get('/api/admin/backup', adminAuth.requireAdmin, adminAuth.requireRole('super_admin'), (req,res)=>{ auditStore.log({adminEmail:req.admin.email,action:'backup_exported'}); res.attachment(`signal-backup-${new Date().toISOString().slice(0,10)}.json`).json({ exportedAt:new Date().toISOString(), users:getAllUsers(), auth:authStore.readAll(), tickets:ticketStore.getAllTickets(), operations:operationsStore.store(), audit:auditStore.getAll({limit:10000}) }); });
+function buildBackupPayload() {
+  const data=backupService.sanitizeTransient(storage.snapshot(BACKUP_STATE_KEYS));
+  return {schemaVersion:1,backupId:`backup_${Date.now().toString(36)}_${crypto.randomBytes(4).toString('hex')}`,createdAt:new Date().toISOString(),service:'Signal eSIM',data};
+}
+function backupFilename(prefix='signal-backup'){return `${prefix}-${new Date().toISOString().replace(/[:.]/g,'-')}.signalbackup`;}
+function sendBackupFile(res,buffer,filename){res.setHeader('Content-Type','application/octet-stream');res.setHeader('Content-Disposition',`attachment; filename="${filename}"`);res.setHeader('Cache-Control','no-store');res.send(buffer);}
+
+app.get('/api/admin/backup/status',adminAuth.requireAdmin,adminAuth.requireRole('super_admin'),async(req,res)=>{
+  const safety=await storage.load('safety-backup.json',null);
+  res.json({configured:String(process.env.BACKUP_ENCRYPTION_KEY||'').length>=24,safetyBackup:safety?{createdAt:safety.createdAt,createdBy:safety.createdBy}:null,current:backupService.summary(buildBackupPayload())});
+});
+app.get('/api/admin/backup',adminAuth.requireAdmin,adminAuth.requireRole('super_admin'),(req,res)=>{
+  try{const payload=buildBackupPayload(),encrypted=backupService.encrypt(payload);auditStore.log({adminEmail:req.admin.email,action:'encrypted_backup_exported',details:backupService.summary(payload)});sendBackupFile(res,encrypted,backupFilename());}
+  catch(error){res.status(error.code==='BACKUP_NOT_CONFIGURED'?503:500).json({error:error.message,code:error.code});}
+});
+app.get('/api/admin/backup/safety',adminAuth.requireAdmin,adminAuth.requireRole('super_admin'),async(req,res)=>{
+  const safety=await storage.load('safety-backup.json',null);
+  if(!safety?.file)return res.status(404).json({error:'Страхової копії ще немає'});
+  auditStore.log({adminEmail:req.admin.email,action:'safety_backup_downloaded',details:{createdAt:safety.createdAt}});sendBackupFile(res,Buffer.from(safety.file,'base64'),backupFilename('signal-before-restore'));
+});
+app.post('/api/admin/backup/inspect',express.raw({type:'application/octet-stream',limit:'50mb'}),adminAuth.requireAdmin,adminAuth.requireRole('super_admin'),(req,res)=>{
+  try{if(!Buffer.isBuffer(req.body)||!req.body.length)return res.status(400).json({error:'Оберіть файл .signalbackup'});const payload=backupService.validate(backupService.decrypt(req.body));const restoreToken=crypto.randomBytes(32).toString('hex');pendingBackupRestores.set(restoreToken,{payload,adminEmail:req.admin.email,expiresAt:Date.now()+10*60*1000});for(const [token,item] of pendingBackupRestores)if(item.expiresAt<Date.now())pendingBackupRestores.delete(token);auditStore.log({adminEmail:req.admin.email,action:'backup_restore_inspected',target:payload.backupId,details:backupService.summary(payload)});res.json({ok:true,restoreToken,expiresIn:600,summary:backupService.summary(payload)});}
+  catch(error){recordSecurityFailure(req,'backup_restore',error.code,req.admin.email);auditStore.log({adminEmail:req.admin.email,action:'backup_restore_rejected',details:{code:error.code}});res.status(400).json({error:error.message,code:error.code});}
+});
+app.post('/api/admin/backup/restore',adminAuth.requireAdmin,adminAuth.requireRole('super_admin'),async(req,res)=>{
+  const item=pendingBackupRestores.get(String(req.body?.restoreToken||''));
+  if(!item||item.expiresAt<Date.now()||item.adminEmail!==req.admin.email)return res.status(400).json({error:'Перевірка копії завершилася. Завантажте файл ще раз'});
+  if(String(req.body?.confirmation||'')!=='ВІДНОВИТИ'||String(req.body?.adminEmail||'').trim().toLowerCase()!==req.admin.email)return res.status(400).json({error:'Введіть слово ВІДНОВИТИ та точний email Super Admin'});
+  try{
+    const before=buildBackupPayload(),safetyFile=backupService.encrypt(before);
+    await storage.saveNow('safety-backup.json',{createdAt:new Date().toISOString(),createdBy:req.admin.email,file:safetyFile.toString('base64')});
+    const restored=backupService.sanitizeTransient(item.payload.data);
+    await storage.restoreMany(restored);
+    await Promise.all([bootstrapUsers(),authStore.bootstrap(),pushStore.bootstrap(),adminStore.bootstrap(),ticketStore.bootstrap(),auditStore.bootstrap(),operationsStore.bootstrap(),translationService.bootstrap(),diagnosticsStore.bootstrap()]);
+    await adminAuth.bootstrap();
+    pendingBackupRestores.delete(String(req.body.restoreToken));
+    auditStore.log({adminEmail:req.admin.email,action:'backup_restored',target:item.payload.backupId,details:{...backupService.summary(item.payload),allSessionsRevoked:true,safetyBackupCreated:true}});
+    res.json({ok:true,message:'Дані відновлено. Усі сесії завершено — увійдіть знову.',summary:backupService.summary(item.payload)});
+  }catch(error){res.status(500).json({error:`Відновлення не завершено: ${error.message}`});}
+});
 app.get('/api/admin/system-status', adminAuth.requireAdmin, (req,res)=>res.json({ server:'ok', database:Boolean(process.env.DATABASE_URL), push:isPushConfigured(), esimProvider:Boolean(process.env.ESIM_PROVIDER_API_KEY), stripe:Boolean(process.env.STRIPE_SECRET_KEY), checkedAt:new Date().toISOString() }));
 
 // Список користувачів для адмінки
