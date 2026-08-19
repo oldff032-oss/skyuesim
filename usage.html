@@ -57,7 +57,8 @@
       const loading = document.getElementById('loading');
       const content = document.getElementById('content');
       try{
-        const res = await fetch(`${API_URL}/api/status?email=${encodeURIComponent(email)}`);
+        const sessionToken=localStorage.getItem('signal_session_token');
+        const res = await fetch(`${API_URL}/api/status`,{headers:{'x-session-token':sessionToken}});
         const data = await res.json();
         loading.style.display = 'none';
         content.style.display = 'block';
@@ -80,7 +81,7 @@
 
         // Тягнемо СВІЖІ дані використання з eSIM Access (не з кешу)
         try{
-          const usageRes = await fetch(`${API_URL}/api/usage?email=${encodeURIComponent(email)}`);
+          const usageRes = await fetch(`${API_URL}/api/usage`,{headers:{'x-session-token':sessionToken}});
           const usageData = await usageRes.json();
           if(usageRes.ok){
             usedGb = usageData.usedGb;
@@ -168,7 +169,7 @@
 
         // Дата наступного списання — окремий запит до Stripe
         try{
-          const billingRes = await fetch(`${API_URL}/api/billing?email=${encodeURIComponent(email)}`);
+          const billingRes = await fetch(`${API_URL}/api/billing`,{headers:{'x-session-token':sessionToken}});
           const billingData = await billingRes.json();
           const billingCard = document.getElementById('billingCard');
           if(billingRes.ok && billingData.nextBillingDate){

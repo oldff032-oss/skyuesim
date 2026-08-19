@@ -47,23 +47,26 @@
   <script src="config.js"></script>
   <script>
     const email = localStorage.getItem('signal_email');
-    if(!email){ window.location.href = 'login.html'; }
+    const sessionToken = localStorage.getItem('signal_session_token');
+    if(!email||!sessionToken){ window.location.href = 'login.html'; }
     const ticketId = new URLSearchParams(window.location.search).get('id');
 
     const statusLabels = { open:'Відкритий', in_progress:'В роботі', waiting_customer:'Очікує вас', resolved:'Вирішено', closed:'Закрито' };
 
+    const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[char]));
+
     function renderAttachment(a){
       if(!a) return '';
       if(a.type && a.type.startsWith('image/')){
-        return `<img src="${a.dataUrl}" style="max-width:100%; border-radius:10px; margin-top:8px; display:block;" />`;
+        return `<img src="${a.dataUrl}" alt="${escapeHtml(a.name || 'attachment')}" style="max-width:100%; border-radius:10px; margin-top:8px; display:block;" />`;
       }
-      return `<a href="${a.dataUrl}" download="${a.name}" style="display:block; margin-top:8px; color:inherit; text-decoration:underline; font-size:12px;">📎 ${a.name}</a>`;
+      return `<a href="${a.dataUrl}" download="${escapeHtml(a.name || 'attachment')}" style="display:block; margin-top:8px; color:inherit; text-decoration:underline; font-size:12px;">📎 ${escapeHtml(a.name || 'attachment')}</a>`;
     }
 
     function fileToAttachment(file){
       return new Promise((resolve, reject) => {
         if(!file) return resolve(null);
-        if(file.size > 3.5 * 1024 * 1024){ reject(new Error('Файл завеликий')); return; }
+        if(file.size > 550 * 1024){ reject(new Error('Файл завеликий (максимум 550 КБ)')); return; }
         const reader = new FileReader();
         reader.onload = () => resolve({ name: file.name, type: file.type, dataUrl: reader.result });
         reader.onerror = () => reject(new Error('Не вдалося прочитати файл'));
@@ -75,19 +78,19 @@
       const loading = document.getElementById('loading');
       const content = document.getElementById('content');
       try{
-        const res = await fetch(`${API_URL}/api/support/tickets/${ticketId}?email=${encodeURIComponent(email)}`);
+        const res = await fetch(`${API_URL}/api/support/tickets/${ticketId}`,{headers:{'x-session-token':sessionToken}});
         const t = await res.json();
         loading.style.display = 'none';
         if(!res.ok) throw new Error(t.error);
 
         content.style.display = 'block';
         content.innerHTML = `
-          <h1 style="margin-top:20px; font-size:20px;">#${t.id} · ${t.subject}</h1>
-          <p class="muted" style="margin-top:6px;">${t.category} · <span class="status-pill on" style="padding:3px 9px;">${statusLabels[t.status]||t.status}</span></p>
+          <h1 style="margin-top:20px; font-size:20px;">#${escapeHtml(t.id)} · ${escapeHtml(t.subject)}</h1>
+          <p class="muted" style="margin-top:6px;">${escapeHtml(t.category)} · <span class="status-pill on" style="padding:3px 9px;">${escapeHtml(statusLabels[t.status]||t.status)}</span></p>
           <div style="margin-top:20px;">
             ${t.messages.map(m => `
               <div class="msg ${m.from}">
-                ${m.text.replace(/\n/g,'<br>')}
+                ${escapeHtml(m.text).replace(/\n/g,'<br>')}
                 ${renderAttachment(m.attachment)}
                 <div class="msg-time">${new Date(m.createdAt).toLocaleString('uk-UA')}</div>
               </div>`).join('')}
@@ -99,7 +102,7 @@
       }catch(e){
         loading.style.display = 'none';
         content.style.display = 'block';
-        content.innerHTML = `<div class="card"><p class="err-text">${e.message || 'Не вдалося завантажити звернення'}</p></div>`;
+        content.innerHTML = `<div class="card"><p class="err-text">${escapeHtml(e.message || 'Не вдалося завантажити звернення')}</p></div>`;
       }
     }
 
@@ -111,8 +114,8 @@
       try{
         const attachment = await fileToAttachment(document.getElementById('replyAttachment').files[0]);
         await fetch(`${API_URL}/api/support/tickets/${ticketId}/reply`, {
-          method:'POST', headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({ email, message: text, attachment })
+          method:'POST', headers:{'Content-Type':'application/json','x-session-token':sessionToken},
+          body: JSON.stringify({ message: text, attachment })
         });
         document.getElementById('replyText').value = '';
         document.getElementById('replyAttachment').value = '';
@@ -127,4 +130,3 @@
   </script>
 </body>
 </html>
-

@@ -77,7 +77,7 @@
 
     async function load(){
       try{
-        const res = await fetch(`${API_URL}/api/status?email=${encodeURIComponent(email)}`);
+        const res = await fetch(`${API_URL}/api/status`,{headers:{'x-session-token':sessionToken}});
         const data = await res.json();
         if(!res.ok){
           if(res.status === 404){ renderNoSubscription(); return; }
@@ -122,7 +122,7 @@
         let totalBytes=currentUser.esim.totalBytes??(limitGb==null?null:Math.round(Number(limitGb)*(1024**3)));
         let remainingBytes=currentUser.esim.remainingBytes??(totalBytes==null?null:Math.max(0,totalBytes-usedBytes));
         try{
-          const usageRes = await fetch(`${API_URL}/api/usage?email=${encodeURIComponent(email)}`);
+          const usageRes = await fetch(`${API_URL}/api/usage`,{headers:{'x-session-token':sessionToken}});
           const usageData = await usageRes.json();
           if(usageRes.ok){
             usedGb = usageData.usedGb;

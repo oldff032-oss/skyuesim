@@ -50,16 +50,19 @@
   <script src="config.js"></script>
   <script>
     const email = localStorage.getItem('signal_email');
-    if(!email){ window.location.href = 'login.html'; }
+    const sessionToken = localStorage.getItem('signal_session_token');
+    if(!email||!sessionToken){ window.location.href = 'login.html'; }
 
     const statusLabels = { open:'Відкритий', in_progress:'В роботі', waiting_customer:'Очікує вас', resolved:'Вирішено', closed:'Закрито' };
+
+    const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[char]));
 
     async function load(){
       const loading = document.getElementById('loading');
       const list = document.getElementById('list');
       const empty = document.getElementById('empty');
       try{
-        const res = await fetch(`${API_URL}/api/support/tickets?email=${encodeURIComponent(email)}`);
+        const res = await fetch(`${API_URL}/api/support/tickets`,{headers:{'x-session-token':sessionToken}});
         const tickets = await res.json();
         loading.style.display = 'none';
 
@@ -69,10 +72,10 @@
         list.innerHTML = tickets.map(t => `
           <div class="ticket-row" onclick="window.location.href='ticket.html?id=${t.id}'">
             <div>
-              <div class="ticket-subject">#${t.id} · ${t.subject}</div>
-              <div class="ticket-meta">${t.category} · ${new Date(t.updatedAt).toLocaleDateString('uk-UA')}</div>
+              <div class="ticket-subject">#${escapeHtml(t.id)} · ${escapeHtml(t.subject)}</div>
+              <div class="ticket-meta">${escapeHtml(t.category)} · ${new Date(t.updatedAt).toLocaleDateString('uk-UA')}</div>
             </div>
-            <span class="status-chip ${t.status}">${statusLabels[t.status] || t.status}</span>
+            <span class="status-chip ${escapeHtml(t.status)}">${escapeHtml(statusLabels[t.status] || t.status)}</span>
           </div>`).join('');
       }catch(e){
         loading.style.display = 'none';
@@ -84,4 +87,3 @@
   </script>
 </body>
 </html>
-

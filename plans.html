@@ -62,7 +62,8 @@
   <script src="config.js"></script>
   <script>
     const email = localStorage.getItem('signal_email');
-    if(!email){ window.location.href = 'login.html'; }
+    const sessionToken = localStorage.getItem('signal_session_token');
+    if(!email||!sessionToken){ window.location.href = 'login.html'; }
 
     let selectedPlan = 'basic';
     function selectTier(el){
@@ -82,8 +83,8 @@
       try{
         const res = await fetch(`${API_URL}/api/create-subscription`, {
           method:'POST',
-          headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({ email, plan: selectedPlan })
+          headers:{'Content-Type':'application/json','x-session-token':sessionToken},
+          body: JSON.stringify({ plan: selectedPlan })
         });
         const data = await res.json();
         if(!res.ok) throw new Error(data.error || 'Помилка сервера');
@@ -99,4 +100,3 @@
   </script>
 </body>
 </html>
-

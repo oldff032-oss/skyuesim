@@ -40,6 +40,11 @@ window.fetch = async function(input, init = {}) {
   const rawUrl = typeof input === 'string' ? input : input?.url || '';
   let path = 'unknown';
   try { path = new URL(rawUrl, location.origin).pathname; } catch {}
+  const protectedLegacyPaths=['/api/status','/api/usage','/api/billing','/api/cancel','/api/create-subscription','/api/support/tickets'];
+  const sessionToken=localStorage.getItem('signal_session_token');
+  if(sessionToken&&protectedLegacyPaths.some(prefix=>path===prefix||path.startsWith(`${prefix}/`))){
+    const headers=new Headers(init.headers||{});if(!headers.has('x-session-token'))headers.set('x-session-token',sessionToken);init={...init,headers};
+  }
   if (path === '/api/account/diagnostics') return signalOriginalFetch(input, init);
   try {
     const response = await signalOriginalFetch(input, init);

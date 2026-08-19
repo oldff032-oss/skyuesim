@@ -57,7 +57,7 @@
     <div class="field-group">
       <label class="field-label">Скріншот або файл (необов'язково)</label>
       <input type="file" id="attachment" accept="image/*,.pdf" style="width:100%; background:rgba(255,255,255,0.04); border:1.5px solid var(--border); border-radius:14px; padding:12px 14px; color:var(--text-muted); font-size:13px;" />
-      <p class="hint-text">Максимум ~3МБ, зображення або PDF</p>
+      <p class="hint-text">Максимум 550 КБ, PNG/JPG/WEBP або PDF</p>
     </div>
 
     <div class="err-text" id="err" style="display:none;"></div>
@@ -69,12 +69,13 @@
   <script src="config.js"></script>
   <script>
     const email = localStorage.getItem('signal_email');
-    if(!email){ window.location.href = 'login.html'; }
+    const sessionToken = localStorage.getItem('signal_session_token');
+    if(!email||!sessionToken){ window.location.href = 'login.html'; }
 
     function fileToAttachment(file){
       return new Promise((resolve, reject) => {
         if(!file) return resolve(null);
-        if(file.size > 3.5 * 1024 * 1024){ reject(new Error('Файл завеликий (максимум ~3МБ)')); return; }
+        if(file.size > 550 * 1024){ reject(new Error('Файл завеликий (максимум 550 КБ)')); return; }
         const reader = new FileReader();
         reader.onload = () => resolve({ name: file.name, type: file.type, dataUrl: reader.result });
         reader.onerror = () => reject(new Error('Не вдалося прочитати файл'));
@@ -103,8 +104,8 @@
       try{
         const attachment = await fileToAttachment(fileInput.files[0]);
         const res = await fetch(`${API_URL}/api/support/tickets`, {
-          method:'POST', headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({ email, category, subject, message, attachment })
+          method:'POST', headers:{'Content-Type':'application/json','x-session-token':sessionToken},
+          body: JSON.stringify({ category, subject, message, attachment })
         });
         const data = await res.json();
         if(!res.ok) throw new Error(data.error || 'Помилка сервера');
@@ -119,4 +120,3 @@
   </script>
 </body>
 </html>
-

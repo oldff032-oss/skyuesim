@@ -33,12 +33,15 @@ const app = express();
 const esimRetriesInProgress = new Set();
 const renewalInvoicesInProgress = new Set();
 const coverageCache = new Map();
-const accessRecoveryRateLimit = new Map();
 const adminRecoveryRateLimit = new Map();
 const pendingBackupRestores = new Map();
 const securityAttemptTracker = new Map();
 const BACKUP_STATE_KEYS = ['users.json','auth.json','admins.json','tickets.json','audit-log.json','operations.json','push-subscriptions.json','diagnostics.json','translations.json'];
-app.use(cors());
+app.set('trust proxy',1);
+const allowedOrigins=new Set([process.env.FRONTEND_URL,'https://skyesim.netlify.app',...String(process.env.ALLOWED_ORIGINS||'').split(',')].map(value=>String(value||'').trim().replace(/\/$/,'')).filter(Boolean));
+if(process.env.NODE_ENV!=='production'){allowedOrigins.add('http://localhost:3000');allowedOrigins.add('http://localhost:4242');allowedOrigins.add('http://127.0.0.1:5500');}
+app.use(cors({origin(origin,callback){if(!origin||allowedOrigins.has(String(origin).replace(/\/$/,'')))return callback(null,true);callback(new Error('Origin is not allowed'));},methods:['GET','POST','PUT','PATCH','DELETE','OPTIONS'],allowedHeaders:['Content-Type','x-session-token','x-admin-token','x-device-name','stripe-signature','svix-id','svix-timestamp','svix-signature'],maxAge:86400}));
+app.use((req,res,next)=>{res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('X-Frame-Options','DENY');res.setHeader('Referrer-Policy','no-referrer');res.setHeader('Permissions-Policy','camera=(), microphone=(), geolocation=()');res.setHeader('Cross-Origin-Resource-Policy','same-site');if(req.path.startsWith('/api/'))res.setHeader('Cache-Control','no-store');next();});
 
 function upsertPurchase(email, purchaseId, patch, defaults = {}) {
   const user = getUser(email) || {};
@@ -50,6 +53,15 @@ function upsertPurchase(email, purchaseId, patch, defaults = {}) {
   saveUser(email, { purchases });
   return next;
 }
+
+function userStatusView(user) {
+  if(!user)return null;
+  const allowed=['email','displayName','avatarDataUrl','status','plan','createdAt','updatedAt','subscriptionPeriodEnd','lastRenewalError','lastEsimProvisionError'];
+  const result=Object.fromEntries(allowed.filter(key=>user[key]!==undefined).map(key=>[key,user[key]]));
+  if(user.esim){const hidden=new Set(['pinHash','passkeyChallenge','passwordHash']);result.esim=Object.fromEntries(Object.entries(user.esim).filter(([key])=>!hidden.has(key)));}
+  return result;
+}
+function validateSupportAttachment(attachment){if(!attachment)return null;const type=String(attachment.type||'').toLowerCase(),allowed=['image/png','image/jpeg','image/webp','application/pdf'];if(!allowed.includes(type)||typeof attachment.dataUrl!=='string'||attachment.dataUrl.length>800000||!attachment.dataUrl.startsWith(`data:${type};base64,`))throw Object.assign(new Error('Дозволено PNG, JPG, WEBP або PDF до 550 КБ'),{code:'INVALID_ATTACHMENT'});return {name:String(attachment.name||'attachment').replace(/[\r\n<>"']/g,'').slice(0,120),type,dataUrl:attachment.dataUrl};}
 
 async function deliverPurchaseReceipt(email, purchaseId, defaults = {}, suppliedReceiptUrl = null) {
   const stored = (getUser(email)?.purchases || []).find(item => item.id === purchaseId);
@@ -114,6 +126,9 @@ function recordSecurityFailure(req,surface,code,email='') {
   const state=operationsStore.store();(state.securityEvents||=[]).unshift(event);state.securityEvents=state.securityEvents.slice(0,500);operationsStore.save();
   if(attempts.length===alertThreshold)notifySuperAdminsSecurity(event,attempts.length);
 }
+function rateLimit(name,windowMs,maximum,keyFromRequest=()=> ''){
+  return async(req,res,next)=>{try{const material=`${name}:${securityFingerprint(req)}:${String(keyFromRequest(req)||'').trim().toLowerCase()}`,key=crypto.createHash('sha256').update(material).digest('hex'),result=await storage.consumeRateLimit(key,windowMs,maximum);res.setHeader('X-RateLimit-Limit',String(maximum));res.setHeader('X-RateLimit-Remaining',String(Math.max(0,maximum-result.count)));if(!result.allowed){res.setHeader('Retry-After',String(Math.max(1,Math.ceil(result.retryAfterMs/1000))));recordSecurityFailure(req,`rate_limit_${name}`,'RATE_LIMITED',keyFromRequest(req));return res.status(429).json({error:'Забагато спроб. Спробуйте пізніше',code:'RATE_LIMITED',retryAfterSec:Math.max(1,Math.ceil(result.retryAfterMs/1000))});}next();}catch(error){console.error('[rate limit]',error.message);res.status(503).json({error:'Захист запитів тимчасово недоступний'});}};
+}
 
 // ВАЖЛИВО: вебхук Stripe має отримати "сирий" (не розпарсений) body,
 // тому для цього одного маршруту JSON-парсер вимикаємо.
@@ -125,7 +140,7 @@ app.use(express.json({ limit: '1mb' }));
 // АВТЕНТИФІКАЦІЯ: email -> код -> пароль -> акаунт, і логін
 // =========================================================
 
-app.post('/api/auth/request-code', async (req, res) => {
+app.post('/api/auth/request-code',rateLimit('request_code',15*60*1000,10,req=>req.body?.email), async (req, res) => {
   try {
     const { email } = req.body;
     if (!email || !email.includes('@')) return res.status(400).json({ error: 'Введи коректний email' });
@@ -138,7 +153,7 @@ app.post('/api/auth/request-code', async (req, res) => {
   }
 });
 
-app.post('/api/auth/verify-code', (req, res) => {
+app.post('/api/auth/verify-code',rateLimit('verify_code',15*60*1000,15,req=>req.body?.email), (req, res) => {
   try {
     const { email, code } = req.body;
     if (!email || !code) return res.status(400).json({ error: 'Потрібні email і code' });
@@ -161,7 +176,7 @@ app.post('/api/auth/set-password', async (req, res) => {
   }
 });
 
-app.post('/api/auth/login', async (req, res) => {
+app.post('/api/auth/login',rateLimit('user_login',15*60*1000,20,req=>req.body?.email), async (req, res) => {
   try {
     const { email, password } = req.body;
     if (!email || !password) return res.status(400).json({ error: 'Потрібні email і password' });
@@ -389,7 +404,7 @@ app.post('/api/push/test', requireUserSession, async (req, res) => {
 });
 
 // ---- Забув(ла) пароль ----
-app.post('/api/auth/forgot-password', async (req, res) => {
+app.post('/api/auth/forgot-password',rateLimit('forgot_password',60*60*1000,10,req=>req.body?.email), async (req, res) => {
   try {
     const { email } = req.body;
     if (!email || !email.includes('@')) return res.status(400).json({ error: 'Введи коректний email' });
@@ -401,7 +416,7 @@ app.post('/api/auth/forgot-password', async (req, res) => {
   }
 });
 
-app.post('/api/auth/verify-reset-code', (req, res) => {
+app.post('/api/auth/verify-reset-code', rateLimit('verify_reset_code',15*60*1000,15,req=>req.body?.email), (req, res) => {
   try {
     const { email, code } = req.body;
     if (!email || !code) return res.status(400).json({ error: 'Потрібні email і code' });
@@ -412,7 +427,7 @@ app.post('/api/auth/verify-reset-code', (req, res) => {
   }
 });
 
-app.post('/api/auth/reset-password', async (req, res) => {
+app.post('/api/auth/reset-password', rateLimit('reset_password',15*60*1000,10,req=>req.body?.resetToken), async (req, res) => {
   try {
     const { resetToken, password } = req.body;
     if (!resetToken || !password) return res.status(400).json({ error: 'Потрібні resetToken і password' });
@@ -473,13 +488,7 @@ app.post('/api/inbound-email', async (req, res) => {
 // Public intake for people who cannot receive a verification email. It never
 // reveals whether the supplied email/ICCID matches an account; only an admin
 // can verify ownership and issue a short-lived recovery link.
-app.post('/api/auth/access-recovery', (req, res) => {
-  const rateKey = req.ip || req.socket?.remoteAddress || 'unknown';
-  const now = Date.now();
-  const recent = (accessRecoveryRateLimit.get(rateKey) || []).filter(timestamp => now - timestamp < 60 * 60 * 1000);
-  if (recent.length >= 3) return res.status(429).json({ error: 'Забагато запитів. Спробуй через годину.' });
-  recent.push(now);
-  accessRecoveryRateLimit.set(rateKey, recent);
+app.post('/api/auth/access-recovery', rateLimit('access_recovery',60*60*1000,3,req=>req.body?.contactEmail || req.body?.possibleEmail), (req, res) => {
   const name = String(req.body?.name || '').trim().slice(0, 80);
   const possibleEmail = String(req.body?.possibleEmail || '').trim().toLowerCase().slice(0, 254);
   const contactEmail = String(req.body?.contactEmail || '').trim().toLowerCase().slice(0, 254);
@@ -512,7 +521,7 @@ app.get('/api/auth/admin-recovery/:token', (req, res) => {
   }
 });
 
-app.post('/api/auth/admin-recovery/:token', async (req, res) => {
+app.post('/api/auth/admin-recovery/:token', rateLimit('complete_recovery',15*60*1000,10,req=>req.params.token), async (req, res) => {
   try {
     const result = await authService.completeAdminRecovery(req.params.token, req.body?.email, req.body?.password, req.body?.pin);
     const ticket = ticketStore.getTicket(result.ticketId);
@@ -524,34 +533,31 @@ app.post('/api/auth/admin-recovery/:token', async (req, res) => {
   }
 });
 
-app.post('/api/support/tickets', async (req, res) => {
+app.post('/api/support/tickets', requireUserSession,rateLimit('support_ticket',60*60*1000,10,req=>req.userEmail), async (req, res) => {
   try {
-    const { email, category, subject, message, attachment } = req.body;
-    if (!email || !subject || !message) return res.status(400).json({ error: 'Потрібні email, subject і message' });
-    if (attachment && attachment.dataUrl && attachment.dataUrl.length > 4_500_000) {
-      return res.status(400).json({ error: 'Файл завеликий (максимум ~3МБ)' });
-    }
-
-    const ticket = ticketStore.createTicket({ email, category: category || 'Інше', subject, message, attachment });
+    const category = String(req.body?.category || 'Інше').trim().slice(0, 60);
+    const subject = String(req.body?.subject || '').trim().slice(0, 160);
+    const message = String(req.body?.message || '').trim().slice(0, 5000);
+    const attachment = req.body?.attachment;
+    const email=req.userEmail;
+    if (!subject || !message) return res.status(400).json({ error: 'Потрібні subject і message' });
+    const safeAttachment=validateSupportAttachment(attachment);
+    const ticket = ticketStore.createTicket({ email, category: category || 'Інше', subject, message, attachment:safeAttachment });
     notifySuperAdminsAboutTicket(ticket);
     res.json(ticket);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.code === 'INVALID_ATTACHMENT' ? 400 : 500).json({ error: err.code === 'INVALID_ATTACHMENT' ? err.message : 'Не вдалося створити звернення' });
   }
 });
 
-app.get('/api/support/tickets', (req, res) => {
-  const email = req.query.email;
-  if (!email) return res.status(400).json({ error: 'Потрібен email' });
-  res.json(ticketStore.getTicketsByEmail(email));
+app.get('/api/support/tickets', requireUserSession, (req, res) => {
+  res.json(ticketStore.getTicketsByEmail(req.userEmail));
 });
 
-app.get('/api/support/tickets/:id', (req, res) => {
+app.get('/api/support/tickets/:id', requireUserSession, (req, res) => {
   const ticket = ticketStore.getTicket(req.params.id);
   if (!ticket) return res.status(404).json({ error: 'Тікет не знайдено' });
-  if (req.query.email && ticket.email !== req.query.email) {
-    return res.status(403).json({ error: 'Немає доступу до цього тікета' });
-  }
+  if (ticket.email !== req.userEmail) return res.status(403).json({ error: 'Немає доступу до цього тікета' });
   // Внутрішні нотатки адмінів користувач бачити не повинен
   const safeTicket = ticketStore.stripNotesForUser(ticket);
   if ((getUser(ticket.email)?.language || 'uk') !== 'en') return res.json(safeTicket);
@@ -561,16 +567,15 @@ app.get('/api/support/tickets/:id', (req, res) => {
   )).then((messages) => res.json({ ...safeTicket, messages })).catch(() => res.json(safeTicket));
 });
 
-app.post('/api/support/tickets/:id/reply', (req, res) => {
-  const { email, message, attachment } = req.body;
+app.post('/api/support/tickets/:id/reply', requireUserSession, (req, res) => {
+  const message = String(req.body?.message || '').trim().slice(0, 5000);
+  const attachment = req.body?.attachment;
   const ticket = ticketStore.getTicket(req.params.id);
   if (!ticket) return res.status(404).json({ error: 'Тікет не знайдено' });
-  if (ticket.email !== email) return res.status(403).json({ error: 'Немає доступу до цього тікета' });
-  if (attachment && attachment.dataUrl && attachment.dataUrl.length > 4_500_000) {
-    return res.status(400).json({ error: 'Файл завеликий (максимум ~3МБ)' });
-  }
-
-  const updated = ticketStore.addMessage(req.params.id, { from: 'user', text: message, attachment });
+  if (ticket.email !== req.userEmail) return res.status(403).json({ error: 'Немає доступу до цього тікета' });
+  if (!message) return res.status(400).json({ error: 'Напиши повідомлення' });
+  let safeAttachment;try{safeAttachment=validateSupportAttachment(attachment);}catch(error){return res.status(400).json({error:error.message,code:error.code});}
+  const updated = ticketStore.addMessage(req.params.id, { from: 'user', text: message, attachment:safeAttachment });
   res.json(ticketStore.stripNotesForUser(updated));
 });
 
@@ -578,7 +583,7 @@ app.post('/api/support/tickets/:id/reply', (req, res) => {
 // АДМІН-ПАНЕЛЬ: акаунти адмінів з ролями (Super Admin/Admin/Support/Viewer)
 // =========================================================
 
-app.post('/api/admin/login', async (req, res) => {
+app.post('/api/admin/login',rateLimit('admin_login',15*60*1000,10,req=>req.body?.email), async (req, res) => {
   try {
     const { email, password } = req.body;
     const result = await adminAuth.login(email, password);
@@ -596,7 +601,7 @@ app.post('/api/admin/login', async (req, res) => {
   }
 });
 
-app.post('/api/admin/login/2fa', (req,res)=>{
+app.post('/api/admin/login/2fa',rateLimit('admin_2fa',15*60*1000,10), (req,res)=>{
   try{const result=adminAuth.completeLogin(String(req.body?.challengeId||''),String(req.body?.code||''));auditStore.log({adminEmail:result.email,action:'admin_login_2fa'});res.json(result);}
   catch(error){recordSecurityFailure(req,'admin_2fa',error.code);res.status(401).json({error:error.message,code:error.code});}
 });
@@ -811,7 +816,8 @@ app.post('/api/admin/tickets/:id/reply', adminAuth.requireAdmin, adminAuth.requi
     if (!ticket) return res.status(404).json({ error: 'Тікет не знайдено' });
     if (req.admin.role === 'admin' && ticket.assignedTo !== req.admin.email) return res.status(403).json({ error:'Це звернення не призначене вам' });
 
-    const updated = ticketStore.addMessage(req.params.id, { from: 'admin', text: message, attachment });
+    const safeAttachment=validateSupportAttachment(attachment);
+    const updated = ticketStore.addMessage(req.params.id, { from: 'admin', text: message, attachment:safeAttachment });
     const customerMessage = await translationService.forEmail(ticket.email, message, getUser);
     const customerTitle = await translationService.forEmail(ticket.email, 'Нова відповідь від підтримки', getUser);
     // Do not put the reply text in a lock-screen notification. The user can
@@ -837,7 +843,7 @@ app.post('/api/admin/tickets/:id/reply', adminAuth.requireAdmin, adminAuth.requi
 
     res.json(updated);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.code === 'INVALID_ATTACHMENT' ? 400 : 500).json({ error: err.code === 'INVALID_ATTACHMENT' ? err.message : 'Не вдалося надіслати відповідь' });
   }
 });
 
@@ -1544,10 +1550,11 @@ app.post('/api/admin/users/:email/recover-esim', adminAuth.requireAdmin, adminAu
 
 // ---------- 1. Створити сесію оплати підписки ----------
 // Фронтенд викликає це, коли людина натискає "Оформити підписку"
-app.post('/api/create-subscription', async (req, res) => {
+app.post('/api/create-subscription', requireUserSession,rateLimit('checkout',60*60*1000,10,req=>req.userEmail), async (req, res) => {
   try {
-    const { email, plan } = req.body;
-    if (!email || !plan) return res.status(400).json({ error: 'Потрібні email і plan' });
+    const { plan } = req.body;
+    const email=req.userEmail;
+    if (!plan) return res.status(400).json({ error: 'Потрібен plan' });
     if (operationsStore.store().blacklist.emails.includes(email.toLowerCase())) return res.status(403).json({ error: 'Цей email недоступний для оплати' });
 
     const session = await createCheckoutSession({ email, plan });
@@ -1556,7 +1563,7 @@ app.post('/api/create-subscription', async (req, res) => {
     res.json({ url: session.url });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Не вдалося створити оплату' });
   }
 });
 
@@ -1761,9 +1768,8 @@ app.post('/api/webhook', async (req, res) => {
 });
 
 // ---------- 3. Статус користувача (для дашборду) ----------
-app.get('/api/status', (req, res) => {
-  const email = req.query.email;
-  if (!email) return res.status(400).json({ error: 'Потрібен email' });
+app.get('/api/status', requireUserSession, (req, res) => {
+  const email = req.userEmail;
 
   const user = getUser(email);
   if (!user) return res.status(404).json({ error: 'Користувача не знайдено' });
@@ -1772,17 +1778,16 @@ app.get('/api/status', (req, res) => {
   // Repair accounts that were incorrectly marked as pending by older builds
   // after a user opened and then cancelled Stripe Checkout.
   if (user.status === 'pending_payment' && user.esim?.orderNo) {
-    return res.json(saveUser(email, { status: 'active' }));
+    return res.json(userStatusView(saveUser(email, { status: 'active' })));
   }
 
-  res.json(user);
+  res.json(userStatusView(user));
 });
 
 // ---------- 3.5. Оновити реальне використання трафіку ----------
-app.get('/api/usage', async (req, res) => {
+app.get('/api/usage', requireUserSession, async (req, res) => {
   try {
-    const email = req.query.email;
-    if (!email) return res.status(400).json({ error: 'Потрібен email' });
+    const email = req.userEmail;
 
     const user = getUser(email);
     if (!user || !user.esim?.orderNo) {
@@ -1828,15 +1833,14 @@ app.get('/api/usage', async (req, res) => {
     res.json({ usedBytes, totalBytes, remainingBytes, usedGb, totalGb, remainingGb, source:'esim_access_operator', esimStatus: usage.esimStatus, apn: usage.apn, expiredTime: usage.expiredTime, activateTime: usage.activateTime, lastUpdateTime: usage.lastUpdateTime });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: err.message });
+    res.status(502).json({ error: 'Не вдалося отримати дані оператора eSIM' });
   }
 });
 
 // ---------- 3.6. Дата наступного списання (реальна, зі Stripe) ----------
-app.get('/api/billing', async (req, res) => {
+app.get('/api/billing', requireUserSession, async (req, res) => {
   try {
-    const email = req.query.email;
-    if (!email) return res.status(400).json({ error: 'Потрібен email' });
+    const email = req.userEmail;
 
     const user = getUser(email);
     if (!user || !user.stripeSubscriptionId) {
@@ -1847,14 +1851,14 @@ app.get('/api/billing', async (req, res) => {
     res.json({ nextBillingDate });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: err.message });
+    res.status(502).json({ error: 'Не вдалося отримати дані про наступну оплату' });
   }
 });
 
 // ---------- 4. Скасування підписки ----------
-app.post('/api/cancel', async (req, res) => {
+app.post('/api/cancel', requireUserSession, async (req, res) => {
   try {
-    const { email } = req.body;
+    const email = req.userEmail;
     const user = getUser(email);
     if (!user || !user.stripeSubscriptionId) {
       return res.status(404).json({ error: 'Активної підписки не знайдено' });
@@ -1864,7 +1868,7 @@ app.post('/api/cancel', async (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: err.message });
+    res.status(502).json({ error: 'Не вдалося скасувати підписку' });
   }
 });
 
@@ -1906,4 +1910,11 @@ app.get('/api/account/billing-history', requireUserSession, async (req, res) => 
     console.error('Billing history:', error.message);
     res.status(502).json({ error: 'Не вдалося завантажити історію оплат' });
   }
+});
+
+app.use((error, req, res, next) => {
+  console.error('Unhandled request error:', error.message);
+  if (res.headersSent) return next(error);
+  const forbiddenOrigin = error.message === 'Origin is not allowed';
+  res.status(forbiddenOrigin ? 403 : 500).json({ error: forbiddenOrigin ? 'Цей сайт не має доступу до API' : 'Внутрішня помилка сервера' });
 });

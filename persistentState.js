@@ -6,6 +6,7 @@ let pool = null;
 let ready = false;
 const states = new Map();
 const writes = new Map();
+const localRateLimits = new Map();
 
 function localFile(name) { return path.join(__dirname, 'data', name); }
 function readLocal(name, fallback) {
@@ -29,6 +30,7 @@ async function init() {
   const { Pool } = require('pg');
   pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: process.env.DATABASE_SSL === 'false' ? false : { rejectUnauthorized: false } });
   await pool.query("CREATE TABLE IF NOT EXISTS public.app_state (key TEXT PRIMARY KEY, value JSONB NOT NULL DEFAULT '{}'::jsonb, updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())");
+  await pool.query('CREATE TABLE IF NOT EXISTS public.security_rate_limits (key TEXT PRIMARY KEY, window_started TIMESTAMPTZ NOT NULL DEFAULT NOW(), count INTEGER NOT NULL DEFAULT 1)');
   ready = true;
   console.log('[storage] PostgreSQL persistence is enabled.');
 }
@@ -93,4 +95,11 @@ async function restoreMany(entries) {
   } finally { client.release(); }
 }
 
-module.exports = { init, load, save, snapshot, saveNow, restoreMany };
+async function consumeRateLimit(key, windowMs, maximum) {
+  const now=Date.now();
+  if(!pool){const current=localRateLimits.get(key);const item=!current||now-current.windowStarted>=windowMs?{windowStarted:now,count:1}:{...current,count:current.count+1};localRateLimits.set(key,item);return {allowed:item.count<=maximum,count:item.count,retryAfterMs:Math.max(0,item.windowStarted+windowMs-now)};}
+  const result=await pool.query(`INSERT INTO public.security_rate_limits (key,window_started,count) VALUES ($1,NOW(),1) ON CONFLICT (key) DO UPDATE SET count=CASE WHEN public.security_rate_limits.window_started < NOW()-($2::bigint*INTERVAL '1 millisecond') THEN 1 ELSE public.security_rate_limits.count+1 END,window_started=CASE WHEN public.security_rate_limits.window_started < NOW()-($2::bigint*INTERVAL '1 millisecond') THEN NOW() ELSE public.security_rate_limits.window_started END RETURNING count,window_started`,[key,windowMs]);
+  const item=result.rows[0],started=new Date(item.window_started).getTime();return {allowed:Number(item.count)<=maximum,count:Number(item.count),retryAfterMs:Math.max(0,started+windowMs-now)};
+}
+
+module.exports = { init, load, save, snapshot, saveNow, restoreMany, consumeRateLimit };

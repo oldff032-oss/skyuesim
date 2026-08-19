@@ -16,8 +16,11 @@ const VERIFY_TOKEN_TTL_MS = 15 * 60 * 1000; // 15 хвилин на встано
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 днів
 
 function randomCode() {
-  return String(Math.floor(100000 + Math.random() * 900000)); // 6 цифр
+  return String(crypto.randomInt(100000,1000000));
 }
+function normalizeEmail(email){return String(email||'').trim().toLowerCase();}
+function verificationCodeHash(email,code){const secret=String(process.env.AUTH_CODE_PEPPER||process.env.ADMIN_RECOVERY_SECRET||process.env.BACKUP_ENCRYPTION_KEY||'signal-local-development');return crypto.createHmac('sha256',secret).update(`${normalizeEmail(email)}:${String(code||'')}`).digest('hex');}
+function codeMatches(email,entry,code){if(entry.codeHash){const expected=Buffer.from(entry.codeHash,'hex'),actual=Buffer.from(verificationCodeHash(email,code),'hex');return expected.length===actual.length&&crypto.timingSafeEqual(expected,actual);}return entry.code===String(code||'');}
 function randomToken() {
   return crypto.randomBytes(32).toString('hex');
 }
@@ -34,6 +37,7 @@ function createSession(store, email, deviceName) {
 
 // ---------- Крок 1: запит коду ----------
 async function requestCode(email, language = 'uk', referralCode = '', profile = {}) {
+  email=normalizeEmail(email);
   const store = readAll();
   const existing = store.codes[email];
 
@@ -45,7 +49,7 @@ async function requestCode(email, language = 'uk', referralCode = '', profile = 
   const code = randomCode();
   const displayName = String(profile?.displayName || existing?.displayName || '').trim().slice(0, 60);
   const avatarDataUrl = typeof profile?.avatarDataUrl === 'string' && /^data:image\/(png|jpeg|webp);base64,/i.test(profile.avatarDataUrl) && profile.avatarDataUrl.length <= 700000 ? profile.avatarDataUrl : (existing?.avatarDataUrl || null);
-  store.codes[email] = { code, sentAt: Date.now(), attempts: 0, language: language === 'en' ? 'en' : 'uk', referralCode: String(referralCode || existing?.referralCode || '').trim().toUpperCase().slice(0, 32), displayName, avatarDataUrl };
+  store.codes[email] = { codeHash:verificationCodeHash(email,code), sentAt: Date.now(), attempts: 0, language: language === 'en' ? 'en' : 'uk', referralCode: String(referralCode || existing?.referralCode || '').trim().toUpperCase().slice(0, 32), displayName, avatarDataUrl };
   writeAll(store);
 
   await sendVerificationCode(email, code);
@@ -54,6 +58,7 @@ async function requestCode(email, language = 'uk', referralCode = '', profile = 
 
 // ---------- Крок 2: перевірка коду ----------
 function verifyCode(email, code) {
+  email=normalizeEmail(email);
   const store = readAll();
   const entry = store.codes[email];
 
@@ -63,7 +68,7 @@ function verifyCode(email, code) {
 
   entry.attempts += 1;
 
-  if (entry.code !== code) {
+  if (!codeMatches(email,entry,code)) {
     writeAll(store);
     throw Object.assign(new Error('Невірний код'), { code: 'WRONG_CODE' });
   }
@@ -108,6 +113,7 @@ async function setPassword(verifyToken, password, deviceName, pin) {
 
 // ---------- Логін ----------
 async function login(email, password, deviceName) {
+  email=normalizeEmail(email);
   const store = readAll();
   const user = store.users[email];
   if (!user) throw Object.assign(new Error('Невірний email або пароль'), { code: 'INVALID_CREDENTIALS' });
@@ -310,6 +316,7 @@ module.exports = { requestCode, verifyCode, setPassword, login, getSessionEmail,
 
 // ---------- Забув(ла) пароль: запит коду ----------
 async function requestPasswordReset(email) {
+  email=normalizeEmail(email);
   const store = readAll();
   store.resetCodes = store.resetCodes || {};
   const existing = store.resetCodes[email];
@@ -324,7 +331,7 @@ async function requestPasswordReset(email) {
   // реально шлемо тільки якщо акаунт справді є.
   if (store.users[email]) {
     const code = randomCode();
-    store.resetCodes[email] = { code, sentAt: Date.now(), attempts: 0 };
+    store.resetCodes[email] = { codeHash:verificationCodeHash(email,code), sentAt: Date.now(), attempts: 0 };
     writeAll(store);
     await sendVerificationCode(email, code);
   }
@@ -334,6 +341,7 @@ async function requestPasswordReset(email) {
 
 // ---------- Забув(ла) пароль: перевірка коду ----------
 function verifyResetCode(email, code) {
+  email=normalizeEmail(email);
   const store = readAll();
   store.resetCodes = store.resetCodes || {};
   const entry = store.resetCodes[email];
@@ -344,7 +352,7 @@ function verifyResetCode(email, code) {
 
   entry.attempts += 1;
 
-  if (entry.code !== code) {
+  if (!codeMatches(email,entry,code)) {
     writeAll(store);
     throw Object.assign(new Error('Невірний код'), { code: 'WRONG_CODE' });
   }

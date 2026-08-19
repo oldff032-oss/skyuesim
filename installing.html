@@ -65,16 +65,14 @@
     setStep(0);
     setTimeout(() => setStep(1), 400);
 
-    const params = new URLSearchParams(window.location.search);
-    const email = params.get('email') || localStorageEmailFallback();
-    function localStorageEmailFallback() { return ''; } // navigate вручну, якщо email невідомий
+    const sessionToken = localStorage.getItem('signal_session_token');
 
     let attempts = 0;
     async function poll() {
       attempts++;
-      if (!email) { setStep(2); setTimeout(() => window.location.href = 'dashboard.html', 1500); return; }
+      if (!sessionToken) { window.location.href = 'login.html'; return; }
       try {
-        const res = await fetch(`${API_URL}/api/status?email=${encodeURIComponent(email)}`);
+        const res = await fetch(`${API_URL}/api/status`,{headers:{'x-session-token':sessionToken}});
         const data = await res.json();
         if (data.status === 'active') {
           setStep(3);
@@ -95,4 +93,3 @@
   </script>
 </body>
 </html>
-

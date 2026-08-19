@@ -24,7 +24,7 @@ async function createCheckoutSession({ email, plan }) {
     mode: 'subscription',
     customer_email: email,
     line_items: [{ price: priceId, quantity: 1 }],
-    success_url: `${process.env.FRONTEND_URL}/installing.html?email=${encodeURIComponent(email)}`,
+    success_url: `${process.env.FRONTEND_URL}/installing.html?session_id={CHECKOUT_SESSION_ID}`,
     cancel_url: `${process.env.FRONTEND_URL}/plans.html`,
     metadata: { plan, email },
   });
@@ -55,7 +55,7 @@ async function createCustomPackageCheckout({ email, packageCode, packageName, am
     customer_email: email,
     customer_creation: 'always',
     line_items: [{ price_data: { currency, product_data: { name: packageName }, unit_amount: amountCents }, quantity: 1 }],
-    success_url: `${process.env.FRONTEND_URL}/installing.html?email=${encodeURIComponent(email)}`,
+    success_url: `${process.env.FRONTEND_URL}/installing.html?session_id={CHECKOUT_SESSION_ID}`,
     cancel_url: `${process.env.FRONTEND_URL}/profile.html`,
     metadata: { plan: 'custom', email, packageCode, packageName, dataLimitGb: dataLimitGb == null ? '' : String(dataLimitGb), durationDays: durationDays == null ? '' : String(durationDays), location: String(location || '').slice(0,80) },
   });
