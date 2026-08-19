@@ -47,12 +47,15 @@
     let currentUser = null;
     let qrCountdownTimer = null;
     const isAppleMobile = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+    const appLanguage = localStorage.getItem('signal_language') === 'en' ? 'en' : 'uk';
+    const appLocale = appLanguage === 'en' ? 'en-US' : 'uk-UA';
+    const dataUnits = appLanguage === 'en' ? {b:'B',kb:'KB',mb:'MB',gb:'GB'} : {b:'Б',kb:'КБ',mb:'МБ',gb:'ГБ'};
 
     function formatGb(value){
       const number = Number(value);
-      return Number.isFinite(number) ? `${number.toLocaleString('uk-UA', { minimumFractionDigits:2, maximumFractionDigits:4 })} ГБ` : '—';
+      return Number.isFinite(number) ? `${number.toLocaleString(appLocale, { minimumFractionDigits:2, maximumFractionDigits:4 })} ${dataUnits.gb}` : '—';
     }
-    function formatBytes(value){const bytes=Number(value);if(!Number.isFinite(bytes)||bytes<0)return '—';if(bytes<1024)return `${Math.round(bytes).toLocaleString('uk-UA')} Б`;if(bytes<1024**2)return `${(bytes/1024).toLocaleString('uk-UA',{maximumFractionDigits:2})} КБ`;if(bytes<1024**3)return `${(bytes/1024**2).toLocaleString('uk-UA',{minimumFractionDigits:2,maximumFractionDigits:2})} МБ`;return `${(bytes/1024**3).toLocaleString('uk-UA',{minimumFractionDigits:2,maximumFractionDigits:4})} ГБ`;}
+    function formatBytes(value){const bytes=Number(value);if(!Number.isFinite(bytes)||bytes<0)return '—';if(bytes<1024)return `${Math.round(bytes).toLocaleString(appLocale)} ${dataUnits.b}`;if(bytes<1024**2)return `${(bytes/1024).toLocaleString(appLocale,{maximumFractionDigits:2})} ${dataUnits.kb}`;if(bytes<1024**3)return `${(bytes/1024**2).toLocaleString(appLocale,{minimumFractionDigits:2,maximumFractionDigits:2})} ${dataUnits.mb}`;return `${(bytes/1024**3).toLocaleString(appLocale,{minimumFractionDigits:2,maximumFractionDigits:4})} ${dataUnits.gb}`;}
 
     function copyActivationCode(){
       const code = currentUser?.esim?.activationCode;
@@ -143,7 +146,7 @@
         const installAction = !activationCode ? '' : isAppleMobile
           ? `<a class="btn" href="${appleInstallUrl}" style="margin-top:16px;">Встановити eSIM</a>`
           : `<button class="btn" type="button" onclick="copyActivationCode()" style="margin-top:16px;">Скопіювати код eSIM</button>`;
-        const updateText = lastUpdateTime ? `Дані оновлено: ${new Date(lastUpdateTime).toLocaleString('uk-UA')}` : 'Дані оновлюються провайдером протягом кількох годин.';
+        const updateText = lastUpdateTime ? `${window.signalT('Дані оновлено:','Data updated:')} ${new Date(lastUpdateTime).toLocaleString(appLocale)}` : window.signalT('Дані оновлюються провайдером протягом кількох годин.','Data is refreshed by the provider within a few hours.');
         const qrExpiresAt = currentUser.esim.dashboardQrExpiresAt ? new Date(currentUser.esim.dashboardQrExpiresAt).getTime() : 0;
         const showFirstInstallQr = Boolean(currentUser.esim.qrCodeUrl && qrExpiresAt && Date.now() < qrExpiresAt);
         const trafficHeadline = totalBytes == null ? 'Безлімітний інтернет' : `${formatBytes(remainingBytes ?? 0)} залишилось`;

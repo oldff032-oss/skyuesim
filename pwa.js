@@ -19,7 +19,7 @@ window.setTimeout(()=>document.documentElement.classList.remove('signal-maintena
 // and stays consistent across the app.
 if (!document.querySelector('script[data-signal-i18n]')) {
   const script = document.createElement('script');
-  script.src = '/i18n.js?v=33';
+  script.src = '/i18n.js?v=34';
   script.defer = true;
   script.dataset.signalI18n = 'true';
   document.head.appendChild(script);
