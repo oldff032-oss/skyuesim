@@ -419,6 +419,17 @@ app.post('/api/account/feedback', requireUserSession, (req, res) => {
   res.json({ ok: true });
 });
 
+app.get('/api/admin/feedback', adminAuth.requireAdmin, (req,res) => {
+  const ratingFilter = Number(req.query.rating || 0);
+  const items = (operationsStore.store().feedback || []).filter(item=>!ratingFilter || item.rating===ratingFilter).map(item=>{
+    const user=getUser(item.email)||{};
+    return {...item,displayName:user.displayName||'',avatarDataUrl:user.avatarDataUrl||null};
+  });
+  const all=operationsStore.store().feedback||[];
+  const average=all.length?all.reduce((sum,item)=>sum+Number(item.rating||0),0)/all.length:0;
+  res.json({items,summary:{total:all.length,average:Number(average.toFixed(2)),distribution:Object.fromEntries([1,2,3,4,5].map(rating=>[rating,all.filter(item=>item.rating===rating).length]))}});
+});
+
 app.get('/api/service-status', (req, res) => {
   const maintenance = operationsStore.activeAnnouncements(null).find((item) => item.type === 'maintenance');
   res.json({ status: maintenance ? 'maintenance' : 'operational', message: maintenance?.message || null, checkedAt: new Date().toISOString() });
@@ -1274,6 +1285,8 @@ app.get('/api/admin/users/:email', adminAuth.requireAdmin, (req, res) => {
     account: authUser ? {
       createdAt: authUser.createdAt || null,
       lastLoginAt: authUser.lastLoginAt || null,
+      displayName: subscription?.displayName || '',
+      avatarDataUrl: subscription?.avatarDataUrl || null,
     } : null,
     subscription: safeSubscription,
     security: { activeSessions: sessions, pushDevices },

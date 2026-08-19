@@ -32,6 +32,12 @@ function requireAdminAuth(){
     const operationsLink = [...nav.querySelectorAll('a')].find(link => link.getAttribute('href') === 'admin-operations.html');
     nav.insertBefore(purchases, operationsLink || nav.querySelector('a[onclick="logout()"]') || null);
   }
+  if(nav && !document.getElementById('feedbackNavLink')){
+    const feedback=document.createElement('a');
+    feedback.id='feedbackNavLink';feedback.href='admin-feedback.html';feedback.textContent='⭐ Відгуки';
+    if(location.pathname.endsWith('/admin-feedback.html'))feedback.classList.add('active');
+    nav.insertBefore(feedback,nav.querySelector('a[onclick="logout()"]')||null);
+  }
   if(nav && !document.getElementById('guideNavLink')){
     const guide = document.createElement('a');
     guide.id = 'guideNavLink';

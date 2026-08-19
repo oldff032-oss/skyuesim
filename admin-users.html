@@ -45,6 +45,7 @@
         <div class="card" style="max-width:680px;margin:5vh auto;position:relative;">
           <button class="icon-btn" type="button" onclick="closeUserDetails()" style="position:absolute;right:12px;top:12px;">×</button>
           <h2 style="font-size:18px;margin-right:36px;">Дані користувача</h2>
+          <div id="userDetailsIdentity" style="display:flex;align-items:center;gap:13px;margin-top:16px;padding:13px;border:1px solid var(--border);border-radius:15px;background:rgba(255,255,255,.025)"><div id="userDetailsAvatar" style="width:58px;height:58px;flex:none;border-radius:17px;background:linear-gradient(135deg,var(--blue),var(--violet));display:grid;place-items:center;background-size:cover;background-position:center;font-weight:800;font-size:20px"></div><div><b id="userDetailsName"></b><div id="userDetailsEmail" class="muted" style="font-size:12px;margin-top:3px"></div></div></div>
           <pre id="userDetailsContent" style="margin-top:16px;white-space:pre-wrap;word-break:break-word;font-family:'Space Mono',monospace;font-size:12px;color:var(--text-muted);"></pre>
           <div id="userDetailsActions" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:16px;"></div>
         </div>
@@ -176,6 +177,12 @@
         const subscription = data.subscription || {};
         const esim = subscription.esim || {};
         const purchases = Array.isArray(subscription.purchases) ? subscription.purchases : [];
+        const avatar=document.getElementById('userDetailsAvatar');
+        const displayName=data.account?.displayName||subscription.displayName||data.email;
+        avatar.style.backgroundImage=data.account?.avatarDataUrl?`url("${data.account.avatarDataUrl}")`:'';
+        avatar.textContent=data.account?.avatarDataUrl?'':displayName[0].toUpperCase();
+        document.getElementById('userDetailsName').textContent=displayName;
+        document.getElementById('userDetailsEmail').textContent=data.email;
         const lines = [
           `Email: ${data.email}`,
           `Зареєстрований: ${data.account?.createdAt ? new Date(data.account.createdAt).toLocaleString('uk-UA') : '—'}`,
