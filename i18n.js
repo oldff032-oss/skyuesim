@@ -1,13 +1,12 @@
 // Customer-app translations. This intentionally runs only in the customer
 // interface: admin pages remain in the team's working language.
 (() => {
-  const language = localStorage.getItem('signal_language') || 'uk';
+  const supportedLanguages = ['uk', 'en'];
+  const savedLanguage = localStorage.getItem('signal_language');
+  const language = supportedLanguages.includes(savedLanguage) ? savedLanguage : 'uk';
+  if (savedLanguage !== language) localStorage.setItem('signal_language', language);
   document.documentElement.lang = language;
   document.documentElement.dir = 'ltr';
-  if (language !== 'en') {
-    window.signalT = (uk) => uk;
-    return;
-  }
 
   const phrases = {
     'Сигнал': 'Signal', 'Головна': 'Home', 'Тариф': 'Plan', 'Тарифи': 'Plans', 'Витрати': 'Usage', 'Профіль': 'Profile', 'Підтримка': 'Support',
@@ -44,23 +43,35 @@
     ,'Подорожі та інструменти': 'Travel and tools', 'Все важливе для поїздки та зв’язку': 'Everything important for travel and connectivity', 'Карта покриття та Travel Mode': 'Coverage map and Travel Mode', 'Діагностика інтернету': 'Internet diagnostics', 'Запросити друга': 'Invite a friend', 'Статус сервісу': 'Service status', 'Оцінити застосунок': 'Rate the app', 'Змінити тему': 'Change theme', 'Історія використання': 'Usage history'
     ,'Запустити перевірку': 'Run check', 'Поділитися': 'Share', 'Надіслати оцінку': 'Send rating', 'Усі сервіси працюють': 'All services are operational', 'Технічні роботи': 'Maintenance'
     ,'Код запрошення': 'Invitation code', 'Код запрошення прийнято': 'Invitation code accepted', 'Винагорода буде нарахована протягом 12–24 годин.': 'Your reward will be credited within 12–24 hours.'
+    ,'Мова застосунку': 'App language', 'Обери мову': 'Choose your language', 'Цією мовою відображатиметься весь застосунок': 'The entire app will be displayed in this language', 'Продовжити українською': 'Continue in Ukrainian', 'Заповни дані — це займе менше хвилини': 'Enter your details — it takes less than a minute', '← Змінити мову': '← Change language', 'Обери мову для всіх екранів і повідомлень': 'Choose the language for every screen and notification', 'Мову збережено': 'Language saved', 'Зберігаємо мову…': 'Saving language…', 'Не вдалося зберегти. Перевір з’єднання.': 'Could not save. Check your connection.'
+    ,'Ім’я': 'Name', 'Як до тебе звертатися': 'How should we address you?', 'Фото профілю': 'Profile photo', '(необов’язково)': '(optional)', 'PNG, JPG або WebP до 500 КБ': 'PNG, JPG or WebP up to 500 KB', 'Наприклад: A1B2C3D4': 'For example: A1B2C3D4', 'Вже маєш акаунт?': 'Already have an account?', 'Введи коректний email': 'Enter a valid email', 'Введи ім’я': 'Enter your name', 'Надсилаємо код...': 'Sending code…', 'Помилка сервера': 'Server error', 'Фото має бути PNG, JPG або WebP до 500 КБ': 'Photo must be PNG, JPG or WebP up to 500 KB', 'Не вдалося прочитати фото': 'Could not read the photo'
+    ,'Немає доступу до email?': 'No access to your email?', 'Старий email акаунта': 'Previous account email', 'Email, до якого зараз є доступ': 'Email you can currently access', 'Сюди прийде безпечне посилання': 'The secure link will be sent here', 'ICCID або UID eSIM': 'eSIM ICCID or UID', 'Необов’язково, якщо знаєш': 'Optional, if known', 'Не знаєш номер — залиш поле порожнім.': 'If you do not know it, leave this field empty.', 'Що пам’ятаєш про останню покупку?': 'What do you remember about your latest purchase?', 'Що сталося?': 'What happened?', 'Надіслати запит': 'Send request', 'Нові дані входу': 'New sign-in details', 'Новий email': 'New email', 'Новий PIN': 'New PIN', '6 цифр': '6 digits', 'Зберегти та увійти': 'Save and sign in'
+    ,'Підтримка працює': 'Support is available', 'Ваш email': 'Your email', 'Опишіть проблему': 'Describe the issue', 'Надіслати в підтримку': 'Send to support', 'Перевірити стан сервісу': 'Check service status', 'Звернення надіслано': 'Request sent', 'Проблема під час технічних робіт': 'Issue during maintenance', 'Що сталося та якої допомоги ви потребуєте?': 'What happened and what help do you need?', 'Не надсилайте пароль, PIN, банківські дані, QR-код або код активації eSIM.': 'Do not send your password, PIN, banking details, QR code, or eSIM activation code.'
   };
 
-  const translate = (value) => phrases[value.trim()] || value;
+  const translate = (value) => language === 'en' ? (phrases[String(value || '').trim()] || value) : value;
   const translateNode = (node) => {
     const before = node.nodeValue;
     const trimmed = before.trim();
-    const after = phrases[trimmed];
+    const after = language === 'en' ? phrases[trimmed] : null;
     if (after) node.nodeValue = before.replace(trimmed, after);
   };
   const apply = (root) => {
+    if (root.nodeType === Node.ELEMENT_NODE && root.hasAttribute?.('data-i18n-uk')) {
+      const value = language === 'en' ? root.dataset.i18nEn : root.dataset.i18nUk;
+      if (value !== undefined) root.textContent = value;
+    }
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
     const nodes = [];
     while (walker.nextNode()) nodes.push(walker.currentNode);
     nodes.forEach(translateNode);
-    root.querySelectorAll?.('[placeholder],[title],[aria-label],[alt]').forEach((element) => ['placeholder','title','aria-label','alt'].forEach((attribute) => {
+    root.querySelectorAll?.('[placeholder],[title],[aria-label],[alt],[data-i18n-uk]').forEach((element) => ['placeholder','title','aria-label','alt'].forEach((attribute) => {
       if (element.hasAttribute(attribute)) element.setAttribute(attribute, translate(element.getAttribute(attribute)));
     }));
+    root.querySelectorAll?.('[data-i18n-uk]').forEach((element) => {
+      const value = language === 'en' ? element.dataset.i18nEn : element.dataset.i18nUk;
+      if (value !== undefined) element.textContent = value;
+    });
   };
   const start = () => {
     apply(document.body);
@@ -72,6 +83,34 @@
   };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
   else start();
-  window.signalT = (uk, en) => en || phrases[uk] || uk;
+  window.signalLanguage = language;
+  window.signalT = (uk, en) => language === 'en' ? (en || phrases[uk] || uk) : uk;
+  window.signalSetLanguage = async (nextLanguage, options = {}) => {
+    if (!supportedLanguages.includes(nextLanguage)) throw new Error('Unsupported language');
+    localStorage.setItem('signal_language', nextLanguage);
+    const token = localStorage.getItem('signal_session_token');
+    if (token && options.sync !== false && typeof API_URL !== 'undefined') {
+      const response = await fetch(`${API_URL}/api/account/preferences`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'x-session-token': token },
+        body: JSON.stringify({ language: nextLanguage })
+      });
+      if (!response.ok) throw new Error('LANGUAGE_SAVE_FAILED');
+    }
+    if (options.reload !== false) location.reload();
+  };
+  window.signalSyncLanguage = async () => {
+    const token = localStorage.getItem('signal_session_token');
+    if (!token || typeof API_URL === 'undefined') return language;
+    try {
+      const response = await fetch(`${API_URL}/api/account/preferences`, { headers: { 'x-session-token': token } });
+      if (!response.ok) return language;
+      const preferences = await response.json();
+      if (supportedLanguages.includes(preferences.language) && preferences.language !== language) {
+        localStorage.setItem('signal_language', preferences.language);
+        location.reload();
+      }
+      return preferences.language || language;
+    } catch { return language; }
+  };
 })();
-
