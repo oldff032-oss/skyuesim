@@ -22,8 +22,8 @@
     <h1 style="margin-top:20px;">Обери тариф</h1>
     <p class="lead">Підписка щомісячна, діє у 30+ країнах Європи. Скасувати можна будь-коли в профілі.</p>
 
-    <a href="travel-plans.html" class="glass" style="display:flex;justify-content:space-between;align-items:center;gap:14px;padding:16px 18px;margin-top:18px;text-decoration:none;color:inherit;border-color:rgba(52,228,184,.35)">
-      <div><div style="font-weight:700">🌍 Більше пакетів для подорожей</div><div class="muted" style="font-size:12px;margin-top:3px">Країни, регіони, 1–50+ ГБ та різні терміни</div></div><span style="color:var(--success);font-size:20px">→</span>
+    <a href="travel-plans.html" class="glass" style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:15px;margin-top:18px;text-decoration:none;color:inherit;border-color:rgba(52,228,184,.35);width:100%;max-width:100%;min-width:0;box-sizing:border-box;overflow:hidden">
+      <div style="min-width:0"><div style="font-weight:700;overflow-wrap:anywhere">🌍 Більше пакетів для подорожей</div><div class="muted" style="font-size:12px;margin-top:3px;overflow-wrap:anywhere">Країни, регіони, 1–50+ ГБ та різні терміни</div></div><span style="color:var(--success);font-size:20px;flex:0 0 auto">→</span>
     </a>
 
     <div class="stagger">
@@ -74,12 +74,14 @@
       document.querySelectorAll('.tier').forEach(t=>t.classList.remove('selected'));
       el.classList.add('selected');
       selectedPlan = el.dataset.plan;
+      if(typeof signalReportDiagnostic==='function')signalReportDiagnostic('user_action','info','Monthly plan selected',{action:'monthly_plan_selected',plan:selectedPlan});
     }
 
     async function startCheckout(){
       const err = document.getElementById('err');
       const btn = document.getElementById('payBtn');
       err.style.display = 'none';
+      if(typeof signalReportDiagnostic==='function')signalReportDiagnostic('user_action','info','Monthly checkout clicked',{action:'monthly_checkout_clicked',plan:selectedPlan});
 
       btn.classList.add('loading');
       btn.textContent = 'Зачекай...';

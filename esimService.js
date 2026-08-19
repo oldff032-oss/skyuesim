@@ -244,8 +244,22 @@ function bytes(value) {
 // Public package catalogue from eSIM Access. It is used server-side only so
 // the provider Access Code and signature never reach the customer's browser.
 async function listPackages({ locationCode = '', type = '', packageCode = '', iccid = '' } = {}) {
-  const payload = await esimAccessRequest('/api/v1/open/package/list', { locationCode, type, packageCode, iccid, pager:{ pageNum:1, pageSize:1000 } });
-  return payload?.obj?.packageList || [];
+  const collected = [], seen = new Set();
+  const maximumPages = Math.min(30, positiveInteger(process.env.ESIM_PACKAGE_MAX_PAGES, 15));
+  for (let pageNum = 1; pageNum <= maximumPages; pageNum += 1) {
+    const payload = await esimAccessRequest('/api/v1/open/package/list', { locationCode, type, packageCode, iccid, pager:{ pageNum, pageSize:200 } });
+    const batch = payload?.obj?.packageList || [];
+    if (!batch.length) break;
+    let added = 0;
+    for (const item of batch) {
+      const key = String(item?.packageCode || item?.slug || '');
+      if (!key || seen.has(key)) continue;
+      seen.add(key); collected.push(item); added += 1;
+    }
+    // Some provider accounts ignore pager and return the same first page.
+    if (!added) break;
+  }
+  return collected;
 }
 
 async function findRenewalTopup({ iccid, plan }) {

@@ -52,11 +52,52 @@ test('travel package prices are calculated only on the server', () => {
   const page = read('travel-plans.html');
   assert.match(server, /packageRetailCents\(item\)/);
   assert.match(server, /packages\.find\(item=>item\.packageCode===packageCode\)/);
-  assert.doesNotMatch(page, /amountCents\s*:/);
+  assert.match(page, /body:JSON\.stringify\(\{packageCode:code,changeMode\}\)/);
 });
 
 test('travel package catalogue and checkout require a user session', () => {
   const server = read('server.js');
   assert.match(server, /app\.get\('\/api\/travel-packages',\s*requireUserSession/);
   assert.match(server, /app\.post\('\/api\/travel-packages\/checkout',\s*requireUserSession/);
+});
+
+test('diagnostics correlate payment and eSIM events without storing secrets', () => {
+  const server = read('server.js');
+  const store = read('diagnosticsStore.js');
+  assert.match(server, /x-request-id/);
+  assert.match(server, /purchaseId:session\.id/);
+  assert.match(server, /action:'provision_failed'/);
+  assert.match(store, /password\|pass\|pin\|token\|secret/);
+  assert.match(store, /function summary\(/);
+});
+
+test('travel catalogue is paginated and mobile layout prevents horizontal overflow', () => {
+  const esim = read('esimService.js');
+  const page = read('travel-plans.html');
+  assert.match(esim, /for \(let pageNum = 1; pageNum <= maximumPages/);
+  assert.match(page, /overflow-x:hidden/);
+  assert.match(page, /@media\(max-width:600px\)/);
+  assert.match(page, /package-buy\{width:100%/);
+  assert.match(page, /id="location"/);
+  assert.match(page, /value="unlimited"/);
+});
+
+test('paid plan changes provision first and expose clear admin states', () => {
+  const server = read('server.js');
+  const stripe = read('stripeService.js');
+  const page = read('travel-plans.html');
+  assert.match(server, /executePaidPlanChange/);
+  assert.match(server, /cancelSubscriptionAtPeriodEnd/);
+  assert.match(server, /app\.get\('\/api\/admin\/plan-changes'/);
+  assert.match(server, /PLAN_CHANGE_ALREADY_PENDING/);
+  assert.match(stripe, /changeMode/);
+  assert.match(page, /after_expiry/);
+  assert.match(page, /immediate/);
+  assert.ok(server.indexOf('const esim=await provisionEsim') < server.indexOf('await cancelSubscription(previousSubscriptionId)'), 'new eSIM must be provisioned before the old subscription is canceled');
+});
+
+test('classic subscription checkout cannot create an accidental duplicate', () => {
+  const server = read('server.js');
+  assert.match(server, /ACTIVE_SUBSCRIPTION_EXISTS/);
+  assert.match(server, /currentUser\?\.stripeSubscriptionId/);
 });

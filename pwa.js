@@ -48,7 +48,9 @@ window.fetch = async function(input, init = {}) {
   if (path === '/api/account/diagnostics') return signalOriginalFetch(input, init);
   try {
     const response = await signalOriginalFetch(input, init);
-    if (response.status >= 400) signalReportDiagnostic('api_error','warning',`API returned ${response.status}`,{path,method:String(init.method||'GET').toUpperCase(),status:response.status,durationMs:Math.round(performance.now()-started)});
+    const durationMs=Math.round(performance.now()-started),requestId=response.headers.get('x-request-id');
+    if (response.status >= 400) signalReportDiagnostic('api_error',response.status>=500?'error':'warning',`API returned ${response.status}`,{path,method:String(init.method||'GET').toUpperCase(),status:response.status,durationMs,requestId,outcome:'failed'});
+    else if(['/api/travel-packages','/api/travel-packages/checkout','/api/create-subscription','/api/cancel','/api/support/tickets'].some(prefix=>path===prefix||path.startsWith(`${prefix}/`))) signalReportDiagnostic('api_flow','info','API operation completed',{path,method:String(init.method||'GET').toUpperCase(),status:response.status,durationMs,requestId,outcome:'success'});
     return response;
   } catch (error) {
     signalReportDiagnostic('network_error','error','Network request failed',{path,method:String(init.method||'GET').toUpperCase(),durationMs:Math.round(performance.now()-started),online:navigator.onLine});

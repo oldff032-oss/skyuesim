@@ -37,6 +37,10 @@ async function cancelSubscription(subscriptionId) {
   return stripe.subscriptions.cancel(subscriptionId);
 }
 
+async function cancelSubscriptionAtPeriodEnd(subscriptionId) {
+  return stripe.subscriptions.update(subscriptionId, { cancel_at_period_end:true });
+}
+
 async function deleteStripeCustomer(customerId) {
   if (!customerId) return null;
   return stripe.customers.del(customerId);
@@ -49,7 +53,7 @@ async function getNextBillingDate(subscriptionId) {
   return sub.current_period_end ? new Date(sub.current_period_end * 1000).toISOString() : null;
 }
 
-async function createCustomPackageCheckout({ email, packageCode, packageName, amountCents, currency = 'usd', dataLimitGb = null, durationDays = null, location = '' }) {
+async function createCustomPackageCheckout({ email, packageCode, packageName, amountCents, currency = 'usd', dataLimitGb = null, durationDays = null, location = '', changeMode = '', previousPlan = '', previousSubscriptionId = '', scheduledFor = '' }) {
   const session = await stripe.checkout.sessions.create({
     mode: 'payment',
     customer_email: email,
@@ -57,7 +61,7 @@ async function createCustomPackageCheckout({ email, packageCode, packageName, am
     line_items: [{ price_data: { currency, product_data: { name: packageName }, unit_amount: amountCents }, quantity: 1 }],
     success_url: `${process.env.FRONTEND_URL}/installing.html?session_id={CHECKOUT_SESSION_ID}`,
     cancel_url: `${process.env.FRONTEND_URL}/profile.html`,
-    metadata: { plan: 'custom', email, packageCode, packageName, dataLimitGb: dataLimitGb == null ? '' : String(dataLimitGb), durationDays: durationDays == null ? '' : String(durationDays), location: String(location || '').slice(0,80) },
+    metadata: { plan: 'custom', email, packageCode, packageName, dataLimitGb: dataLimitGb == null ? '' : String(dataLimitGb), durationDays: durationDays == null ? '' : String(durationDays), location: String(location || '').slice(0,80), changeMode:String(changeMode||'').slice(0,30), previousPlan:String(previousPlan||'').slice(0,40), previousSubscriptionId:String(previousSubscriptionId||'').slice(0,100), scheduledFor:String(scheduledFor||'').slice(0,40) },
   });
   return session;
 }
@@ -240,4 +244,4 @@ function constructWebhookEvent(rawBody, signature) {
   );
 }
 
-module.exports = { createCheckoutSession, createCustomPackageCheckout, cancelSubscription, cancelAllSubscriptionsForCustomers, deleteStripeCustomer, constructWebhookEvent, getNextBillingDate, getBillingHistory, getRecoveryPaymentEvidence, findCustomerIdsByEmail, getCustomerEmail, getSubscriptionStateByEmail, listCompletedCheckoutPurchasesByEmail, getCheckoutPurchaseDetails, listRefundablePaymentsByEmail, refundPayment };
+module.exports = { createCheckoutSession, createCustomPackageCheckout, cancelSubscription, cancelSubscriptionAtPeriodEnd, cancelAllSubscriptionsForCustomers, deleteStripeCustomer, constructWebhookEvent, getNextBillingDate, getBillingHistory, getRecoveryPaymentEvidence, findCustomerIdsByEmail, getCustomerEmail, getSubscriptionStateByEmail, listCompletedCheckoutPurchasesByEmail, getCheckoutPurchaseDetails, listRefundablePaymentsByEmail, refundPayment };

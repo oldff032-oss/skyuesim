@@ -9,7 +9,7 @@ const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const { generateRegistrationOptions, verifyRegistrationResponse } = require('@simplewebauthn/server');
 
-const { createCheckoutSession, createCustomPackageCheckout, cancelSubscription, cancelAllSubscriptionsForCustomers, deleteStripeCustomer, constructWebhookEvent, getNextBillingDate, getBillingHistory, getRecoveryPaymentEvidence, findCustomerIdsByEmail, getCustomerEmail, getSubscriptionStateByEmail, listCompletedCheckoutPurchasesByEmail, getCheckoutPurchaseDetails, listRefundablePaymentsByEmail, refundPayment } = require('./stripeService');
+const { createCheckoutSession, createCustomPackageCheckout, cancelSubscription, cancelSubscriptionAtPeriodEnd, cancelAllSubscriptionsForCustomers, deleteStripeCustomer, constructWebhookEvent, getNextBillingDate, getBillingHistory, getRecoveryPaymentEvidence, findCustomerIdsByEmail, getCustomerEmail, getSubscriptionStateByEmail, listCompletedCheckoutPurchasesByEmail, getCheckoutPurchaseDetails, listRefundablePaymentsByEmail, refundPayment } = require('./stripeService');
 const crypto = require('crypto');
 const { provisionEsim, checkUsage, recoverEsim, topupEsim, listPackages, findRenewalTopup } = require('./esimService');
 const { bootstrap: bootstrapUsers, getUser, saveUser, deleteUser, getUserByStripeCustomerId, getAllUsers } = require('./db');
@@ -32,6 +32,7 @@ const backupService = require('./backupService');
 const app = express();
 const esimRetriesInProgress = new Set();
 const renewalInvoicesInProgress = new Set();
+const planChangesInProgress = new Set();
 const coverageCache = new Map();
 const travelPackageCache = { createdAt:0, packages:[] };
 const adminRecoveryRateLimit = new Map();
@@ -41,7 +42,8 @@ const BACKUP_STATE_KEYS = ['users.json','auth.json','admins.json','tickets.json'
 app.set('trust proxy',1);
 const allowedOrigins=new Set([process.env.FRONTEND_URL,'https://skyesim.netlify.app',...String(process.env.ALLOWED_ORIGINS||'').split(',')].map(value=>String(value||'').trim().replace(/\/$/,'')).filter(Boolean));
 if(process.env.NODE_ENV!=='production'){allowedOrigins.add('http://localhost:3000');allowedOrigins.add('http://localhost:4242');allowedOrigins.add('http://127.0.0.1:5500');}
-app.use(cors({origin(origin,callback){if(!origin||allowedOrigins.has(String(origin).replace(/\/$/,'')))return callback(null,true);callback(new Error('Origin is not allowed'));},methods:['GET','POST','PUT','PATCH','DELETE','OPTIONS'],allowedHeaders:['Content-Type','x-session-token','x-admin-token','x-device-name','stripe-signature','svix-id','svix-timestamp','svix-signature'],maxAge:86400}));
+app.use(cors({origin(origin,callback){if(!origin||allowedOrigins.has(String(origin).replace(/\/$/,'')))return callback(null,true);callback(new Error('Origin is not allowed'));},methods:['GET','POST','PUT','PATCH','DELETE','OPTIONS'],allowedHeaders:['Content-Type','x-session-token','x-admin-token','x-device-name','stripe-signature','svix-id','svix-timestamp','svix-signature'],exposedHeaders:['x-request-id'],maxAge:86400}));
+app.use((req,res,next)=>{req.requestId=String(req.headers['x-request-id']||crypto.randomUUID()).slice(0,100);res.setHeader('x-request-id',req.requestId);next();});
 app.use((req,res,next)=>{res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('X-Frame-Options','DENY');res.setHeader('Referrer-Policy','no-referrer');res.setHeader('Permissions-Policy','camera=(), microphone=(), geolocation=()');res.setHeader('Cross-Origin-Resource-Policy','same-site');if(req.path.startsWith('/api/'))res.setHeader('Cache-Control','no-store');next();});
 
 function upsertPurchase(email, purchaseId, patch, defaults = {}) {
@@ -60,9 +62,14 @@ function userStatusView(user) {
   const allowed=['email','displayName','avatarDataUrl','status','plan','createdAt','updatedAt','subscriptionPeriodEnd','lastRenewalError','lastEsimProvisionError'];
   const result=Object.fromEntries(allowed.filter(key=>user[key]!==undefined).map(key=>[key,user[key]]));
   if(user.esim){const hidden=new Set(['pinHash','passkeyChallenge','passwordHash']);result.esim=Object.fromEntries(Object.entries(user.esim).filter(([key])=>!hidden.has(key)));}
+  if(user.pendingPlanChange){const change=user.pendingPlanChange;result.pendingPlanChange={purchaseId:change.purchaseId||null,packageName:change.packageName||null,dataLimitGb:change.dataLimitGb??null,durationDays:change.durationDays??null,location:change.location||null,scheduledFor:change.scheduledFor||null,paidAt:change.paidAt||null,status:change.status==='failed'?'failed':change.cancellationError?'needs_attention':'scheduled',error:change.status==='failed'?'Не вдалося активувати новий пакет. Звернися в підтримку.':null};}
   return result;
 }
 function validateSupportAttachment(attachment){if(!attachment)return null;const type=String(attachment.type||'').toLowerCase(),allowed=['image/png','image/jpeg','image/webp','application/pdf'];if(!allowed.includes(type)||typeof attachment.dataUrl!=='string'||attachment.dataUrl.length>800000||!attachment.dataUrl.startsWith(`data:${type};base64,`))throw Object.assign(new Error('Дозволено PNG, JPG, WEBP або PDF до 550 КБ'),{code:'INVALID_ATTACHMENT'});return {name:String(attachment.name||'attachment').replace(/[\r\n<>"']/g,'').slice(0,120),type,dataUrl:attachment.dataUrl};}
+
+function recordDiagnostic(req,event={}) {
+  return diagnosticsStore.add({ source:'server', requestId:req?.requestId||null, page:req?.path||'', ...event });
+}
 
 function packageVolumeGb(item) {
   const raw = Number(item?.volume ?? item?.dataVolume);
@@ -107,10 +114,45 @@ function safeTravelPackage(item) {
 async function getTravelPackages(force = false) {
   if (!force && travelPackageCache.packages.length && Date.now() - travelPackageCache.createdAt < 10 * 60 * 1000) return travelPackageCache.packages;
   const raw = await listPackages({});
-  const packages = raw.map(safeTravelPackage).filter(Boolean).sort((a,b) => a.amountCents-b.amountCents || (a.dataLimitGb||Infinity)-(b.dataLimitGb||Infinity)).slice(0,500);
+  const packages = raw.map(safeTravelPackage).filter(Boolean).sort((a,b) => a.location.localeCompare(b.location,'uk') || (a.dataLimitGb||Infinity)-(b.dataLimitGb||Infinity) || a.durationDays-b.durationDays || a.amountCents-b.amountCents).slice(0,5000);
   travelPackageCache.createdAt=Date.now();
   travelPackageCache.packages=packages;
   return packages;
+}
+
+async function executePaidPlanChange({email,purchaseId,packageCode,packageName,dataLimitGb,durationDays,location,previousPlan,previousSubscriptionId,requestId=null}) {
+  if(planChangesInProgress.has(purchaseId)) return {ok:false,inProgress:true};
+  planChangesInProgress.add(purchaseId);
+  const diagnostic=event=>diagnosticsStore.add({email,source:'server',type:'plan_change',purchaseId,requestId,...event});
+  const before=getUser(email);
+  try {
+    diagnostic({action:'new_esim_provision',outcome:'started',severity:'info',message:'Provisioning new eSIM for paid plan change',context:{previousPlan:previousPlan||before?.plan||null,newPackage:packageName,packageCode}});
+    const esim=await provisionEsim({email,plan:'custom',packageCode,dataLimitGb});
+    esim.dashboardQrExpiresAt=new Date(Date.now()+5*60*1000).toISOString();
+    let cancellationError=null;
+    if(previousSubscriptionId){
+      try{await cancelSubscription(previousSubscriptionId);diagnostic({source:'stripe',action:'previous_subscription_canceled',outcome:'success',severity:'info',message:'Previous Stripe subscription canceled after new eSIM was ready',context:{previousSubscriptionId}});}
+      catch(error){cancellationError=error.message;diagnostic({source:'stripe',action:'previous_subscription_cancel',outcome:'failed',severity:'error',message:'New eSIM is ready but previous Stripe subscription cancellation failed',errorCode:error.code||'PREVIOUS_SUBSCRIPTION_CANCEL_FAILED',context:{previousSubscriptionId}});}
+    }
+    const history=Array.isArray(before?.esimHistory)?[...before.esimHistory]:[];
+    if(before?.esim) history.unshift({plan:before.plan||previousPlan||null,esim:before.esim,replacedAt:new Date().toISOString(),reason:'plan_change',purchaseId});
+    saveUser(email,{status:'active',plan:'custom',esim,stripeSubscriptionId:null,pendingPlanChange:null,esimHistory:history.slice(0,10),lastPlanChangeAt:new Date().toISOString(),lastPlanChangeError:null,previousSubscriptionCancellationError:cancellationError});
+    upsertPurchase(email,purchaseId,{fulfillmentStatus:'provisioned',planChangeStatus:cancellationError?'completed_with_warning':'completed',fulfilledAt:new Date().toISOString(),fulfillmentError:null,esimOrderNo:esim.orderNo||null,iccid:esim.iccid||null,esimTranNo:esim.esimTranNo||null,previousPlan:previousPlan||before?.plan||null,previousSubscriptionId:previousSubscriptionId||null,cancellationError});
+    diagnostic({source:'esim_access',action:'plan_change_completed',outcome:'success',severity:cancellationError?'warning':'info',message:cancellationError?'New eSIM activated; previous subscription needs admin attention':'Plan change completed successfully',context:{packageCode,packageName,dataLimitGb,durationDays,location,cancellationWarning:Boolean(cancellationError)}});
+    sendToEmail(email,{title:'Тариф успішно змінено',body:`Новий пакет ${packageName||'eSIM'} активовано. QR-код доступний на головному екрані 5 хвилин.`,url:'/dashboard.html',tag:`plan-change-${String(purchaseId).slice(-10)}`}).catch(()=>{});
+    return {ok:true,esim,cancellationError};
+  } catch(error) {
+    const failedPending=before?.pendingPlanChange?.purchaseId===purchaseId?{...before.pendingPlanChange,status:'failed',scheduledFor:null,failedAt:new Date().toISOString(),error:error.message}:before?.pendingPlanChange||null;
+    saveUser(email,{pendingPlanChange:failedPending,lastPlanChangeError:error.message,lastPlanChangeFailedAt:new Date().toISOString()});
+    upsertPurchase(email,purchaseId,{fulfillmentStatus:'failed',planChangeStatus:'failed',failedAt:new Date().toISOString(),fulfillmentError:error.message,fulfillmentErrorCode:error.code||null});
+    diagnostic({source:'esim_access',action:'plan_change_failed',outcome:'failed',severity:'error',message:'Paid plan change failed while provisioning new eSIM',errorCode:error.code||'PLAN_CHANGE_PROVISION_FAILED',context:{packageCode,providerStatus:error.status||null}});
+    return {ok:false,error};
+  } finally { planChangesInProgress.delete(purchaseId); }
+}
+
+async function processDuePlanChanges() {
+  const due=Object.values(getAllUsers()).filter(user=>user?.pendingPlanChange?.scheduledFor&&new Date(user.pendingPlanChange.scheduledFor).getTime()<=Date.now());
+  for(const user of due){const change=user.pendingPlanChange;await executePaidPlanChange({email:user.email,purchaseId:change.purchaseId,packageCode:change.packageCode,packageName:change.packageName,dataLimitGb:change.dataLimitGb,durationDays:change.durationDays,location:change.location,previousPlan:change.previousPlan,previousSubscriptionId:change.previousSubscriptionId,requestId:change.requestId});}
 }
 
 async function deliverPurchaseReceipt(email, purchaseId, defaults = {}, suppliedReceiptUrl = null) {
@@ -299,7 +341,7 @@ app.get('/api/account/preferences', requireUserSession, (req, res) => {
 app.post('/api/account/diagnostics', requireUserSession, (req, res) => {
   const { type, severity, page, message, context } = req.body || {};
   if (!type || String(type).length > 80) return res.status(400).json({ error:'Некоректний тип події' });
-  diagnosticsStore.add({ email:req.userEmail, source:'client', type, severity, page, message, context });
+  diagnosticsStore.add({ email:req.userEmail, source:'client', type, severity, page, message, action:context?.action||context?.path||null, outcome:context?.outcome||null, requestId:context?.requestId||req.requestId, durationMs:context?.durationMs, errorCode:context?.status?`HTTP_${context.status}`:null, context });
   res.status(202).json({ ok:true });
 });
 
@@ -365,34 +407,55 @@ app.get('/api/service-status', (req, res) => {
 });
 
 app.get('/api/travel-packages', requireUserSession, rateLimit('travel_catalog',60*1000,30,req=>req.userEmail), async (req,res) => {
+  const started=Date.now();
   try {
     const query=String(req.query.q||'').trim().toLowerCase().slice(0,80);
+    const location=String(req.query.location||'').trim().toLowerCase().slice(0,160);
     const data=String(req.query.data||'all');
     const duration=String(req.query.duration||'all');
     let packages=await getTravelPackages();
+    const locations=[...new Set(packages.map(item=>item.location).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'uk')).slice(0,300);
+    if(location) packages=packages.filter(item=>item.location.toLowerCase()===location);
     if(query) packages=packages.filter(item=>`${item.name} ${item.location} ${item.description}`.toLowerCase().includes(query));
-    if(data==='small') packages=packages.filter(item=>item.dataLimitGb!=null&&item.dataLimitGb<=3);
-    if(data==='medium') packages=packages.filter(item=>item.dataLimitGb>3&&item.dataLimitGb<=10);
-    if(data==='large') packages=packages.filter(item=>item.dataLimitGb>10||item.unlimited);
-    if(duration==='short') packages=packages.filter(item=>item.durationDays<=7);
-    if(duration==='month') packages=packages.filter(item=>item.durationDays>7&&item.durationDays<=30);
+    if(data==='1') packages=packages.filter(item=>item.dataLimitGb!=null&&item.dataLimitGb<=1.2);
+    if(data==='2_3') packages=packages.filter(item=>item.dataLimitGb>1.2&&item.dataLimitGb<=3.2);
+    if(data==='5_10') packages=packages.filter(item=>item.dataLimitGb>3.2&&item.dataLimitGb<=10.5);
+    if(data==='20_30') packages=packages.filter(item=>item.dataLimitGb>10.5&&item.dataLimitGb<=30.5);
+    if(data==='50_plus') packages=packages.filter(item=>item.dataLimitGb>30.5&&!item.unlimited);
+    if(data==='unlimited') packages=packages.filter(item=>item.unlimited);
+    if(duration==='7') packages=packages.filter(item=>item.durationDays<=7);
+    if(duration==='15') packages=packages.filter(item=>item.durationDays>7&&item.durationDays<=15);
+    if(duration==='30') packages=packages.filter(item=>item.durationDays>15&&item.durationDays<=30);
     if(duration==='long') packages=packages.filter(item=>item.durationDays>30);
-    res.json({packages:packages.slice(0,120),updatedAt:new Date(travelPackageCache.createdAt).toISOString()});
+    const total=packages.length,visible=packages.slice(0,200);
+    recordDiagnostic(req,{email:req.userEmail,type:'catalog_flow',action:'travel_catalog_loaded',outcome:'success',severity:'info',message:'Travel package catalogue loaded',durationMs:Date.now()-started,context:{query:Boolean(query),location:location||null,data,duration,resultCount:visible.length,total}});
+    res.json({packages:visible,locations,total,updatedAt:new Date(travelPackageCache.createdAt).toISOString()});
   } catch(error) {
+    recordDiagnostic(req,{email:req.userEmail,type:'catalog_flow',action:'travel_catalog_load',outcome:'failed',severity:'error',message:'Travel package catalogue failed',errorCode:error.code||'CATALOG_PROVIDER_ERROR',durationMs:Date.now()-started,context:{provider:'esim_access',status:error.status||null}});
     console.error('[travel packages]',error.message);
     res.status(502).json({error:'Не вдалося завантажити актуальні пакети eSIM Access'});
   }
 });
 
 app.post('/api/travel-packages/checkout', requireUserSession, rateLimit('travel_checkout',60*60*1000,10,req=>req.userEmail), async (req,res) => {
+  const started=Date.now();
   try {
     const currentUser=getUser(req.userEmail);
-    if(currentUser?.esim && ['active','payment_confirmed','renewal_failed'].includes(currentUser.status)) return res.status(409).json({error:'В акаунті вже є активна eSIM. Щоб не втратити її, звернися в підтримку для додаткового пакета.'});
+    const hasActiveEsim=Boolean(currentUser?.esim&&['active','payment_confirmed','renewal_failed'].includes(currentUser.status));
+    const changeMode=hasActiveEsim?String(req.body?.changeMode||''):'';
+    if(hasActiveEsim&&!['immediate','after_expiry'].includes(changeMode)){recordDiagnostic(req,{email:req.userEmail,type:'plan_change',action:'change_mode_required',outcome:'blocked',severity:'warning',message:'Plan change mode is required',errorCode:'CHANGE_MODE_REQUIRED'});return res.status(409).json({error:'Вибери: змінити зараз або після завершення поточного тарифу.',code:'CHANGE_MODE_REQUIRED'});}
+    if(currentUser?.pendingPlanChange){return res.status(409).json({error:'Вже є оплачена відкладена зміна тарифу. Її можна перевірити в профілі або через підтримку.',code:'PLAN_CHANGE_ALREADY_PENDING'});}
     const packageCode=String(req.body?.packageCode||'').trim();
-    if(!/^[A-Za-z0-9_-]{3,80}$/.test(packageCode)) return res.status(400).json({error:'Некоректний пакет'});
+    if(!/^[A-Za-z0-9_-]{3,80}$/.test(packageCode)){recordDiagnostic(req,{email:req.userEmail,type:'payment_flow',action:'travel_checkout',outcome:'blocked',severity:'warning',message:'Invalid travel package code',errorCode:'PACKAGE_CODE_INVALID'});return res.status(400).json({error:'Некоректний пакет'});}
     const packages=await getTravelPackages(true);
     const selected=packages.find(item=>item.packageCode===packageCode);
-    if(!selected) return res.status(404).json({error:'Пакет більше недоступний. Онови каталог і вибери інший.'});
+    if(!selected){recordDiagnostic(req,{email:req.userEmail,type:'payment_flow',action:'travel_checkout',outcome:'blocked',severity:'warning',message:'Selected travel package is no longer available',errorCode:'PACKAGE_NOT_AVAILABLE',context:{packageCode}});return res.status(404).json({error:'Пакет більше недоступний. Онови каталог і вибери інший.'});}
+    let scheduledFor='';
+    if(changeMode==='after_expiry'){
+      if(currentUser.stripeSubscriptionId) scheduledFor=await getNextBillingDate(currentUser.stripeSubscriptionId).catch(()=>null)||'';
+      scheduledFor=scheduledFor||currentUser.subscriptionPeriodEnd||currentUser.esim?.expiredTime||'';
+      if(!scheduledFor||Number.isNaN(new Date(scheduledFor).getTime())||new Date(scheduledFor).getTime()<=Date.now()) return res.status(409).json({error:'Не вдалося визначити дату завершення поточного тарифу. Вибери «Змінити зараз» або звернися в підтримку.',code:'CURRENT_PLAN_END_UNKNOWN'});
+    }
     const session=await createCustomPackageCheckout({
       email:req.userEmail,
       packageCode:selected.packageCode,
@@ -402,9 +465,15 @@ app.post('/api/travel-packages/checkout', requireUserSession, rateLimit('travel_
       dataLimitGb:selected.dataLimitGb,
       durationDays:selected.durationDays,
       location:selected.location,
+      changeMode:changeMode||'new',
+      previousPlan:currentUser?.plan||'',
+      previousSubscriptionId:currentUser?.stripeSubscriptionId||'',
+      scheduledFor,
     });
+    recordDiagnostic(req,{email:req.userEmail,type:changeMode?'plan_change':'payment_flow',action:'stripe_checkout_created',outcome:'success',severity:'info',message:changeMode?'Stripe Checkout created for plan change':'Stripe Checkout created for travel package',purchaseId:session.id,durationMs:Date.now()-started,context:{packageCode:selected.packageCode,amountCents:selected.amountCents,currency:'usd',dataLimitGb:selected.dataLimitGb,durationDays:selected.durationDays,location:selected.location,changeMode:changeMode||'new',scheduledFor:scheduledFor||null,previousPlan:currentUser?.plan||null}});
     res.json({url:session.url});
   } catch(error) {
+    recordDiagnostic(req,{email:req.userEmail,type:'payment_flow',action:'stripe_checkout_create',outcome:'failed',severity:'error',message:'Stripe Checkout creation failed',errorCode:error.code||error.type||'STRIPE_CHECKOUT_ERROR',durationMs:Date.now()-started,context:{provider:'stripe'}});
     console.error('[travel checkout]',error.message);
     res.status(502).json({error:'Не вдалося створити безпечну оплату пакета'});
   }
@@ -743,7 +812,8 @@ app.post('/api/admin/push/test', adminAuth.requireAdmin, async(req,res)=>{
 });
 
 app.get('/api/admin/diagnostics', adminAuth.requireAdmin, adminAuth.requireRole('super_admin'), (req,res)=>{
-  res.json({events:diagnosticsStore.list({email:req.query.email||'',type:req.query.type||'',severity:req.query.severity||'',limit:req.query.limit||200})});
+  const filters={email:req.query.email||'',type:req.query.type||'',severity:req.query.severity||'',source:req.query.source||'',outcome:req.query.outcome||'',search:req.query.search||'',since:req.query.since||'',limit:req.query.limit||300};
+  res.json({events:diagnosticsStore.list(filters),summary:diagnosticsStore.summary(req.query.hours||24)});
 });
 
 // Керування командою — тільки Super Admin
@@ -1230,6 +1300,26 @@ app.get('/api/admin/purchases', adminAuth.requireAdmin, adminAuth.requireRole('s
   res.json({ purchases, totals:{ purchases:purchases.length, paid:purchases.filter(item=>item.paymentStatus==='paid').length, failed:purchases.filter(item=>item.fulfillmentStatus==='failed').length, provisioned:purchases.filter(item=>item.fulfillmentStatus==='provisioned').length } });
 });
 
+app.get('/api/admin/plan-changes', adminAuth.requireAdmin, adminAuth.requireRole('super_admin','admin','support','viewer'), (req, res) => {
+  const changes = Object.values(getAllUsers()).flatMap(user => (user.purchases || [])
+    .filter(purchase => ['immediate','after_expiry'].includes(purchase.changeMode))
+    .map(purchase => ({ ...purchase, email:user.email, accountStatus:user.status || null, currentPlan:user.plan || null,
+      pending:Boolean(user.pendingPlanChange?.purchaseId === purchase.id),
+      pendingStatus:user.pendingPlanChange?.purchaseId === purchase.id ? (user.pendingPlanChange.status === 'failed' ? 'failed' : user.pendingPlanChange.cancellationError ? 'needs_attention' : 'scheduled') : null,
+    })))
+    .sort((a,b) => new Date(b.paidAt || b.createdAt || 0) - new Date(a.paidAt || a.createdAt || 0));
+  const statusOf = item => item.fulfillmentStatus === 'failed' ? 'failed'
+    : item.cancellationError || item.pendingStatus === 'needs_attention' ? 'needs_attention'
+    : item.fulfillmentStatus === 'provisioned' ? 'completed'
+    : item.fulfillmentStatus === 'provisioning' ? 'provisioning' : 'scheduled';
+  res.json({ changes:changes.map(item => ({ ...item, displayStatus:statusOf(item) })), totals:{
+    all:changes.length, scheduled:changes.filter(item => statusOf(item) === 'scheduled').length,
+    provisioning:changes.filter(item => statusOf(item) === 'provisioning').length,
+    completed:changes.filter(item => statusOf(item) === 'completed').length,
+    failed:changes.filter(item => ['failed','needs_attention'].includes(statusOf(item))).length,
+  }});
+});
+
 app.get('/api/admin/purchases/:purchaseId', adminAuth.requireAdmin, adminAuth.requireRole('super_admin','admin','support'), async (req, res) => {
   const purchaseId = String(req.params.purchaseId || '');
   const owner = Object.values(getAllUsers()).find(user => (user.purchases || []).some(purchase => purchase.id === purchaseId));
@@ -1593,6 +1683,12 @@ app.post('/api/admin/users/:email/purchases/:purchaseId/retry-provision', adminA
   if (!purchase) return res.status(404).json({ error:'Покупку не знайдено' });
   if (purchase.paymentStatus !== 'paid') return res.status(409).json({ error:'Stripe не підтвердив оплату цієї покупки' });
   if (purchase.fulfillmentStatus !== 'failed') return res.status(409).json({ error:'Повторити можна лише невдалу видачу' });
+  if (['immediate','after_expiry'].includes(purchase.changeMode)) {
+    const result=await executePaidPlanChange({email,purchaseId,packageCode:purchase.packageCode,packageName:purchase.packageName,dataLimitGb:purchase.dataLimitGb,durationDays:purchase.durationDays,location:purchase.location,previousPlan:purchase.previousPlan,previousSubscriptionId:purchase.previousSubscriptionId,requestId:req.requestId});
+    auditStore.log({adminEmail:req.admin.email,action:'paid_plan_change_retried',target:email,details:{purchaseId,ok:Boolean(result.ok)}});
+    if(!result.ok)return res.status(502).json({error:result.error?.message||'Зміну тарифу не вдалося завершити'});
+    return res.json({ok:true,purchaseId,esim:result.esim,cancellationError:result.cancellationError||null});
+  }
   if (user.status === 'canceled') return res.status(409).json({ error:'Підписку/акаунт скасовано. Спочатку перевірте оплату та статус у Stripe.' });
   if (user.esim?.orderNo && user.status === 'active') return res.status(409).json({ error:'В акаунті вже є активна eSIM. Автоматична заміна могла б стерти її дані.' });
   const retryKey = `${email}:${purchaseId}`;
@@ -1650,6 +1746,9 @@ app.post('/api/create-subscription', requireUserSession,rateLimit('checkout',60*
   try {
     const { plan } = req.body;
     const email=req.userEmail;
+    const currentUser=getUser(email);
+    if(currentUser?.pendingPlanChange)return res.status(409).json({error:'Уже є оплачена запланована зміна тарифу. Дочекайся її виконання або звернися в підтримку.',code:'PLAN_CHANGE_ALREADY_PENDING'});
+    if(currentUser?.stripeSubscriptionId&&['active','renewal_failed','payment_confirmed'].includes(currentUser.status))return res.status(409).json({error:'У тебе вже є активна підписка. Для безпечної заміни відкрий «Тарифи» → «Більше пакетів для подорожей» і вибери спосіб зміни.',code:'ACTIVE_SUBSCRIPTION_EXISTS'});
     if (!plan) return res.status(400).json({ error: 'Потрібен plan' });
     if (operationsStore.store().blacklist.emails.includes(email.toLowerCase())) return res.status(403).json({ error: 'Цей email недоступний для оплати' });
 
@@ -1748,6 +1847,7 @@ app.post('/api/webhook', async (req, res) => {
     event = constructWebhookEvent(req.body, signature);
   } catch (err) {
     console.error('Webhook signature verification failed:', err.message);
+    recordDiagnostic(req,{source:'stripe',type:'payment_flow',action:'webhook_verification',outcome:'failed',severity:'error',message:'Stripe webhook signature verification failed',errorCode:'STRIPE_WEBHOOK_SIGNATURE_INVALID'});
     return res.status(400).send(`Webhook Error: ${err.message}`);
   }
 
@@ -1760,6 +1860,10 @@ app.post('/api/webhook', async (req, res) => {
       ? ({ basic:10, standard:20, unlimited:null }[plan] ?? null)
       : Number(session.metadata.dataLimitGb);
     const durationDays = session.metadata.durationDays ? Number(session.metadata.durationDays) : (plan === 'custom' ? null : 30);
+    const changeMode = String(session.metadata.changeMode || '');
+    const previousPlan = String(session.metadata.previousPlan || '');
+    const previousSubscriptionId = String(session.metadata.previousSubscriptionId || '');
+    const scheduledFor = String(session.metadata.scheduledFor || '');
     const purchaseDefaults = {
       kind: plan === 'custom' ? 'custom_package' : 'subscription',
       plan,
@@ -1776,8 +1880,31 @@ app.post('/api/webhook', async (req, res) => {
       stripePaymentIntentId: typeof session.payment_intent === 'string' ? session.payment_intent : session.payment_intent?.id || null,
       paidAt: new Date((session.created || Math.floor(Date.now()/1000)) * 1000).toISOString(),
       paymentStatus: session.payment_status || 'paid',
+      changeMode:changeMode||null,
+      previousPlan:previousPlan||null,
+      previousSubscriptionId:previousSubscriptionId||null,
+      scheduledFor:scheduledFor||null,
     };
     const existingPurchase = (getUser(email)?.purchases || []).find(item => item.id === session.id);
+    recordDiagnostic(req,{email,source:'stripe',type:'payment_flow',action:'checkout_completed',outcome:'success',severity:'info',message:'Stripe confirmed checkout payment',purchaseId:session.id,context:{plan,packageCode:packageCode||null,amountCents:session.amount_total??null,currency:session.currency||null,paymentStatus:session.payment_status||null,mode:session.mode||null}});
+
+    if(changeMode==='after_expiry'){
+      let cancellationScheduled=false,cancellationError=null;
+      if(previousSubscriptionId){try{await cancelSubscriptionAtPeriodEnd(previousSubscriptionId);cancellationScheduled=true;}catch(error){cancellationError=error.message;}}
+      const pending={purchaseId:session.id,packageCode,packageName:session.metadata.packageName||plan,dataLimitGb,durationDays,location:session.metadata.location||null,previousPlan:previousPlan||getUser(email)?.plan||null,previousSubscriptionId:previousSubscriptionId||null,scheduledFor,paidAt:new Date().toISOString(),requestId:req.requestId,cancellationScheduled,cancellationError};
+      saveUser(email,{pendingPlanChange:pending,stripeCustomerId:session.customer,lastPlanChangeError:cancellationError});
+      upsertPurchase(email,session.id,{fulfillmentStatus:'scheduled',planChangeStatus:cancellationError?'scheduled_with_warning':'scheduled',fulfillmentError:cancellationError},purchaseDefaults);
+      recordDiagnostic(req,{email,source:'stripe',type:'plan_change',action:'plan_change_scheduled',outcome:cancellationError?'failed':'pending',severity:cancellationError?'error':'info',message:cancellationError?'Plan change paid, but old subscription could not be scheduled for cancellation':'Paid plan change scheduled for current plan end',errorCode:cancellationError?'SUBSCRIPTION_END_SCHEDULE_FAILED':null,purchaseId:session.id,context:{scheduledFor,previousPlan,packageCode,cancellationScheduled}});
+      await deliverPurchaseReceipt(email,session.id,purchaseDefaults);
+      return res.json({received:true,planChange:'scheduled'});
+    }
+
+    if(changeMode==='immediate'){
+      upsertPurchase(email,session.id,{fulfillmentStatus:'provisioning',planChangeStatus:'provisioning',fulfillmentError:null},purchaseDefaults);
+      await executePaidPlanChange({email,purchaseId:session.id,packageCode,packageName:session.metadata.packageName||plan,dataLimitGb,durationDays,location:session.metadata.location||null,previousPlan,previousSubscriptionId,requestId:req.requestId});
+      await deliverPurchaseReceipt(email,session.id,purchaseDefaults);
+      return res.json({received:true,planChange:'immediate'});
+    }
 
     // Save Stripe ownership immediately after confirmed payment. Provisioning
     // can fail later, but the admin must still be able to find and refund it.
@@ -1790,6 +1917,7 @@ app.post('/api/webhook', async (req, res) => {
     if (existingPurchase?.fulfillmentStatus !== 'provisioned') upsertPurchase(email, session.id, { fulfillmentStatus:'provisioning', fulfillmentError:null }, purchaseDefaults);
 
     if (existingPurchase?.fulfillmentStatus !== 'provisioned') try {
+      recordDiagnostic(req,{email,source:'esim_access',type:'esim_flow',action:'provision_started',outcome:'started',severity:'info',message:'eSIM provisioning started after confirmed payment',purchaseId:session.id,context:{plan,packageCode:packageCode||null}});
       // Оплата підтверджена Stripe -> тепер видаємо реальну eSIM
       const esim = await provisionEsim({ email, plan, packageCode, dataLimitGb });
       esim.dashboardQrExpiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
@@ -1802,12 +1930,14 @@ app.post('/api/webhook', async (req, res) => {
         esim,
       });
       upsertPurchase(email, session.id, { fulfillmentStatus:'provisioned', fulfilledAt:new Date().toISOString(), fulfillmentError:null, esimOrderNo:esim.orderNo || null, iccid:esim.iccid || null, esimTranNo:esim.esimTranNo || null }, purchaseDefaults);
+      recordDiagnostic(req,{email,source:'esim_access',type:'esim_flow',action:'provision_completed',outcome:'success',severity:'info',message:'eSIM provisioned successfully',purchaseId:session.id,context:{plan,packageCode:packageCode||null,provider:esim.provider||'esim_access',hasQr:Boolean(esim.qrCodeUrl||esim.activationCode),orderReference:esim.orderNo?String(esim.orderNo).slice(-8):null}});
 
       console.log(`✅ Підписку і eSIM активовано для ${email}`);
     } catch (err) {
       console.error('Помилка видачі eSIM після оплати:', err);
       saveUser(email, { status: 'payment_ok_esim_failed', lastEsimProvisionError:err.message });
       upsertPurchase(email, session.id, { fulfillmentStatus:'failed', failedAt:new Date().toISOString(), fulfillmentError:err.message, fulfillmentErrorCode:err.code || null }, purchaseDefaults);
+      recordDiagnostic(req,{email,source:'esim_access',type:'esim_flow',action:'provision_failed',outcome:'failed',severity:'error',message:'Paid eSIM provisioning failed',errorCode:err.code||'ESIM_PROVISION_FAILED',purchaseId:session.id,context:{plan,packageCode:packageCode||null,providerStatus:err.status||null,providerMessage:String(err.message||'').slice(0,240)}});
     }
     await deliverPurchaseReceipt(email, session.id, purchaseDefaults);
   }
@@ -1822,6 +1952,8 @@ app.post('/api/webhook', async (req, res) => {
       } catch (error) { console.error('[subscription deleted lookup]', error.message); }
     }
     if (user) {
+      if(user.pendingPlanChange){recordDiagnostic(req,{email:user.email,source:'stripe',type:'plan_change',action:'previous_subscription_period_ended',outcome:'pending',severity:'info',message:'Previous subscription ended; scheduled plan change will now be processed',purchaseId:user.pendingPlanChange.purchaseId,context:{subscriptionId:sub.id}});processDuePlanChanges().catch(error=>console.error('[plan change webhook]',error.message));return res.json({received:true,planChangeQueued:true});}
+      if(user.plan==='custom'&&user.esim?.orderNo&&user.lastPlanChangeAt){recordDiagnostic(req,{email:user.email,source:'stripe',type:'plan_change',action:'previous_subscription_deleted_webhook',outcome:'success',severity:'info',message:'Previous subscription deletion confirmed; new one-time eSIM remains active',context:{subscriptionId:sub.id}});return res.json({received:true,previousSubscriptionClosed:true});}
       const state = await getSubscriptionStateByEmail(user.email, user.stripeCustomerId || null).catch(() => null);
       if (!state || !state.active.length) saveUser(user.email, { status:'canceled', canceledAt:new Date().toISOString(), canceledReason:'stripe_webhook' });
     }
@@ -1983,6 +2115,9 @@ storage.init().then(() => Promise.all([
   app.listen(PORT, () => {
     console.log(`Signal backend running on http://localhost:${PORT}`);
   });
+  processDuePlanChanges().catch(error=>console.error('[plan change scheduler]',error.message));
+  const planChangeTimer=setInterval(()=>processDuePlanChanges().catch(error=>console.error('[plan change scheduler]',error.message)),60*1000);
+  planChangeTimer.unref?.();
 }).catch((error) => {
   console.error('Failed to start persistent storage:', error);
   process.exit(1);
