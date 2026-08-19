@@ -244,7 +244,7 @@ function bytes(value) {
 // Public package catalogue from eSIM Access. It is used server-side only so
 // the provider Access Code and signature never reach the customer's browser.
 async function listPackages({ locationCode = '', type = '', packageCode = '', iccid = '' } = {}) {
-  const payload = await esimAccessRequest('/api/v1/open/package/list', { locationCode, type, packageCode, iccid });
+  const payload = await esimAccessRequest('/api/v1/open/package/list', { locationCode, type, packageCode, iccid, pager:{ pageNum:1, pageSize:1000 } });
   return payload?.obj?.packageList || [];
 }
 

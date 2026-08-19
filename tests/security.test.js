@@ -46,3 +46,17 @@ test('frontend ticket messages are escaped before HTML rendering', () => {
     assert.match(html, /escapeHtml\(m\.text\)\.replace/);
   }
 });
+
+test('travel package prices are calculated only on the server', () => {
+  const server = read('server.js');
+  const page = read('travel-plans.html');
+  assert.match(server, /packageRetailCents\(item\)/);
+  assert.match(server, /packages\.find\(item=>item\.packageCode===packageCode\)/);
+  assert.doesNotMatch(page, /amountCents\s*:/);
+});
+
+test('travel package catalogue and checkout require a user session', () => {
+  const server = read('server.js');
+  assert.match(server, /app\.get\('\/api\/travel-packages',\s*requireUserSession/);
+  assert.match(server, /app\.post\('\/api\/travel-packages\/checkout',\s*requireUserSession/);
+});

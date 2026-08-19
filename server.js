@@ -33,6 +33,7 @@ const app = express();
 const esimRetriesInProgress = new Set();
 const renewalInvoicesInProgress = new Set();
 const coverageCache = new Map();
+const travelPackageCache = { createdAt:0, packages:[] };
 const adminRecoveryRateLimit = new Map();
 const pendingBackupRestores = new Map();
 const securityAttemptTracker = new Map();
@@ -62,6 +63,55 @@ function userStatusView(user) {
   return result;
 }
 function validateSupportAttachment(attachment){if(!attachment)return null;const type=String(attachment.type||'').toLowerCase(),allowed=['image/png','image/jpeg','image/webp','application/pdf'];if(!allowed.includes(type)||typeof attachment.dataUrl!=='string'||attachment.dataUrl.length>800000||!attachment.dataUrl.startsWith(`data:${type};base64,`))throw Object.assign(new Error('Дозволено PNG, JPG, WEBP або PDF до 550 КБ'),{code:'INVALID_ATTACHMENT'});return {name:String(attachment.name||'attachment').replace(/[\r\n<>"']/g,'').slice(0,120),type,dataUrl:attachment.dataUrl};}
+
+function packageVolumeGb(item) {
+  const raw = Number(item?.volume ?? item?.dataVolume);
+  return Number.isFinite(raw) && raw >= 0 ? +(raw / (1024 ** 3)).toFixed(2) : null;
+}
+
+function packageRetailCents(item) {
+  const providerCostUsd = Number(item?.price || 0) / 10000;
+  if (!Number.isFinite(providerCostUsd) || providerCostUsd <= 0) return null;
+  const percent = Math.min(100, Math.max(10, Number(process.env.PACKAGE_MARKUP_PERCENT || 35))) / 100;
+  const fixed = Math.min(10, Math.max(0.5, Number(process.env.PACKAGE_FIXED_MARKUP_USD || 1)));
+  const minimum = Math.min(20, Math.max(1.99, Number(process.env.PACKAGE_MIN_PRICE_USD || 2.99)));
+  const calculated = Math.max(minimum, providerCostUsd * (1 + percent), providerCostUsd + fixed);
+  return Math.max(199, Math.round((Math.ceil(calculated) - 0.01) * 100));
+}
+
+function safeTravelPackage(item) {
+  const packageCode = String(item?.packageCode || item?.slug || '').trim();
+  const amountCents = packageRetailCents(item);
+  if (!/^[A-Za-z0-9_-]{3,80}$/.test(packageCode) || !amountCents) return null;
+  const text = `${item?.type || ''} ${item?.packageType || ''} ${item?.name || ''}`.toLowerCase();
+  if (text.includes('topup') || text.includes('top-up')) return null;
+  const unlimited = Number(item?.dataType) === 4 || /unlimited|безліміт/i.test(`${item?.name || ''} ${item?.description || ''}`);
+  const networks = (item?.locationNetworkList || []).slice(0,30).map(network => ({ locationName:String(network?.locationName || '').slice(0,80), operatorCount:(network?.operatorList || []).length }));
+  const rawDuration=Number(item?.duration || 30);
+  const durationDays=Number.isFinite(rawDuration)?Math.max(1,Math.min(365,rawDuration)):30;
+  return {
+    packageCode,
+    name:String(item?.name || item?.description || packageCode).slice(0,120),
+    description:String(item?.description || '').slice(0,240),
+    location:String(item?.location || networks.map(network=>network.locationName).filter(Boolean).join(', ') || 'Global').slice(0,160),
+    dataLimitGb:unlimited ? null : packageVolumeGb(item),
+    unlimited,
+    durationDays,
+    speed:String(item?.speed || '4G/5G').slice(0,40),
+    amountCents,
+    currency:'usd',
+    networks,
+  };
+}
+
+async function getTravelPackages(force = false) {
+  if (!force && travelPackageCache.packages.length && Date.now() - travelPackageCache.createdAt < 10 * 60 * 1000) return travelPackageCache.packages;
+  const raw = await listPackages({});
+  const packages = raw.map(safeTravelPackage).filter(Boolean).sort((a,b) => a.amountCents-b.amountCents || (a.dataLimitGb||Infinity)-(b.dataLimitGb||Infinity)).slice(0,500);
+  travelPackageCache.createdAt=Date.now();
+  travelPackageCache.packages=packages;
+  return packages;
+}
 
 async function deliverPurchaseReceipt(email, purchaseId, defaults = {}, suppliedReceiptUrl = null) {
   const stored = (getUser(email)?.purchases || []).find(item => item.id === purchaseId);
@@ -312,6 +362,52 @@ app.post('/api/account/feedback', requireUserSession, (req, res) => {
 app.get('/api/service-status', (req, res) => {
   const maintenance = operationsStore.activeAnnouncements(null).find((item) => item.type === 'maintenance');
   res.json({ status: maintenance ? 'maintenance' : 'operational', message: maintenance?.message || null, checkedAt: new Date().toISOString() });
+});
+
+app.get('/api/travel-packages', requireUserSession, rateLimit('travel_catalog',60*1000,30,req=>req.userEmail), async (req,res) => {
+  try {
+    const query=String(req.query.q||'').trim().toLowerCase().slice(0,80);
+    const data=String(req.query.data||'all');
+    const duration=String(req.query.duration||'all');
+    let packages=await getTravelPackages();
+    if(query) packages=packages.filter(item=>`${item.name} ${item.location} ${item.description}`.toLowerCase().includes(query));
+    if(data==='small') packages=packages.filter(item=>item.dataLimitGb!=null&&item.dataLimitGb<=3);
+    if(data==='medium') packages=packages.filter(item=>item.dataLimitGb>3&&item.dataLimitGb<=10);
+    if(data==='large') packages=packages.filter(item=>item.dataLimitGb>10||item.unlimited);
+    if(duration==='short') packages=packages.filter(item=>item.durationDays<=7);
+    if(duration==='month') packages=packages.filter(item=>item.durationDays>7&&item.durationDays<=30);
+    if(duration==='long') packages=packages.filter(item=>item.durationDays>30);
+    res.json({packages:packages.slice(0,120),updatedAt:new Date(travelPackageCache.createdAt).toISOString()});
+  } catch(error) {
+    console.error('[travel packages]',error.message);
+    res.status(502).json({error:'Не вдалося завантажити актуальні пакети eSIM Access'});
+  }
+});
+
+app.post('/api/travel-packages/checkout', requireUserSession, rateLimit('travel_checkout',60*60*1000,10,req=>req.userEmail), async (req,res) => {
+  try {
+    const currentUser=getUser(req.userEmail);
+    if(currentUser?.esim && ['active','payment_confirmed','renewal_failed'].includes(currentUser.status)) return res.status(409).json({error:'В акаунті вже є активна eSIM. Щоб не втратити її, звернися в підтримку для додаткового пакета.'});
+    const packageCode=String(req.body?.packageCode||'').trim();
+    if(!/^[A-Za-z0-9_-]{3,80}$/.test(packageCode)) return res.status(400).json({error:'Некоректний пакет'});
+    const packages=await getTravelPackages(true);
+    const selected=packages.find(item=>item.packageCode===packageCode);
+    if(!selected) return res.status(404).json({error:'Пакет більше недоступний. Онови каталог і вибери інший.'});
+    const session=await createCustomPackageCheckout({
+      email:req.userEmail,
+      packageCode:selected.packageCode,
+      packageName:selected.name,
+      amountCents:selected.amountCents,
+      currency:'usd',
+      dataLimitGb:selected.dataLimitGb,
+      durationDays:selected.durationDays,
+      location:selected.location,
+    });
+    res.json({url:session.url});
+  } catch(error) {
+    console.error('[travel checkout]',error.message);
+    res.status(502).json({error:'Не вдалося створити безпечну оплату пакета'});
+  }
 });
 
 app.get('/api/account/coverage', requireUserSession, async (req, res) => {
