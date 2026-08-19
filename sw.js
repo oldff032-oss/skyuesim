@@ -3,7 +3,7 @@
 // Кешує тільки статичну "оболонку" — самі дані (підписка, тікети) завжди
 // тягнуться наживо з бекенду, ніколи не кешуються.
 
-const CACHE_NAME = 'signal-shell-v21-logo-maintenance';
+const CACHE_NAME = 'signal-shell-v32-hard-maintenance';
 const SHELL_FILES = [
   '/index.html',
   '/style.css',
@@ -42,7 +42,7 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
   const critical = event.request.mode === 'navigate' || ['/pwa.js','/config.js','/sw.js'].includes(url.pathname);
   if (critical) {
-    event.respondWith(fetch(event.request).then(response => {
+    event.respondWith(fetch(event.request, { cache:'no-store' }).then(response => {
       const copy = response.clone();
       caches.open(CACHE_NAME).then(cache => cache.put(event.request, copy));
       return response;
