@@ -55,6 +55,29 @@ test('travel package prices are calculated only on the server', () => {
   assert.match(page, /body:JSON\.stringify\(\{packageCode:code,changeMode\}\)/);
 });
 
+test('language selection is explicit, persistent, and synchronized', () => {
+  const registration = read('register-email.html');
+  const profile = read('profile.html');
+  const languagePage = read('language.html');
+  const i18n = read('i18n.js');
+  assert.match(registration, /selectRegistrationLanguage\('uk'\)/);
+  assert.match(registration, /selectRegistrationLanguage\('en'\)/);
+  assert.doesNotMatch(profile, /prompt\(/);
+  assert.match(profile, /language\.html/);
+  assert.match(languagePage, /Українська/);
+  assert.match(languagePage, /English/);
+  assert.match(i18n, /signalSetLanguage/);
+  assert.match(i18n, /api\/account\/preferences/);
+  assert.match(i18n, /localStorage\.setItem\('signal_language'/);
+});
+
+test('all customer pages load localization support', () => {
+  const excluded = new Set(['maintenance-support.html']);
+  const customerPages = fs.readdirSync(root).filter(name => name.endsWith('.html') && !name.startsWith('admin-') && !excluded.has(name));
+  for (const page of customerPages) assert.match(read(page), /pwa\.js/, `${page} must load customer localization`);
+  assert.match(read('maintenance-support.html'), /i18n\.js/);
+});
+
 test('travel package catalogue and checkout require a user session', () => {
   const server = read('server.js');
   assert.match(server, /app\.get\('\/api\/travel-packages',\s*requireUserSession/);

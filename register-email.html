@@ -15,47 +15,43 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Сигнал">
 <script src="pwa.js"></script>
+<style>
+  .registration-shell{max-width:540px;margin:0 auto;padding-bottom:42px}.registration-progress{display:flex;gap:7px;margin:24px 0 26px}.registration-progress span{height:4px;flex:1;border-radius:999px;background:rgba(255,255,255,.1)}.registration-progress span.active{background:linear-gradient(90deg,#3b82f6,#7c4dff)}.language-choice{display:flex;align-items:center;gap:15px;width:100%;padding:17px;margin-top:12px;border:1.5px solid var(--border);border-radius:19px;background:rgba(255,255,255,.035);color:var(--text);cursor:pointer;text-align:left}.language-choice:hover,.language-choice:focus-visible{border-color:#7080ff;outline:none;background:rgba(93,103,255,.1)}.language-choice .flag{width:46px;height:46px;display:grid;place-items:center;border-radius:14px;background:rgba(255,255,255,.08);font-size:24px}.language-choice strong{display:block;font-size:16px}.language-choice small{display:block;color:var(--muted);margin-top:3px}.language-choice .arrow{margin-left:auto;font-size:23px;color:#8590ac}.registration-fields{display:none}.registration-fields.visible{display:block}.field-with-icon{position:relative}.field-with-icon input:not([type=file]){padding-left:48px}.field-icon{position:absolute;left:16px;bottom:15px;width:20px;height:20px;color:#9ba8c7;pointer-events:none}.file-control{position:relative;padding:14px;border:1.5px dashed var(--border);border-radius:15px;background:rgba(255,255,255,.025)}.file-control input{width:100%;border:0;padding:0;background:transparent}.registration-back{border:0;background:transparent;color:var(--muted);padding:8px 0;margin-bottom:4px;cursor:pointer;font-weight:600}
+</style>
 </head>
 <body>
-  <div class="wrap">
+  <div class="wrap registration-shell">
     <div class="brand"><div class="mark">📶</div><span>Сигнал</span></div>
-
-    <h1 style="margin-top:20px;">Create Account</h1>
-    <p class="lead">Enter your e-mail to continue</p>
-
-    <div class="field-group">
-      <label class="field-label">Мова / Language</label>
-      <select id="language" style="width:100%;background:rgba(255,255,255,.04);border:1.5px solid var(--border);border-radius:14px;padding:15px 16px;color:var(--text);font-size:15px;"><option value="uk">Українська</option><option value="en">English</option></select>
-    </div>
-    <div class="field-group">
-      <label class="field-label">Ім’я</label>
-      <input type="text" id="displayName" placeholder="Як до тебе звертатися" autocomplete="name" maxlength="60" />
-    </div>
-    <div class="field-group">
-      <label class="field-label">Фото профілю <span class="muted">(необов’язково)</span></label>
-      <input type="file" id="avatar" accept="image/png,image/jpeg,image/webp" style="padding:12px;" />
-      <div class="muted" style="font-size:11px;margin-top:6px;">PNG, JPG або WebP до 500 КБ</div>
-    </div>
-    <div class="field-group">
-      <label class="field-label">Email</label>
-      <input type="email" id="email" placeholder="you@example.com" autocomplete="email" />
-      <div class="err-text" id="err" style="display:none;"></div>
-    </div>
-    <div class="field-group">
-      <label class="field-label">Код запрошення <span class="muted">(необов’язково)</span></label>
-      <input type="text" id="referralCode" placeholder="Наприклад: A1B2C3D4" autocomplete="off" maxlength="32" />
-    </div>
-
-    <button class="btn" id="continueBtn" style="margin-top:24px;" onclick="requestCode()">Continue</button>
-    <p class="muted" style="text-align:center; margin-top:16px;">Вже маєш акаунт? <a href="login.html" style="color:var(--cyan); text-decoration:none;">Увійти</a></p>
+    <div class="registration-progress"><span class="active"></span><span id="progressDetails"></span><span></span><span></span></div>
+    <section id="languageStep">
+      <h1 data-i18n-uk="Обери мову" data-i18n-en="Choose your language" style="margin-top:12px">Обери мову</h1>
+      <p class="lead" data-i18n-uk="Цією мовою відображатиметься весь застосунок" data-i18n-en="The entire app will be displayed in this language">Цією мовою відображатиметься весь застосунок</p>
+      <button class="language-choice" type="button" onclick="selectRegistrationLanguage('uk')"><span class="flag">🇺🇦</span><span><strong>Українська</strong><small>Продовжити українською</small></span><span class="arrow">›</span></button>
+      <button class="language-choice" type="button" onclick="selectRegistrationLanguage('en')"><span class="flag">🇬🇧</span><span><strong>English</strong><small>Continue in English</small></span><span class="arrow">›</span></button>
+    </section>
+    <section id="detailsStep" class="registration-fields">
+      <button class="registration-back" type="button" onclick="showLanguageStep()" data-i18n-uk="← Змінити мову" data-i18n-en="← Change language">← Змінити мову</button>
+      <h1 data-i18n-uk="Створити акаунт" data-i18n-en="Create account" style="margin-top:10px">Створити акаунт</h1>
+      <p class="lead" data-i18n-uk="Заповни дані — це займе менше хвилини" data-i18n-en="Enter your details — it takes less than a minute">Заповни дані — це займе менше хвилини</p>
+      <div class="field-group field-with-icon"><label class="field-label">Ім’я</label><svg class="field-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="4"/><path d="M4.5 21a7.5 7.5 0 0 1 15 0"/></svg><input type="text" id="displayName" placeholder="Як до тебе звертатися" autocomplete="name" maxlength="60" /></div>
+      <div class="field-group"><label class="field-label">Фото профілю <span class="muted">(необов’язково)</span></label><div class="file-control"><input type="file" id="avatar" accept="image/png,image/jpeg,image/webp" /></div><div class="muted" style="font-size:11px;margin-top:6px;">PNG, JPG або WebP до 500 КБ</div></div>
+      <div class="field-group field-with-icon"><label class="field-label">Email</label><svg class="field-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="m4 7 8 6 8-6"/></svg><input type="email" id="email" placeholder="you@example.com" autocomplete="email" /><div class="err-text" id="err" style="display:none;"></div></div>
+      <div class="field-group field-with-icon"><label class="field-label">Код запрошення <span class="muted">(необов’язково)</span></label><svg class="field-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20 12v8H4v-8M2 8h20v4H2zM12 8v12M12 8H7.5a2.5 2.5 0 1 1 2.1-3.85L12 8Zm0 0h4.5a2.5 2.5 0 1 0-2.1-3.85L12 8Z"/></svg><input type="text" id="referralCode" placeholder="Наприклад: A1B2C3D4" autocomplete="off" maxlength="32" /></div>
+      <button class="btn" id="continueBtn" style="margin-top:24px" onclick="requestCode()">Продовжити</button>
+      <p class="muted" style="text-align:center;margin-top:16px">Вже маєш акаунт? <a href="login.html" style="color:var(--cyan);text-decoration:none">Увійти</a></p>
+    </section>
   </div>
 
   <script src="config.js"></script>
   <script>
+    function selectRegistrationLanguage(language){localStorage.setItem('signal_language',language);location.href=`register-email.html?step=details${new URLSearchParams(location.search).get('ref')?`&ref=${encodeURIComponent(new URLSearchParams(location.search).get('ref'))}`:''}`;}
+    function showDetailsStep(){document.getElementById('languageStep').style.display='none';document.getElementById('detailsStep').classList.add('visible');document.getElementById('progressDetails').classList.add('active');}
+    function showLanguageStep(){history.replaceState(null,'','register-email.html');document.getElementById('languageStep').style.display='block';document.getElementById('detailsStep').classList.remove('visible');document.getElementById('progressDetails').classList.remove('active');}
+    if(new URLSearchParams(location.search).get('step')==='details') showDetailsStep();
     async function requestCode(){
       const emailInput = document.getElementById('email');
       const email = emailInput.value.trim();
-      const language = document.getElementById('language').value;
+      const language = ['uk','en'].includes(localStorage.getItem('signal_language')) ? localStorage.getItem('signal_language') : 'uk';
       const referralCode = document.getElementById('referralCode').value.trim().toUpperCase();
       const displayName = document.getElementById('displayName').value.trim();
       const err = document.getElementById('err');
@@ -64,15 +60,15 @@
       emailInput.classList.remove('error');
 
       if(!email || !email.includes('@')){
-        err.textContent = 'Введи коректний email';
+        err.textContent = window.signalT('Введи коректний email','Enter a valid email');
         err.style.display = 'flex';
         emailInput.classList.add('error');
         return;
       }
-      if(!displayName){ err.textContent = 'Введи ім’я'; err.style.display = 'flex'; return; }
+      if(!displayName){ err.textContent = window.signalT('Введи ім’я','Enter your name'); err.style.display = 'flex'; return; }
 
       btn.classList.add('loading');
-      btn.textContent = 'Надсилаємо код...';
+      btn.textContent = window.signalT('Надсилаємо код...','Sending code…');
 
       try{
         const file = document.getElementById('avatar').files[0];
@@ -82,7 +78,7 @@
           body: JSON.stringify({ email, language, referralCode, displayName, avatarDataUrl })
         });
         const data = await res.json();
-        if(!res.ok) throw new Error(data.error || 'Помилка сервера');
+        if(!res.ok) throw new Error(data.error || window.signalT('Помилка сервера','Server error'));
 
         localStorage.setItem('signal_pending_email', email);
         localStorage.setItem('signal_language', language);
@@ -92,7 +88,7 @@
         err.textContent = e.message;
         err.style.display = 'flex';
         btn.classList.remove('loading');
-        btn.textContent = 'Continue';
+        btn.textContent = window.signalT('Продовжити','Continue');
       }
     }
 
@@ -107,4 +103,3 @@
   </script>
 </body>
 </html>
-

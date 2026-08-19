@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Мова застосунку — Сигнал</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#05060d">
+<script src="pwa.js"></script>
+<style>
+  .language-shell{max-width:560px;margin:0 auto;padding-bottom:40px}.language-head{display:flex;align-items:center;gap:14px;margin:18px 0 26px}.back-button{width:44px;height:44px;border-radius:14px;border:1px solid var(--border);background:rgba(255,255,255,.04);color:var(--text);font-size:24px;cursor:pointer}.language-card{display:flex;align-items:center;gap:16px;width:100%;padding:18px;margin-top:12px;border-radius:20px;border:1.5px solid var(--border);background:rgba(255,255,255,.035);color:var(--text);text-align:left;cursor:pointer;transition:.2s ease}.language-card:hover{transform:translateY(-1px);border-color:#6f7cff}.language-card.selected{border-color:#6f7cff;background:linear-gradient(135deg,rgba(45,108,255,.17),rgba(123,67,255,.13));box-shadow:0 12px 34px rgba(62,98,255,.15)}.language-flag{width:48px;height:48px;display:grid;place-items:center;border-radius:15px;background:rgba(255,255,255,.08);font-size:25px}.language-copy{flex:1}.language-name{display:block;font-family:'Space Grotesk',sans-serif;font-size:17px;font-weight:700}.language-native{display:block;color:var(--muted);font-size:13px;margin-top:3px}.language-check{width:25px;height:25px;border:2px solid #6f7891;border-radius:50%;display:grid;place-items:center;font-size:14px}.selected .language-check{border-color:#6f7cff;background:#6f7cff;color:#fff}.save-status{min-height:24px;margin-top:18px;text-align:center;color:var(--muted);font-size:13px}
+</style>
+</head>
+<body>
+<main class="wrap language-shell">
+  <div class="language-head">
+    <button class="back-button" type="button" onclick="history.length > 1 ? history.back() : location.href='profile.html'" aria-label="Назад">‹</button>
+    <div><h1 data-i18n-uk="Мова застосунку" data-i18n-en="App language" style="font-size:25px;margin:0">Мова застосунку</h1><p class="lead" data-i18n-uk="Обери мову для всіх екранів і повідомлень" data-i18n-en="Choose the language for every screen and notification" style="margin:5px 0 0">Обери мову для всіх екранів і повідомлень</p></div>
+  </div>
+  <section class="glass" style="padding:18px">
+    <button class="language-card" data-language="uk" type="button" onclick="chooseLanguage('uk')">
+      <span class="language-flag" aria-hidden="true">🇺🇦</span><span class="language-copy"><span class="language-name">Українська</span><span class="language-native">Українська</span></span><span class="language-check">✓</span>
+    </button>
+    <button class="language-card" data-language="en" type="button" onclick="chooseLanguage('en')">
+      <span class="language-flag" aria-hidden="true">🇬🇧</span><span class="language-copy"><span class="language-name">English</span><span class="language-native">English</span></span><span class="language-check">✓</span>
+    </button>
+    <p class="save-status" id="saveStatus" aria-live="polite"></p>
+  </section>
+</main>
+<script src="config.js"></script>
+<script>
+  function markSelected(){const current=localStorage.getItem('signal_language')||'uk';document.querySelectorAll('.language-card').forEach(card=>card.classList.toggle('selected',card.dataset.language===current));}
+  async function chooseLanguage(language){
+    const status=document.getElementById('saveStatus');
+    status.textContent=language==='en'?'Saving language…':'Зберігаємо мову…';
+    try{await window.signalSetLanguage(language,{reload:false});markSelected();status.textContent=language==='en'?'Language saved':'Мову збережено';setTimeout(()=>location.reload(),350);}
+    catch{status.textContent=language==='en'?'Could not save. Check your connection.':'Не вдалося зберегти. Перевір з’єднання.';}
+  }
+  window.addEventListener('load',markSelected);
+</script>
+</body>
+</html>
