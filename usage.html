@@ -37,6 +37,9 @@
   <script>
     const email = localStorage.getItem('signal_email');
     if(!email){ window.location.href = 'login.html'; }
+    const appLanguage = localStorage.getItem('signal_language') === 'en' ? 'en' : 'uk';
+    const appLocale = appLanguage === 'en' ? 'en-US' : 'uk-UA';
+    const dataUnits = appLanguage === 'en' ? {b:'B',kb:'KB',mb:'MB',gb:'GB'} : {b:'Б',kb:'КБ',mb:'МБ',gb:'ГБ'};
 
     function providerDate(value){
       if(value == null || value === '') return null;
@@ -49,9 +52,9 @@
 
     function formatGb(value){
       const number = Number(value);
-      return Number.isFinite(number) ? `${number.toLocaleString('uk-UA', { minimumFractionDigits:2, maximumFractionDigits:4 })} ГБ` : '—';
+      return Number.isFinite(number) ? `${number.toLocaleString(appLocale, { minimumFractionDigits:2, maximumFractionDigits:4 })} ${dataUnits.gb}` : '—';
     }
-    function formatBytes(value){const bytes=Number(value);if(!Number.isFinite(bytes)||bytes<0)return '—';if(bytes<1024)return `${Math.round(bytes).toLocaleString('uk-UA')} Б`;if(bytes<1024**2)return `${(bytes/1024).toLocaleString('uk-UA',{maximumFractionDigits:2})} КБ`;if(bytes<1024**3)return `${(bytes/1024**2).toLocaleString('uk-UA',{minimumFractionDigits:2,maximumFractionDigits:2})} МБ`;return `${(bytes/1024**3).toLocaleString('uk-UA',{minimumFractionDigits:2,maximumFractionDigits:4})} ГБ`;}
+    function formatBytes(value){const bytes=Number(value);if(!Number.isFinite(bytes)||bytes<0)return '—';if(bytes<1024)return `${Math.round(bytes).toLocaleString(appLocale)} ${dataUnits.b}`;if(bytes<1024**2)return `${(bytes/1024).toLocaleString(appLocale,{maximumFractionDigits:2})} ${dataUnits.kb}`;if(bytes<1024**3)return `${(bytes/1024**2).toLocaleString(appLocale,{minimumFractionDigits:2,maximumFractionDigits:2})} ${dataUnits.mb}`;return `${(bytes/1024**3).toLocaleString(appLocale,{minimumFractionDigits:2,maximumFractionDigits:4})} ${dataUnits.gb}`;}
 
     async function load(){
       const loading = document.getElementById('loading');
@@ -131,7 +134,7 @@
             const remainingGb = Math.max(0, limitGb - usedGb);
             const daysUntilOut = remainingGb / dailyAvg;
             const projectedDate = new Date(Date.now() + daysUntilOut * 86400000);
-            const dateStr = projectedDate.toLocaleDateString('uk-UA', { day:'numeric', month:'long' });
+            const dateStr = projectedDate.toLocaleDateString(appLocale, { day:'numeric', month:'long' });
             forecastHtml = `<div class="card"><p class="muted">При такому темпі використання (~${dailyAvg.toFixed(2)} ГБ/день) трафіку вистачить приблизно до <b style="color:var(--text);">${dateStr}</b>.</p></div>`;
           }
         } else if(limitGb) {
@@ -173,7 +176,7 @@
           const billingData = await billingRes.json();
           const billingCard = document.getElementById('billingCard');
           if(billingRes.ok && billingData.nextBillingDate){
-            const d = new Date(billingData.nextBillingDate).toLocaleDateString('uk-UA', { day:'numeric', month:'long', year:'numeric' });
+            const d = new Date(billingData.nextBillingDate).toLocaleDateString(appLocale, { day:'numeric', month:'long', year:'numeric' });
             billingCard.innerHTML = `<div style="display:flex; justify-content:space-between; align-items:center;"><span class="muted">Наступне списання</span><b>${d}</b></div>`;
           } else {
             billingCard.remove();

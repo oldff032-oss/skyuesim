@@ -47,14 +47,42 @@
     ,'Ім’я': 'Name', 'Як до тебе звертатися': 'How should we address you?', 'Фото профілю': 'Profile photo', '(необов’язково)': '(optional)', 'PNG, JPG або WebP до 500 КБ': 'PNG, JPG or WebP up to 500 KB', 'Наприклад: A1B2C3D4': 'For example: A1B2C3D4', 'Вже маєш акаунт?': 'Already have an account?', 'Введи коректний email': 'Enter a valid email', 'Введи ім’я': 'Enter your name', 'Надсилаємо код...': 'Sending code…', 'Помилка сервера': 'Server error', 'Фото має бути PNG, JPG або WebP до 500 КБ': 'Photo must be PNG, JPG or WebP up to 500 KB', 'Не вдалося прочитати фото': 'Could not read the photo'
     ,'Немає доступу до email?': 'No access to your email?', 'Старий email акаунта': 'Previous account email', 'Email, до якого зараз є доступ': 'Email you can currently access', 'Сюди прийде безпечне посилання': 'The secure link will be sent here', 'ICCID або UID eSIM': 'eSIM ICCID or UID', 'Необов’язково, якщо знаєш': 'Optional, if known', 'Не знаєш номер — залиш поле порожнім.': 'If you do not know it, leave this field empty.', 'Що пам’ятаєш про останню покупку?': 'What do you remember about your latest purchase?', 'Що сталося?': 'What happened?', 'Надіслати запит': 'Send request', 'Нові дані входу': 'New sign-in details', 'Новий email': 'New email', 'Новий PIN': 'New PIN', '6 цифр': '6 digits', 'Зберегти та увійти': 'Save and sign in'
     ,'Підтримка працює': 'Support is available', 'Ваш email': 'Your email', 'Опишіть проблему': 'Describe the issue', 'Надіслати в підтримку': 'Send to support', 'Перевірити стан сервісу': 'Check service status', 'Звернення надіслано': 'Request sent', 'Проблема під час технічних робіт': 'Issue during maintenance', 'Що сталося та якої допомоги ви потребуєте?': 'What happened and what help do you need?', 'Не надсилайте пароль, PIN, банківські дані, QR-код або код активації eSIM.': 'Do not send your password, PIN, banking details, QR code, or eSIM activation code.'
+    ,'Більше пакетів для подорожей': 'More travel packages', 'Країни, регіони, 1–50+ ГБ та різні терміни': 'Countries, regions, 1–50+ GB and flexible durations', 'Місячні тарифи': 'Monthly plans', 'Пакети для подорожей': 'Travel packages', 'Актуальні країни й регіони безпосередньо з каталогу eSIM Access.': 'Current countries and regions directly from the eSIM Access catalogue.', 'Країна, регіон або назва...': 'Country, region, or package name…', 'Усі країни та регіони': 'All countries and regions', 'Будь-який обсяг': 'Any data allowance', 'Будь-який термін': 'Any duration', 'Ціна остаточна у USD. Пакет не поновлюється автоматично. Якщо eSIM вже активна, ти зможеш безпечно змінити тариф зараз або після завершення поточного.': 'The displayed USD price is final. The package does not renew automatically. If an eSIM is already active, you can safely change the plan now or after the current one expires.'
+    ,'QR-код прибрано з головного екрана': 'The QR code was removed from the home screen', 'З міркувань безпеки п’ять хвилин минули. Відкрити знову:': 'For security, the five-minute display period has ended. Open it again in:', 'Активовано': 'Activated', 'Дані оновлюються провайдером протягом кількох годин.': 'Data is refreshed by the provider within a few hours.', 'Безлімітний інтернет': 'Unlimited internet', 'Змінити тариф': 'Change plan', 'Оновити дані оператора': 'Refresh carrier data', 'Точки зберігаються після оновлення даних у застосунку.': 'Data points are saved after refreshing usage in the app.', 'Прогноз з’явиться, коли назбирається трохи даних про використання.': 'A forecast will appear after enough usage data has been collected.'
+    ,'Налаштування акаунта': 'Account settings', 'Керуй своїми персональними даними та входом.': 'Manage your personal details and sign-in.', 'PIN-код застосунку': 'App PIN', '6 цифр для захисту при кожному відкритті.': 'Six digits that protect the app when it opens.', 'Новий PIN із 6 цифр': 'New 6-digit PIN', 'Зберегти PIN': 'Save PIN', 'Змінити фото': 'Change photo', 'Прибрати фото': 'Remove photo', 'Щоб змінити email або пароль, введи поточний пароль нижче.': 'To change your email or password, enter your current password below.', 'Зміна пароля': 'Change password', 'Новий пароль': 'New password', 'Щонайменше 8 символів': 'At least 8 characters', 'Поточний пароль': 'Current password', 'Потрібен для email або нового пароля': 'Required to change email or password', 'Зберегти зміни': 'Save changes', 'Зберігаємо…': 'Saving…', 'Зміни збережено': 'Changes saved'
+    ,'Центр підтримки': 'Support center', 'Ми допоможемо з eSIM, оплатою або тарифом.': 'We can help with your eSIM, payment, or plan.', '+ Створити звернення': '+ Create request', 'Звернень поки немає': 'No requests yet', 'Створіть нове звернення — воно одразу з’явиться тут.': 'Create a new request and it will appear here immediately.'
+    ,'Твоя eSIM': 'Your eSIM', 'Активна': 'Active', 'Код активації для ручного встановлення:': 'Activation code for manual installation:', 'Скопіювати код eSIM': 'Copy eSIM code', 'Повторне встановлення не створює нове замовлення і не списує кошти.': 'Reinstalling does not create a new order or charge you again.'
   };
 
-  const translate = (value) => language === 'en' ? (phrases[String(value || '').trim()] || value) : value;
+  const translateDynamic = (value) => {
+    if (language !== 'en') return value;
+    let result = String(value || '');
+    const replacements = [
+      [/^Привіт,\s*(.+)\s*👋$/u, 'Hello, $1 👋'], [/^Статус:\s*/u, 'Status: '],
+      [/^Залишилось:\s*/u, 'Remaining: '], [/^Використано\s+/u, 'Used '], [/^Дані оновлено:\s*/u, 'Data updated: '],
+      [/^Точне значення провайдера:\s*/u, 'Exact provider value: '], [/\sбайт використано/u, ' bytes used'], [/\sіз\s([\d\s,.]+)\sбайт/u, ' of $1 bytes'],
+      [/^Мережа:\s*/u, 'Network: '], [/^Профіль → Керування eSIM$/u, 'Profile → Manage eSIM'],
+      [/^Днів до закінчення eSIM$/u, 'Days until eSIM expires'], [/^Історія використання$/u, 'Usage history'],
+      [/^Наступне списання$/u, 'Next billing date'], [/^Використано трафіку$/u, 'Data used'],
+      [/^Трафік$/u, 'Data'], [/^Деталі використання$/u, 'Usage details'],
+      [/^Базовий/u, 'Basic'], [/^Стандарт/u, 'Standard'], [/^Безліміт/u, 'Unlimited'],
+      [/\bГБ\b/gu, 'GB'], [/\bМБ\b/gu, 'MB'], [/\bКБ\b/gu, 'KB'], [/\bдн\./gu, 'days'], [/\/день/gu, '/day']
+    ];
+    for (const [pattern, replacement] of replacements) result = result.replace(pattern, replacement);
+    return result;
+  };
+  const translate = (value) => {
+    if (language !== 'en') return value;
+    const text = String(value || '');
+    const trimmed = text.trim();
+    return phrases[trimmed] || translateDynamic(text);
+  };
   const translateNode = (node) => {
+    if (['SCRIPT','STYLE','NOSCRIPT'].includes(node.parentElement?.tagName)) return;
     const before = node.nodeValue;
     const trimmed = before.trim();
-    const after = language === 'en' ? phrases[trimmed] : null;
-    if (after) node.nodeValue = before.replace(trimmed, after);
+    const after = language === 'en' ? (phrases[trimmed] || translateDynamic(trimmed)) : null;
+    if (after && after !== trimmed) node.nodeValue = before.replace(trimmed, after);
   };
   const apply = (root) => {
     if (root.nodeType === Node.ELEMENT_NODE && root.hasAttribute?.('data-i18n-uk')) {
