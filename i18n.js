@@ -148,4 +148,40 @@
       return preferences.language || language;
     } catch { return language; }
   };
+
+  if (language === 'en') {
+    let remoteCache = {};
+    try { remoteCache = JSON.parse(localStorage.getItem('signal_translation_cache_en') || '{}'); } catch {}
+    let translationTimer = null;
+    const translateRemainingText = () => {
+      clearTimeout(translationTimer);
+      translationTimer = setTimeout(async () => {
+        const token = localStorage.getItem('signal_session_token');
+        if (!token || typeof API_URL === 'undefined') return;
+        const candidates = [];
+        const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+        while (walker.nextNode()) {
+          const node = walker.currentNode;
+          if (['SCRIPT','STYLE','NOSCRIPT'].includes(node.parentElement?.tagName) || node.parentElement?.closest('[data-no-auto-translate]')) continue;
+          const source = node.nodeValue.trim();
+          if (!/[А-ЯІЇЄҐа-яіїєґ]/u.test(source)) continue;
+          if (remoteCache[source]) node.nodeValue = node.nodeValue.replace(source, remoteCache[source]);
+          else candidates.push({node,source});
+        }
+        const texts = [...new Set(candidates.map(item=>item.source))].slice(0,40);
+        if (!texts.length) return;
+        try {
+          const response = await fetch(`${API_URL}/api/translations/batch`, {method:'POST',headers:{'Content-Type':'application/json','x-session-token':token},body:JSON.stringify({texts})});
+          if (!response.ok) return;
+          const result = await response.json();
+          Object.assign(remoteCache,result.translations||{});
+          localStorage.setItem('signal_translation_cache_en',JSON.stringify(Object.fromEntries(Object.entries(remoteCache).slice(-800))));
+          candidates.forEach(({node,source})=>{if(remoteCache[source]&&node.isConnected)node.nodeValue=node.nodeValue.replace(source,remoteCache[source]);});
+        } catch {}
+      }, 120);
+    };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded',translateRemainingText);
+    else translateRemainingText();
+    new MutationObserver(translateRemainingText).observe(document.documentElement,{childList:true,subtree:true,characterData:true});
+  }
 })();

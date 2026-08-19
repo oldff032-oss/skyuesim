@@ -19,7 +19,7 @@ window.setTimeout(()=>document.documentElement.classList.remove('signal-maintena
 // and stays consistent across the app.
 if (!document.querySelector('script[data-signal-i18n]')) {
   const script = document.createElement('script');
-  script.src = '/i18n.js?v=34';
+  script.src = '/i18n.js?v=35';
   script.defer = true;
   script.dataset.signalI18n = 'true';
   document.head.appendChild(script);
@@ -147,9 +147,16 @@ window.addEventListener('load', async () => {
       return;
     }
 
-    document.body.insertAdjacentHTML('beforeend', '<div id="lock" style="position:fixed;inset:0;z-index:99999;background:radial-gradient(circle at top,#1c2650,#05060d 62%);color:white;display:grid;place-items:center;padding:24px;text-align:center"><div style="width:min(100%,360px)"><div style="font-size:48px;margin-bottom:16px">🔒</div><div style="font:700 26px Space Grotesk,sans-serif">Signal захищено</div><p style="color:#aeb6c9;line-height:1.5">Введи свій PIN, щоб продовжити</p><input id="pin" inputmode="numeric" maxlength="6" type="password" placeholder="••••••" style="width:100%;box-sizing:border-box;text-align:center;letter-spacing:10px;font-size:24px;margin-top:16px"></div></div>');
+    const lockEnglish=localStorage.getItem('signal_language')==='en';
+    const lockTitle=lockEnglish?'Signal is protected':'Signal захищено',lockHint=lockEnglish?'Enter your PIN to continue':'Введи свій PIN, щоб продовжити',lockDelete=lockEnglish?'Delete':'Видалити';
+    document.body.insertAdjacentHTML('beforeend', `<div id="lock" style="position:fixed;inset:0;z-index:99999;background:radial-gradient(circle at 50% -12%,#17356f 0,#080c1b 43%,#03050b 100%);color:white;display:grid;place-items:center;padding:22px;text-align:center;font-family:Inter,-apple-system,sans-serif"><div style="width:min(100%,390px);padding:30px 22px;border:1px solid #6685ff38;border-radius:30px;background:#090d1dcc;box-shadow:0 28px 90px #000b,0 0 70px #3978ff20;backdrop-filter:blur(18px)"><img src="/signal-premium-logo.png" alt="Signal" width="88" height="88" style="display:block;margin:auto;border-radius:24px;box-shadow:0 15px 45px #2d79ff55"><div style="font:700 27px Space Grotesk,sans-serif;margin-top:20px">${lockTitle}</div><p style="color:#aebbd5;line-height:1.5;margin:8px 0 0">${lockHint}</p><div id="pinDots" style="display:flex;justify-content:center;gap:11px;margin:25px 0 20px">${'<span style="width:13px;height:13px;border:1.5px solid #7d8caf;border-radius:50%;transition:.15s"></span>'.repeat(6)}</div><input id="pin" inputmode="numeric" maxlength="6" type="password" autocomplete="off" style="position:absolute;opacity:0;pointer-events:none"><div id="pinPad" style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;max-width:300px;margin:auto">${[1,2,3,4,5,6,7,8,9].map(n=>`<button type="button" data-pin="${n}" style="height:58px;border:1px solid #7183af3d;border-radius:17px;background:#ffffff09;color:#f7f9ff;font:700 20px Space Grotesk;cursor:pointer">${n}</button>`).join('')}<button type="button" data-action="clear" style="height:58px;border:0;background:transparent;color:#8e9ab4;font-size:11px;font-weight:700">${lockDelete}</button><button type="button" data-pin="0" style="height:58px;border:1px solid #7183af3d;border-radius:17px;background:#ffffff09;color:#f7f9ff;font:700 20px Space Grotesk;cursor:pointer">0</button><button type="button" data-action="back" aria-label="${lockDelete}" style="height:58px;border:0;background:transparent;color:#cbd4e8;font-size:23px">⌫</button></div><p id="pinError" style="min-height:18px;color:#ff7185;font-size:12px;margin:14px 0 0"></p></div></div>`);
     const input = document.getElementById('pin');
-    input.focus();
+    const drawPin=()=>document.querySelectorAll('#pinDots span').forEach((dot,index)=>{const filled=index<input.value.length;dot.style.background=filled?'#6d70ff':'transparent';dot.style.borderColor=filled?'#7f7dff':'#7d8caf';dot.style.boxShadow=filled?'0 0 16px #5d73ff88':'none';});
+    document.querySelectorAll('#pinPad [data-pin]').forEach(button=>button.onclick=()=>{if(input.value.length<6){input.value+=button.dataset.pin;drawPin();input.dispatchEvent(new Event('input'));}});
+    document.querySelector('#pinPad [data-action="back"]').onclick=()=>{input.value=input.value.slice(0,-1);drawPin();};
+    document.querySelector('#pinPad [data-action="clear"]').onclick=()=>{input.value='';drawPin();};
+    const lockKeyHandler=event=>{if(/^\d$/.test(event.key)&&input.value.length<6){input.value+=event.key;drawPin();input.dispatchEvent(new Event('input'));}else if(event.key==='Backspace'){input.value=input.value.slice(0,-1);drawPin();}};
+    document.addEventListener('keydown',lockKeyHandler);
     input.addEventListener('input', async () => {
       if (input.value.length !== 6) return;
       input.disabled = true;
@@ -160,12 +167,13 @@ window.addEventListener('load', async () => {
       });
       if (result.ok) {
         sessionStorage.setItem(unlockKey, '1');
+        document.removeEventListener('keydown',lockKeyHandler);
         document.getElementById('lock')?.remove();
       } else {
         input.disabled = false;
         input.value = '';
-        input.focus();
-        alert('Невірний PIN');
+        drawPin();
+        document.getElementById('pinError').textContent=lockEnglish?'Incorrect PIN. Try again.':'Невірний PIN. Спробуй ще раз.';
       }
     });
   } catch (error) {
