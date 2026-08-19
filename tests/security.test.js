@@ -169,9 +169,23 @@ test('maintenance support works without account unlock and remains rate limited'
 test('service worker bypasses stale cache for maintenance and localization assets', () => {
   const worker=read('sw.js');
   const support=read('support.html');
-  assert.match(worker, /signal-shell-v35-auto-i18n-pin/);
+  assert.match(worker, /signal-shell-v36-feedback-admin/);
   assert.match(worker, /fetch\(event\.request, \{ cache:'no-store' \}\)/);
   assert.match(worker, /'\/i18n\.js'/);
   assert.match(worker, /'\/style\.css'/);
   assert.match(support, /maintenance-support\.html/);
+});
+
+test('feedback has a branded customer form and a protected admin inbox', () => {
+  const server=read('server.js');
+  const form=read('feedback.html');
+  const admin=read('admin-feedback.html');
+  const users=read('admin-users.html');
+  assert.match(server, /app\.post\('\/api\/account\/feedback', requireUserSession/);
+  assert.match(server, /app\.get\('\/api\/admin\/feedback', adminAuth\.requireAdmin/);
+  assert.match(form, /rating-button/);
+  assert.match(form, /feedback-text/);
+  assert.match(admin, /summary\.distribution/);
+  assert.match(admin, /avatarDataUrl/);
+  assert.match(users, /userDetailsAvatar/);
 });
