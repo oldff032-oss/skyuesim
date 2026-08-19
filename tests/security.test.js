@@ -43,7 +43,7 @@ test('Stripe success redirect does not disclose customer email', () => {
 test('frontend ticket messages are escaped before HTML rendering', () => {
   for (const page of ['ticket.html', 'admin-ticket.html']) {
     const html = read(page);
-    assert.match(html, /escapeHtml\(m\.text\)\.replace/);
+    assert.match(html, /(?:escapeHtml|esc)\(m\.text\)\.replace/);
   }
 });
 
@@ -100,4 +100,39 @@ test('classic subscription checkout cannot create an accidental duplicate', () =
   const server = read('server.js');
   assert.match(server, /ACTIVE_SUBSCRIPTION_EXISTS/);
   assert.match(server, /currentUser\?\.stripeSubscriptionId/);
+});
+
+test('all transactional emails share the responsive Signal logo template', () => {
+  const templates = read('emailTemplates.js');
+  const emailService = read('emailService.js');
+  const server = read('server.js');
+  assert.match(templates, /signal-premium-logo\.png/);
+  assert.match(templates, /name="viewport"/);
+  for (const name of ['verificationCode','supportReply','ticketAssignment','purchaseReceipt','twoFactorCode','broadcast','adminSecurityAlert','notification','accessRecovery','esimInstructions']) assert.match(templates, new RegExp(`function ${name}\\(`));
+  assert.match(emailService, /emailTemplates\.verificationCode/);
+  assert.match(server, /emailTemplates\.accessRecovery/);
+  assert.match(server, /emailTemplates\.esimInstructions/);
+  assert.match(server, /notifyStaffAboutUserReply/);
+});
+
+test('customer support screens are mobile friendly and free of legacy mojibake', () => {
+  for (const pageName of ['support.html','new-ticket.html','ticket.html']) {
+    const page = read(pageName);
+    assert.match(page, /viewport-fit=cover/);
+    assert.match(page, /class="mark"/);
+    assert.doesNotMatch(page, /Рџ|РЎРё|вЂ/);
+  }
+});
+
+test('maintenance support works without account unlock and remains rate limited', () => {
+  const server = read('server.js');
+  const pwa = read('pwa.js');
+  const page = read('maintenance-support.html');
+  assert.match(server, /app\.post\('\/api\/maintenance-support',rateLimit\('maintenance_support'/);
+  assert.match(server, /MAINTENANCE_INACTIVE/);
+  assert.match(server, /operationsStore\.activeAnnouncements\(null\)/);
+  assert.match(pwa, /maintenance-support/);
+  assert.match(page, /\/api\/maintenance-support/);
+  assert.match(page, /signal-premium-logo\.png/);
+  assert.doesNotMatch(page, /pwa\.js/);
 });

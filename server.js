@@ -194,7 +194,16 @@ async function syncPurchasesForUser(email) {
 
 function notifySuperAdminsAboutTicket(ticket) {
   const recipients = adminAuth.listAdmins().filter(admin=>!admin.blocked&&admin.role==='super_admin');
+  for(const admin of recipients) sendEmail({to:admin.email,subject:`Нове звернення #${ticket.id} — Signal Admin`,html:emailTemplates.notification({title:'Нове звернення в підтримку',message:`Користувач ${ticket.email} створив звернення «${ticket.subject}».`,actionUrl:`/admin-ticket.html?id=${ticket.id}`,actionLabel:'Відкрити звернення'})}).catch(()=>{});
   for(const admin of recipients) sendToEmail(`admin:${admin.email}`, { title:'Нове звернення в підтримку', body:`Тікет #${ticket.id}: ${ticket.subject}`, url:`/admin-ticket.html?id=${ticket.id}`, tag:`admin-ticket-${ticket.id}` }).catch(()=>{});
+}
+
+function notifyStaffAboutUserReply(ticket){
+  const recipients=adminAuth.listAdmins().filter(admin=>!admin.blocked&&(ticket.assignedTo?admin.email===ticket.assignedTo:admin.role==='super_admin'));
+  for(const admin of recipients){
+    sendToEmail(`admin:${admin.email}`,{title:'Нова відповідь користувача',body:`Звернення #${ticket.id}: ${ticket.subject}`,url:`/admin-ticket.html?id=${ticket.id}`,tag:`ticket-user-reply-${ticket.id}`}).catch(()=>{});
+    sendEmail({to:admin.email,subject:`Нова відповідь у зверненні #${ticket.id} — Signal`,html:emailTemplates.notification({title:'Користувач відповів у зверненні',message:`У зверненні #${ticket.id} «${ticket.subject}» є нове повідомлення від ${ticket.email}.`,actionUrl:`/admin-ticket.html?id=${ticket.id}`,actionLabel:'Переглянути відповідь'})}).catch(()=>{});
+  }
 }
 
 function securityFingerprint(req) {
@@ -698,6 +707,19 @@ app.post('/api/auth/admin-recovery/:token', rateLimit('complete_recovery',15*60*
   }
 });
 
+app.post('/api/maintenance-support',rateLimit('maintenance_support',60*60*1000,5,req=>req.ip),async(req,res)=>{
+  const maintenance=operationsStore.activeAnnouncements(null).find(item=>item.type==='maintenance'&&item.audience==='all');
+  if(!maintenance)return res.status(409).json({error:'Технічні роботи вже завершено. Увійдіть у застосунок і скористайтеся звичайною підтримкою.',code:'MAINTENANCE_INACTIVE'});
+  const email=String(req.body?.email||'').trim().toLowerCase(),subject=String(req.body?.subject||'Проблема під час технічних робіт').trim().slice(0,160),message=String(req.body?.message||'').trim().slice(0,5000);
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))return res.status(400).json({error:'Вкажіть правильний email.'});
+  if(message.length<10)return res.status(400).json({error:'Опишіть проблему щонайменше десятьма символами.'});
+  const ticket=ticketStore.createTicket({email,category:'Технічні роботи',subject,message,recoveryRequest:{contactEmail:email,source:'maintenance_support'}});
+  notifySuperAdminsAboutTicket(ticket);
+  sendEmail({to:email,subject:`Звернення #${ticket.id} отримано — Signal`,html:emailTemplates.notification({title:'Ми отримали ваше звернення',message:`Звернення під номером #${ticket.id} зареєстровано під час технічних робіт. Команда підтримки відповість на цей email.`,actionUrl:'/maintenance-support.html',actionLabel:'Перевірити стан сервісу'})}).catch(()=>{});
+  recordDiagnostic(req,{email,type:'support_flow',action:'maintenance_ticket_created',outcome:'success',severity:'info',message:'Maintenance support ticket created',context:{ticketId:ticket.id}});
+  res.status(201).json({ok:true,ticketId:ticket.id});
+});
+
 app.post('/api/support/tickets', requireUserSession,rateLimit('support_ticket',60*60*1000,10,req=>req.userEmail), async (req, res) => {
   try {
     const category = String(req.body?.category || 'Інше').trim().slice(0, 60);
@@ -709,6 +731,7 @@ app.post('/api/support/tickets', requireUserSession,rateLimit('support_ticket',6
     const safeAttachment=validateSupportAttachment(attachment);
     const ticket = ticketStore.createTicket({ email, category: category || 'Інше', subject, message, attachment:safeAttachment });
     notifySuperAdminsAboutTicket(ticket);
+    sendEmail({to:email,subject:`Звернення #${ticket.id} отримано — Signal`,html:emailTemplates.notification({title:'Ми отримали ваше звернення',message:`Звернення «${subject}» зареєстровано під номером #${ticket.id}. Відповідь з’явиться в застосунку та надійде на email.`,actionUrl:`/ticket.html?id=${ticket.id}`,actionLabel:'Переглянути звернення'})}).catch(()=>{});
     res.json(ticket);
   } catch (err) {
     res.status(err.code === 'INVALID_ATTACHMENT' ? 400 : 500).json({ error: err.code === 'INVALID_ATTACHMENT' ? err.message : 'Не вдалося створити звернення' });
@@ -741,6 +764,7 @@ app.post('/api/support/tickets/:id/reply', requireUserSession, (req, res) => {
   if (!message) return res.status(400).json({ error: 'Напиши повідомлення' });
   let safeAttachment;try{safeAttachment=validateSupportAttachment(attachment);}catch(error){return res.status(400).json({error:error.message,code:error.code});}
   const updated = ticketStore.addMessage(req.params.id, { from: 'user', text: message, attachment:safeAttachment });
+  notifyStaffAboutUserReply(updated);
   res.json(ticketStore.stripNotesForUser(updated));
 });
 
@@ -923,7 +947,7 @@ app.post('/api/admin/tickets/:id/create-recovery-link', adminAuth.requireAdmin, 
     const delivery = await sendEmail({
       to: deliveryEmail,
       subject: 'Безпечне відновлення доступу — Сигнал',
-      html: `<div style="font-family:Arial,sans-serif;max-width:520px;margin:auto"><h2>Відновлення доступу</h2><p>Підтримка Сигнал підтвердила запит на відновлення акаунта.</p><p><a href="${url}" style="display:inline-block;padding:12px 18px;background:#2563eb;color:#fff;text-decoration:none;border-radius:9px;font-weight:bold">Задати нові дані входу</a></p><p>Посилання одноразове та діє до ${new Date(result.expiresAt).toLocaleString('uk-UA')}.</p><p style="color:#666;font-size:12px">Якщо ви не подавали цей запит, не відкривайте посилання.</p></div>`,
+      html: emailTemplates.accessRecovery({url,expiresAt:result.expiresAt}),
     });
     if (delivery?.mocked) throw new Error('Лист не надіслано: RESEND_API_KEY не налаштований на сервері');
     ticketStore.updateTicket(ticket.id, { status: 'waiting_customer', verifiedAccountEmail: accountEmail, recoveryDeliveryEmail: deliveryEmail, recoveryLinkCreatedAt: new Date().toISOString(), recoveryLinkExpiresAt: result.expiresAt });
@@ -1094,7 +1118,7 @@ app.post('/api/admin/notify-bulk', adminAuth.requireAdmin, adminAuth.requireRole
   const users=Object.values(getAllUsers()).filter(user => (!status || user.status===status) && (!plan || user.plan===plan) && (!minUsage || (user.esim?.dataLimitGb && (user.esim.usedGb||0)/user.esim.dataLimitGb*100>=Number(minUsage))));
   if(users.length>200) return res.status(400).json({error:'Занадто багато отримувачів; звузьте фільтр до 200'});
   let delivered=0;
-  for(const user of users){ try { const localizedTitle=await translationService.forEmail(user.email,title||'Сигнал',getUser); const localizedMessage=await translationService.forEmail(user.email,String(message),getUser); if(channel==='push') delivered += await sendToEmail(user.email,{title:localizedTitle,body:localizedMessage,url:'/dashboard.html',tag:'bulk-message'}); else { await sendEmail({to:user.email,subject:localizedTitle,html:`<p>${localizedMessage.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])).replace(/\n/g,'<br>')}</p>`}); delivered++; } } catch(e){} }
+  for(const user of users){ try { const localizedTitle=await translationService.forEmail(user.email,title||'Signal',getUser); const localizedMessage=await translationService.forEmail(user.email,String(message),getUser); if(channel==='push') delivered += await sendToEmail(user.email,{title:localizedTitle,body:localizedMessage,url:'/dashboard.html',tag:'bulk-message'}); else { await sendEmail({to:user.email,subject:localizedTitle,html:emailTemplates.notification({title:localizedTitle,message:localizedMessage})}); delivered++; } } catch(e){} }
   auditStore.log({adminEmail:req.admin.email,action:'bulk_notification_sent',target:`${users.length} users`,details:{channel,status,plan,minUsage,delivered}}); res.json({ok:true,recipients:users.length,delivered});
 });
 
@@ -1493,7 +1517,7 @@ app.post('/api/admin/users/:email/notify', adminAuth.requireAdmin, adminAuth.req
       if (!delivered) return res.status(410).json({ error: 'Push-підписка користувача прострочена або браузер її відхилив. Користувачу потрібно перепідключити push у застосунку.' });
     }
     else if (channel === 'email') {
-      await sendEmail({ to: email, subject: localizedTitle, html: `<p>${localizedMessage.replace(/[&<>]/g, (char) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;' }[char])).replace(/\n/g, '<br>')}</p>` });
+      await sendEmail({ to: email, subject: localizedTitle, html: emailTemplates.notification({title:localizedTitle,message:localizedMessage}) });
       delivered = 1;
     } else return res.status(400).json({ error: 'Оберіть push або email' });
     auditStore.log({ adminEmail: req.admin.email, action: 'user_notification_sent', target: email, details: { channel, delivered } });
@@ -1617,7 +1641,7 @@ app.post('/api/admin/users/:email/resend-esim-instructions', adminAuth.requireAd
   const esim = getUser(email)?.esim;
   if (!esim?.activationCode) return res.status(404).json({ error: 'Код активації eSIM не знайдено' });
   try {
-    await sendEmail({ to: email, subject: 'Інструкція встановлення eSIM', html: `<p>Відкрий застосунок Сигнал → Профіль → Керування eSIM.</p><p>Код активації: <strong>${esim.activationCode}</strong></p><p>Не передавай цей код іншим людям.</p>` });
+    await sendEmail({ to: email, subject: 'Інструкція встановлення eSIM — Signal', html: emailTemplates.esimInstructions({activationCode:esim.activationCode}) });
     auditStore.log({ adminEmail: req.admin.email, action: 'esim_instructions_resent', target: email });
     res.json({ ok: true });
   } catch (error) { res.status(502).json({ error: error.message }); }
