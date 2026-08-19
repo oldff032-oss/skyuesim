@@ -3,7 +3,7 @@
 // Кешує тільки статичну "оболонку" — самі дані (підписка, тікети) завжди
 // тягнуться наживо з бекенду, ніколи не кешуються.
 
-const CACHE_NAME = 'signal-shell-v21-logo-maintenance';
+const CACHE_NAME = 'signal-shell-v31-maintenance-support';
 const SHELL_FILES = [
   '/index.html',
   '/style.css',
