@@ -69,6 +69,8 @@ test('language selection is explicit, persistent, and synchronized', () => {
   assert.match(i18n, /signalSetLanguage/);
   assert.match(i18n, /api\/account\/preferences/);
   assert.match(i18n, /localStorage\.setItem\('signal_language'/);
+  assert.match(i18n, /savedLocally:\s*true/);
+  assert.match(i18n, /catch \{ synced = false; \}/);
 });
 
 test('all customer pages load localization support', () => {
@@ -162,10 +164,12 @@ test('maintenance support works without account unlock and remains rate limited'
   assert.doesNotMatch(page, /pwa\.js/);
 });
 
-test('service worker bypasses stale cache for critical maintenance assets', () => {
+test('service worker bypasses stale cache for maintenance and localization assets', () => {
   const worker=read('sw.js');
   const support=read('support.html');
-  assert.match(worker, /signal-shell-v32-hard-maintenance/);
+  assert.match(worker, /signal-shell-v33-complete-i18n/);
   assert.match(worker, /fetch\(event\.request, \{ cache:'no-store' \}\)/);
+  assert.match(worker, /'\/i18n\.js'/);
+  assert.match(worker, /'\/style\.css'/);
   assert.match(support, /maintenance-support\.html/);
 });

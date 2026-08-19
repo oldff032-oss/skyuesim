@@ -72,6 +72,9 @@
       const value = language === 'en' ? element.dataset.i18nEn : element.dataset.i18nUk;
       if (value !== undefined) element.textContent = value;
     });
+    root.querySelectorAll?.('[data-i18n-placeholder-uk]').forEach((element) => {
+      element.placeholder = language === 'en' ? element.dataset.i18nPlaceholderEn : element.dataset.i18nPlaceholderUk;
+    });
   };
   const start = () => {
     apply(document.body);
@@ -89,15 +92,19 @@
     if (!supportedLanguages.includes(nextLanguage)) throw new Error('Unsupported language');
     localStorage.setItem('signal_language', nextLanguage);
     const token = localStorage.getItem('signal_session_token');
+    let synced = false;
     if (token && options.sync !== false && typeof API_URL !== 'undefined') {
-      const response = await fetch(`${API_URL}/api/account/preferences`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', 'x-session-token': token },
-        body: JSON.stringify({ language: nextLanguage })
-      });
-      if (!response.ok) throw new Error('LANGUAGE_SAVE_FAILED');
+      try {
+        const response = await fetch(`${API_URL}/api/account/preferences`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', 'x-session-token': token },
+          body: JSON.stringify({ language: nextLanguage })
+        });
+        synced = response.ok;
+      } catch { synced = false; }
     }
     if (options.reload !== false) location.reload();
+    return { language: nextLanguage, savedLocally: true, synced };
   };
   window.signalSyncLanguage = async () => {
     const token = localStorage.getItem('signal_session_token');

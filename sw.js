@@ -3,7 +3,7 @@
 // Кешує тільки статичну "оболонку" — самі дані (підписка, тікети) завжди
 // тягнуться наживо з бекенду, ніколи не кешуються.
 
-const CACHE_NAME = 'signal-shell-v32-hard-maintenance';
+const CACHE_NAME = 'signal-shell-v33-complete-i18n';
 const SHELL_FILES = [
   '/index.html',
   '/style.css',
@@ -40,7 +40,7 @@ self.addEventListener('fetch', (event) => {
   // HTML and critical scripts are network-first so a newly deployed auth,
   // push or payment fix is not hidden behind an old PWA cache.
   const url = new URL(event.request.url);
-  const critical = event.request.mode === 'navigate' || ['/pwa.js','/config.js','/sw.js'].includes(url.pathname);
+  const critical = event.request.mode === 'navigate' || ['/pwa.js','/config.js','/sw.js','/i18n.js','/style.css'].includes(url.pathname);
   if (critical) {
     event.respondWith(fetch(event.request, { cache:'no-store' }).then(response => {
       const copy = response.clone();

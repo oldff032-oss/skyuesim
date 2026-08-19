@@ -36,8 +36,8 @@
   async function chooseLanguage(language){
     const status=document.getElementById('saveStatus');
     status.textContent=language==='en'?'Saving language…':'Зберігаємо мову…';
-    try{await window.signalSetLanguage(language,{reload:false});markSelected();status.textContent=language==='en'?'Language saved':'Мову збережено';setTimeout(()=>location.reload(),350);}
-    catch{status.textContent=language==='en'?'Could not save. Check your connection.':'Не вдалося зберегти. Перевір з’єднання.';}
+    try{const result=await window.signalSetLanguage(language,{reload:false});markSelected();status.textContent=language==='en'?(result.synced?'Language saved':'Language saved on this device'):(result.synced?'Мову збережено':'Мову збережено на цьому пристрої');setTimeout(()=>location.reload(),250);}
+    catch{localStorage.setItem('signal_language',language);location.reload();}
   }
   window.addEventListener('load',markSelected);
 </script>
