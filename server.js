@@ -383,6 +383,15 @@ app.put('/api/account/preferences', requireUserSession, (req, res) => {
   res.json({ ok: true, trafficAlertThresholds: trafficAlertThresholds || user?.preferences?.trafficAlertThresholds || [50,80,95], language: language || user?.language || 'uk' });
 });
 
+app.post('/api/translations/batch', requireUserSession, rateLimit('ui_translation',60*1000,20,req=>req.userEmail), async (req,res) => {
+  const language = getUser(req.userEmail)?.language || 'uk';
+  if (language !== 'en') return res.json({ translations: {}, enabled:false });
+  const texts = Array.isArray(req.body?.texts) ? [...new Set(req.body.texts.map(value=>String(value||'').trim()).filter(value=>value && value.length<=300))].slice(0,40) : [];
+  if (!texts.length) return res.json({ translations:{}, enabled:translationService.enabled() });
+  const pairs = await Promise.all(texts.map(async source=>[source,await translationService.translate(source,'en')]));
+  res.json({ translations:Object.fromEntries(pairs.filter(([source,target])=>target && target!==source)), enabled:translationService.enabled() });
+});
+
 app.get('/api/account/usage-history', requireUserSession, (req, res) => {
   res.json({ history: getUser(req.userEmail)?.esim?.usageHistory || [] });
 });
