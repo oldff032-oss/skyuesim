@@ -211,18 +211,24 @@ function securityFingerprint(req) {
 }
 function notifySuperAdminsSecurity(event,count) {
   const state=operationsStore.store();
-  if(state.lastSecurityNotificationAt&&Date.now()-new Date(state.lastSecurityNotificationAt).getTime()<15*60*1000)return;
-  state.lastSecurityNotificationAt=new Date().toISOString();operationsStore.save();
+  const notificationKey=`${event.surface}:${event.fingerprint}`;
+  state.securityNotificationAtByKey||={};
+  const previous=state.securityNotificationAtByKey[notificationKey];
+  if(previous&&Date.now()-new Date(previous).getTime()<10*60*1000)return;
+  state.securityNotificationAtByKey[notificationKey]=new Date().toISOString();
+  state.securityNotificationAtByKey=Object.fromEntries(Object.entries(state.securityNotificationAtByKey).filter(([,value])=>Date.now()-new Date(value).getTime()<24*60*60*1000));
+  operationsStore.save();
   const recipients=adminAuth.listAdmins().filter(admin=>!admin.blocked&&admin.role==='super_admin');
   for(const admin of recipients){
-    sendToEmail(`admin:${admin.email}`,{title:'🚨 Підозріла активність у Signal',body:`Зафіксовано ${count} невдалих спроб: ${event.surface}. Відкрийте «Захист системи».`,url:'/admin-security-incident.html',tag:'security-incident'}).catch(()=>{});
-    sendEmail({to:admin.email,subject:'🚨 Підозріла активність — Signal Admin',html:emailTemplates.adminSecurityAlert({title:'Виявлено підозрілу активність',message:`За 15 хвилин зафіксовано ${count} невдалих спроб у зоні «${event.surface}». Анонімний відбиток джерела: ${event.fingerprint}. Перевірте розділ «Захист системи» та за потреби ввімкніть повноекранне попередження.`})}).catch(()=>{});
+    sendToEmail(`admin:${admin.email}`,{title:'🚨 Підозріла спроба входу',body:`${event.surface}: ${event.code}. Спроб за 15 хв: ${count}.`,url:'/admin-security-incident.html',tag:`security-${event.surface}-${event.fingerprint}`}).catch(()=>{});
+    sendEmail({to:admin.email,subject:`🚨 Підозріла спроба входу — ${event.surface}`,html:emailTemplates.adminSecurityAlert({title:'Виявлено підозрілу активність',message:`Час: ${new Date(event.createdAt).toLocaleString('uk-UA')}\nЗона: ${event.surface}\nПодія: ${event.code}\nСпроб за 15 хвилин: ${count}${event.email?`\nВказаний акаунт: ${event.email}`:''}\nАнонімний відбиток джерела: ${event.fingerprint}\n\nПеревірте розділ «Захист системи». Паролі, PIN, токени та повна IP-адреса в лист не додаються.`})}).catch(error=>console.error('[security email]',error.message));
   }
 }
 function recordSecurityFailure(req,surface,code,email='') {
   const fingerprint=securityFingerprint(req),now=Date.now(),key=`${surface}:${fingerprint}`;
   const attempts=(securityAttemptTracker.get(key)||[]).filter(time=>now-time<15*60*1000);attempts.push(now);securityAttemptTracker.set(key,attempts);
-  const alertThreshold=['admin_emergency_recovery','backup_restore'].includes(surface)?1:5;
+  const immediateSurfaces=['admin_login','admin_2fa','admin_emergency_recovery','backup_restore'];
+  const alertThreshold=surface.startsWith('rate_limit_')||immediateSurfaces.includes(surface)?1:3;
   const event={id:`sec_${now.toString(36)}_${crypto.randomBytes(3).toString('hex')}`,createdAt:new Date(now).toISOString(),surface:String(surface).slice(0,80),code:String(code||'FAILED').slice(0,80),email:String(email||'').trim().toLowerCase().slice(0,254)||null,fingerprint,count15m:attempts.length,severity:attempts.length>=alertThreshold?'critical':attempts.length>=3?'warning':'info'};
   const state=operationsStore.store();(state.securityEvents||=[]).unshift(event);state.securityEvents=state.securityEvents.slice(0,500);operationsStore.save();
   if(attempts.length===alertThreshold)notifySuperAdminsSecurity(event,attempts.length);
@@ -388,8 +394,8 @@ app.post('/api/translations/batch', requireUserSession, rateLimit('ui_translatio
   if (language !== 'en') return res.json({ translations: {}, enabled:false });
   const texts = Array.isArray(req.body?.texts) ? [...new Set(req.body.texts.map(value=>String(value||'').trim()).filter(value=>value && value.length<=300))].slice(0,40) : [];
   if (!texts.length) return res.json({ translations:{}, enabled:translationService.enabled() });
-  const pairs = await Promise.all(texts.map(async source=>[source,await translationService.translate(source,'en')]));
-  res.json({ translations:Object.fromEntries(pairs.filter(([source,target])=>target && target!==source)), enabled:translationService.enabled() });
+  const translated = await translationService.translateBatch(texts,'en');
+  res.json({ translations:Object.fromEntries(Object.entries(translated).filter(([source,target])=>target && target!==source)), enabled:translationService.enabled() });
 });
 
 app.get('/api/account/usage-history', requireUserSession, (req, res) => {
