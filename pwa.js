@@ -35,6 +35,21 @@ if (window.location.pathname.endsWith('/app-tools.html')) {
 // auth headers, PINs, tokens, QR data or full URLs/query strings.
 const signalOriginalFetch = window.fetch.bind(window);
 let signalDiagnosticCount = 0;
+const SIGNAL_FRONTEND_VERSION='1.0.0',SIGNAL_SW_VERSION='v39',SIGNAL_CACHE_VERSION='signal-shell-v39-control-center';
+window.addEventListener('load',async()=>{
+  if(typeof API_URL==='undefined')return;
+  const token=localStorage.getItem('signal_session_token');
+  try{
+    const versionResponse=await signalOriginalFetch(`${API_URL}/api/app-version`,{cache:'no-store'}),version=await versionResponse.json();
+    const refreshKey='signal_critical_refresh_token';
+    if(version.criticalRefreshToken&&localStorage.getItem(refreshKey)!==version.criticalRefreshToken){
+      localStorage.setItem(refreshKey,version.criticalRefreshToken);
+      const registration=await navigator.serviceWorker?.ready;registration?.active?.postMessage({type:'REFRESH_CRITICAL',assets:version.criticalAssets||[]});
+      await registration?.update?.();setTimeout(()=>location.reload(),500);
+    }
+    if(token)signalOriginalFetch(`${API_URL}/api/account/client-version`,{method:'POST',headers:{'Content-Type':'application/json','x-session-token':token},body:JSON.stringify({frontend:SIGNAL_FRONTEND_VERSION,serviceWorker:SIGNAL_SW_VERSION,cache:SIGNAL_CACHE_VERSION,platform:navigator.standalone?'ios-pwa':matchMedia('(display-mode: standalone)').matches?'pwa':'web'})}).catch(()=>{});
+  }catch{}
+});
 function signalReportDiagnostic(type, severity, message, context = {}) {
   const token = localStorage.getItem('signal_session_token');
   if (!token || typeof API_URL === 'undefined' || signalDiagnosticCount >= 100) return;

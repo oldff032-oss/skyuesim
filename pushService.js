@@ -3,7 +3,7 @@ const pushStore = require('./pushStore');
 const operationsStore = require('./operationsStore');
 
 function isConfigured() {
-  return Boolean(process.env.VAPID_SUBJECT && process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY);
+  return operationsStore.store().featureFlags?.push !== false && Boolean(process.env.VAPID_SUBJECT && process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY);
 }
 
 function configure() {

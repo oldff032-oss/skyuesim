@@ -6,8 +6,10 @@ const defaults = () => ({
     registration:true, monthlyPlans:true, travelPackages:true, referrals:true,
     autoRenew:true, push:true, deepl:true, photoUploads:true, cardPayments:true,
   },
+  featureRules: { disabledCountries:[], disabledPackages:[], paymentMethods:{stripeCard:true} },
   providerBalance: { amount:null, currency:'USD', averageOrderCost:null, updatedAt:null, source:'not_configured' },
-  versionInfo: { frontend:'1.0.0', backend:'1.0.0', serviceWorker:'v37', deployedAt:null, changelog:[] },
+  versionInfo: { frontend:'1.0.0', backend:'1.0.0', serviceWorker:'v39', cache:'signal-shell-v39-control-center', deployedAt:null, changelog:[],criticalRefreshToken:null,criticalAssets:['/i18n.js','/style.css','/pwa.js','/sw.js'] },
+  clientVersions: {},
   dailyReports: [], reportSettings: { enabled:true, hour:8, lastSentDate:null },
 });
 let store = defaults();
@@ -16,6 +18,7 @@ async function bootstrap(){
   store = {...defaults(), ...loaded};
   store.blacklist = {...defaults().blacklist, ...(loaded.blacklist||{})};
   store.featureFlags = {...defaults().featureFlags, ...(loaded.featureFlags||{})};
+  store.featureRules = {...defaults().featureRules, ...(loaded.featureRules||{}),paymentMethods:{...defaults().featureRules.paymentMethods,...(loaded.featureRules?.paymentMethods||{})}};
   store.providerBalance = {...defaults().providerBalance, ...(loaded.providerBalance||{})};
   store.versionInfo = {...defaults().versionInfo, ...(loaded.versionInfo||{})};
   store.reportSettings = {...defaults().reportSettings, ...(loaded.reportSettings||{})};

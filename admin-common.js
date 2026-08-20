@@ -8,6 +8,7 @@ function requireAdminAuth(){
   const links=[
     ['admin-dashboard.html','📊 Dashboard'],
     ['admin-control-center.html','🎛️ Центр керування'],
+    ['admin-versions.html','🔄 Версії та оновлення'],
     ['admin-tickets.html','🎫 Підтримка'],
     ['admin-users.html','👥 Користувачі'],
     ['admin-purchases.html','🧾 Покупки'],
