@@ -5,6 +5,7 @@ const storage = require('./persistentState');
 let cache = {};
 let cooldownUntil = 0;
 let lastRateLimitLogAt = 0;
+let health = { requests:0, translated:0, failures:0, rateLimits:0, lastError:null, lastErrorAt:null, lastSuccessAt:null };
 
 async function bootstrap() {
   cache = await storage.load('translations.json', {});
@@ -28,6 +29,7 @@ async function translateBatch(texts, targetLanguage) {
   if (!sources.length || targetLanguage !== 'en' || !enabled() || Date.now() < cooldownUntil) return output;
   const missing = sources.filter(source=>!cache[`en:${source}`]);
   if (!missing.length) return output;
+  health.requests += 1;
 
   const endpoint = process.env.DEEPL_API_URL || 'https://api-free.deepl.com/v2/translate';
   try {
@@ -42,6 +44,7 @@ async function translateBatch(texts, targetLanguage) {
       body,
     });
     if (response.status === 429) {
+      health.rateLimits += 1; health.lastError='DeepL HTTP 429'; health.lastErrorAt=new Date().toISOString();
       cooldownUntil = Date.now() + 2 * 60 * 1000;
       if (Date.now() - lastRateLimitLogAt > 60 * 1000) { console.warn('[translation] DeepL rate limit reached; pausing for 2 minutes'); lastRateLimitLogAt=Date.now(); }
       return output;
@@ -49,16 +52,22 @@ async function translateBatch(texts, targetLanguage) {
     if (!response.ok) throw new Error(`DeepL HTTP ${response.status}`);
     const result = await response.json();
     missing.forEach((source,index)=>{const translated=result?.translations?.[index]?.text;if(translated){cache[`en:${source}`]=translated;output[source]=translated;}});
+    health.translated += missing.filter(source=>output[source]!==source).length; health.lastSuccessAt=new Date().toISOString();
     Promise.resolve(storage.save('translations.json', cache)).catch(()=>{});
     return output;
   } catch (error) {
+    health.failures += 1; health.lastError=error.message; health.lastErrorAt=new Date().toISOString();
     console.error('[translation] DeepL:', error.message);
     return output;
   }
 }
 
+function status(){return {...health,enabled:enabled(),cacheSize:Object.keys(cache).length,cooldownUntil:cooldownUntil?new Date(cooldownUntil).toISOString():null};}
+function clearCache(){const removed=Object.keys(cache).length;cache={};storage.save('translations.json',cache);return removed;}
+function setManual(source,translated){const key=String(source||'').trim(),value=String(translated||'').trim();if(!key||!value)throw new Error('Вкажіть оригінал і переклад');cache[`en:${key}`]=value;storage.save('translations.json',cache);return {source:key,translated:value};}
+
 async function forEmail(email, text, getUser) {
   return translate(text, getUser(email)?.language || 'uk');
 }
 
-module.exports = { bootstrap, enabled, translate, translateBatch, forEmail };
+module.exports = { bootstrap, enabled, translate, translateBatch, forEmail, status, clearCache, setManual };

@@ -100,7 +100,7 @@
           ${subscription.status === 'blocked' ? 'Розблокувати' : 'Заблокувати'}
         </button>`;
 
-        const detailsButton = `<button class="btn ghost" style="padding:7px 10px;font-size:12px;" onclick="showUserDetails('${encodedEmail}')">Деталі</button>`;
+        const detailsButton = `<button class="btn ghost" style="padding:7px 10px;font-size:12px;" onclick="showUserDetails('${encodedEmail}')">Деталі</button> <a class="btn ghost" style="padding:7px 10px;font-size:12px;" href="admin-user-timeline.html?email=${encodedEmail}">Хронологія</a>`;
 
         const usage = subscription.esim
           ? `${subscription.esim.usedGb ?? 0} / ${subscription.esim.dataLimitGb ?? '∞'} ГБ`

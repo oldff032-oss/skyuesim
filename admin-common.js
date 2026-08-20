@@ -7,6 +7,7 @@ function requireAdminAuth(){
   if(!nav)return;
   const links=[
     ['admin-dashboard.html','📊 Dashboard'],
+    ['admin-control-center.html','🎛️ Центр керування'],
     ['admin-tickets.html','🎫 Підтримка'],
     ['admin-users.html','👥 Користувачі'],
     ['admin-purchases.html','🧾 Покупки'],

@@ -28,6 +28,7 @@ const { isConfigured: isPushConfigured, sendToEmail } = require('./pushService')
 const { sendEmail, getReceivedEmail, verifyInboundSignature, isEmailConfigured } = require('./emailService');
 const emailTemplates = require('./emailTemplates');
 const backupService = require('./backupService');
+const controlCenter = require('./controlCenterService');
 
 const app = express();
 const esimRetriesInProgress = new Set();
@@ -70,6 +71,9 @@ function validateSupportAttachment(attachment){if(!attachment)return null;const 
 function recordDiagnostic(req,event={}) {
   return diagnosticsStore.add({ source:'server', requestId:req?.requestId||null, page:req?.path||'', ...event });
 }
+function featureEnabled(name){return operationsStore.store().featureFlags?.[name]!==false;}
+function requireFeature(name,message){return(req,res,next)=>featureEnabled(name)?next():res.status(503).json({error:message||'Функція тимчасово вимкнена адміністратором',code:'FEATURE_DISABLED',feature:name});}
+function requireProviderCapacity(req,res,next){const b=operationsStore.store().providerBalance||{};const orders=b.amount!=null&&Number(b.averageOrderCost)>0?Math.floor(Number(b.amount)/Number(b.averageOrderCost)):null;return orders!=null&&orders<3?res.status(503).json({error:'Продажі тимчасово призупинено через критичний баланс eSIM-провайдера',code:'PROVIDER_BALANCE_CRITICAL'}):next();}
 
 function packageVolumeGb(item) {
   const raw = Number(item?.volume ?? item?.dataVolume);
@@ -123,6 +127,7 @@ async function getTravelPackages(force = false) {
 async function executePaidPlanChange({email,purchaseId,packageCode,packageName,dataLimitGb,durationDays,location,previousPlan,previousSubscriptionId,requestId=null}) {
   if(planChangesInProgress.has(purchaseId)) return {ok:false,inProgress:true};
   planChangesInProgress.add(purchaseId);
+  const trackedJob=operationsStore.addJob({type:'plan_change',status:'running',email,purchaseId,payload:{packageCode,packageName},maxAttempts:3});
   const diagnostic=event=>diagnosticsStore.add({email,source:'server',type:'plan_change',purchaseId,requestId,...event});
   const before=getUser(email);
   try {
@@ -140,13 +145,13 @@ async function executePaidPlanChange({email,purchaseId,packageCode,packageName,d
     upsertPurchase(email,purchaseId,{fulfillmentStatus:'provisioned',planChangeStatus:cancellationError?'completed_with_warning':'completed',fulfilledAt:new Date().toISOString(),fulfillmentError:null,esimOrderNo:esim.orderNo||null,iccid:esim.iccid||null,esimTranNo:esim.esimTranNo||null,previousPlan:previousPlan||before?.plan||null,previousSubscriptionId:previousSubscriptionId||null,cancellationError});
     diagnostic({source:'esim_access',action:'plan_change_completed',outcome:'success',severity:cancellationError?'warning':'info',message:cancellationError?'New eSIM activated; previous subscription needs admin attention':'Plan change completed successfully',context:{packageCode,packageName,dataLimitGb,durationDays,location,cancellationWarning:Boolean(cancellationError)}});
     sendToEmail(email,{title:'Тариф успішно змінено',body:`Новий пакет ${packageName||'eSIM'} активовано. QR-код доступний на головному екрані 5 хвилин.`,url:'/dashboard.html',tag:`plan-change-${String(purchaseId).slice(-10)}`}).catch(()=>{});
-    return {ok:true,esim,cancellationError};
+    operationsStore.updateJob(trackedJob.id,{status:'succeeded',completedAt:new Date().toISOString()});return {ok:true,esim,cancellationError};
   } catch(error) {
     const failedPending=before?.pendingPlanChange?.purchaseId===purchaseId?{...before.pendingPlanChange,status:'failed',scheduledFor:null,failedAt:new Date().toISOString(),error:error.message}:before?.pendingPlanChange||null;
     saveUser(email,{pendingPlanChange:failedPending,lastPlanChangeError:error.message,lastPlanChangeFailedAt:new Date().toISOString()});
     upsertPurchase(email,purchaseId,{fulfillmentStatus:'failed',planChangeStatus:'failed',failedAt:new Date().toISOString(),fulfillmentError:error.message,fulfillmentErrorCode:error.code||null});
     diagnostic({source:'esim_access',action:'plan_change_failed',outcome:'failed',severity:'error',message:'Paid plan change failed while provisioning new eSIM',errorCode:error.code||'PLAN_CHANGE_PROVISION_FAILED',context:{packageCode,providerStatus:error.status||null}});
-    return {ok:false,error};
+    const nonRetryable=/balance is insufficient|invalid package|doesn.t exist/i.test(String(error.message||''));operationsStore.updateJob(trackedJob.id,{status:'failed',error:error.message,retryable:!nonRetryable,completedAt:new Date().toISOString()});return {ok:false,error};
   } finally { planChangesInProgress.delete(purchaseId); }
 }
 
@@ -156,8 +161,9 @@ async function processDuePlanChanges() {
 }
 
 async function deliverPurchaseReceipt(email, purchaseId, defaults = {}, suppliedReceiptUrl = null) {
+  const trackedJob=operationsStore.addJob({type:'receipt_email',status:'running',email,purchaseId,maxAttempts:3});
   const stored = (getUser(email)?.purchases || []).find(item => item.id === purchaseId);
-  if (stored?.receiptEmailSentAt) return { duplicate:true, receiptUrl:stored.receiptUrl || suppliedReceiptUrl || null };
+  if (stored?.receiptEmailSentAt){operationsStore.updateJob(trackedJob.id,{status:'succeeded',completedAt:new Date().toISOString(),duplicate:true});return { duplicate:true, receiptUrl:stored.receiptUrl || suppliedReceiptUrl || null };}
   let receiptUrl = suppliedReceiptUrl || stored?.receiptUrl || null;
   try {
     if (!receiptUrl && String(purchaseId).startsWith('cs_')) {
@@ -172,11 +178,11 @@ async function deliverPurchaseReceipt(email, purchaseId, defaults = {}, supplied
     });
     if (delivery?.mocked) throw new Error('RESEND_API_KEY не налаштовано');
     upsertPurchase(email, purchaseId, {receiptUrl,receiptEmailSentAt:new Date().toISOString(),receiptEmailError:null}, defaults);
-    return {sent:true,receiptUrl};
+    operationsStore.updateJob(trackedJob.id,{status:'succeeded',completedAt:new Date().toISOString()});return {sent:true,receiptUrl};
   } catch (error) {
     upsertPurchase(email, purchaseId, {receiptUrl,receiptEmailError:error.message,receiptEmailLastAttemptAt:new Date().toISOString()}, defaults);
     console.error(`[purchase receipt] ${email} ${purchaseId}:`, error.message);
-    return {sent:false,receiptUrl,error:error.message};
+    operationsStore.updateJob(trackedJob.id,{status:'failed',error:error.message,completedAt:new Date().toISOString()});return {sent:false,receiptUrl,error:error.message};
   }
 }
 
@@ -247,7 +253,7 @@ app.use(express.json({ limit: '1mb' }));
 // АВТЕНТИФІКАЦІЯ: email -> код -> пароль -> акаунт, і логін
 // =========================================================
 
-app.post('/api/auth/request-code',rateLimit('request_code',15*60*1000,10,req=>req.body?.email), async (req, res) => {
+app.post('/api/auth/request-code',requireFeature('registration','Реєстрацію тимчасово призупинено'),rateLimit('request_code',15*60*1000,10,req=>req.body?.email), async (req, res) => {
   try {
     const { email } = req.body;
     if (!email || !email.includes('@')) return res.status(400).json({ error: 'Введи коректний email' });
@@ -402,7 +408,7 @@ app.get('/api/account/usage-history', requireUserSession, (req, res) => {
   res.json({ history: getUser(req.userEmail)?.esim?.usageHistory || [] });
 });
 
-app.get('/api/account/referral', requireUserSession, (req, res) => {
+app.get('/api/account/referral', requireUserSession, requireFeature('referrals','Реферальна програма тимчасово призупинена'), (req, res) => {
   const user = getUser(req.userEmail);
   if (!user) return res.status(404).json({ error: 'Користувача не знайдено' });
   const referralCode = user.referralCode || crypto.randomBytes(4).toString('hex').toUpperCase();
@@ -420,8 +426,11 @@ app.post('/api/account/feedback', requireUserSession, (req, res) => {
   const message = String(req.body?.message || '').trim();
   if (!Number.isInteger(rating) || rating < 1 || rating > 5 || message.length > 1000) return res.status(400).json({ error: 'Некоректний відгук' });
   const operations = operationsStore.store();
-  (operations.feedback ||= []).unshift({ id: Date.now().toString(36), email: req.userEmail, rating, message, createdAt: new Date().toISOString() });
+  const tags=(Array.isArray(req.body?.tags)?req.body.tags:[]).filter(tag=>['design','esim','payment','speed','translation','support'].includes(tag)).slice(0,6);
+  const item={ id: Date.now().toString(36), email: req.userEmail, rating, message, tags, status:'new', assignedTo:null, createdAt: new Date().toISOString() };
+  (operations.feedback ||= []).unshift(item);
   operationsStore.save();
+  if(rating<=2)for(const admin of adminAuth.listAdmins().filter(a=>a.role==='super_admin'&&!a.blocked))sendEmail({to:admin.email,subject:`Низька оцінка ${rating}/5 — Signal`,html:emailTemplates.notification({title:'Користувач залишив низьку оцінку',message:`${req.userEmail}: ${message||'без коментаря'}`,actionUrl:'/admin-feedback.html',actionLabel:'Переглянути відгук'})}).catch(()=>{});
   res.json({ ok: true });
 });
 
@@ -433,15 +442,16 @@ app.get('/api/admin/feedback', adminAuth.requireAdmin, (req,res) => {
   });
   const all=operationsStore.store().feedback||[];
   const average=all.length?all.reduce((sum,item)=>sum+Number(item.rating||0),0)/all.length:0;
-  res.json({items,summary:{total:all.length,average:Number(average.toFixed(2)),distribution:Object.fromEntries([1,2,3,4,5].map(rating=>[rating,all.filter(item=>item.rating===rating).length]))}});
+  res.json({items,summary:{total:all.length,average:Number(average.toFixed(2)),distribution:Object.fromEntries([1,2,3,4,5].map(rating=>[rating,all.filter(item=>item.rating===rating).length])),byStatus:Object.fromEntries(['new','reviewed','planned','done'].map(status=>[status,all.filter(item=>(item.status||'new')===status).length])),byTag:Object.fromEntries(['design','esim','payment','speed','translation','support'].map(tag=>[tag,all.filter(item=>(item.tags||[]).includes(tag)).length]))}});
 });
+app.patch('/api/admin/feedback/:id',adminAuth.requireAdmin,adminAuth.requirePermission('operations.manage'),(req,res)=>{const item=(operationsStore.store().feedback||[]).find(x=>x.id===req.params.id);if(!item)return res.status(404).json({error:'Відгук не знайдено'});if(req.body?.status&&['new','reviewed','planned','done'].includes(req.body.status))item.status=req.body.status;if(req.body?.assignedTo!==undefined)item.assignedTo=String(req.body.assignedTo||'').slice(0,254)||null;if(req.body?.createTask){item.task={id:`feedback_${item.id}`,title:String(req.body.taskTitle||item.message||'Опрацювати відгук').slice(0,200),status:'open',createdAt:new Date().toISOString(),createdBy:req.admin.email};}item.updatedAt=new Date().toISOString();operationsStore.save();auditStore.log({adminEmail:req.admin.email,action:'feedback_updated',target:item.id,details:{status:item.status,assignedTo:item.assignedTo,task:Boolean(item.task)}});res.json(item);});
 
 app.get('/api/service-status', (req, res) => {
   const maintenance = operationsStore.activeAnnouncements(null).find((item) => item.type === 'maintenance');
   res.json({ status: maintenance ? 'maintenance' : 'operational', message: maintenance?.message || null, checkedAt: new Date().toISOString() });
 });
 
-app.get('/api/travel-packages', requireUserSession, rateLimit('travel_catalog',60*1000,30,req=>req.userEmail), async (req,res) => {
+app.get('/api/travel-packages', requireUserSession, requireFeature('travelPackages','Пакети для подорожей тимчасово недоступні'), rateLimit('travel_catalog',60*1000,30,req=>req.userEmail), async (req,res) => {
   const started=Date.now();
   try {
     const query=String(req.query.q||'').trim().toLowerCase().slice(0,80);
@@ -472,7 +482,7 @@ app.get('/api/travel-packages', requireUserSession, rateLimit('travel_catalog',6
   }
 });
 
-app.post('/api/travel-packages/checkout', requireUserSession, rateLimit('travel_checkout',60*60*1000,10,req=>req.userEmail), async (req,res) => {
+app.post('/api/travel-packages/checkout', requireUserSession, requireFeature('travelPackages'), requireFeature('cardPayments','Оплати тимчасово призупинено'), requireProviderCapacity, rateLimit('travel_checkout',60*60*1000,10,req=>req.userEmail), async (req,res) => {
   const started=Date.now();
   try {
     const currentUser=getUser(req.userEmail);
@@ -986,7 +996,7 @@ app.post('/api/admin/tickets/:id/create-recovery-link', adminAuth.requireAdmin, 
 
 // Зміна статусу/пріоритету — заборонено для Viewer
 app.patch('/api/admin/tickets/:id', adminAuth.requireAdmin, adminAuth.requireRole('super_admin', 'admin', 'support'), async (req, res) => {
-  const { status, priority, assignedTo } = req.body;
+  const { status, priority, assignedTo, category, tags } = req.body;
   const ticket = ticketStore.getTicket(req.params.id);
   if (!ticket) return res.status(404).json({ error:'Тікет не знайдено' });
   if (req.admin.role === 'admin' && ticket.assignedTo !== req.admin.email) return res.status(403).json({ error:'Це звернення не призначене вам' });
@@ -1008,6 +1018,10 @@ app.patch('/api/admin/tickets/:id', adminAuth.requireAdmin, adminAuth.requireRol
     ...(status && { status }),
     ...(priority && { priority }),
     ...(assignedTo !== undefined && { assignedTo: assignedTo || null }),
+    ...(category && {category:String(category).slice(0,80)}),
+    ...(Array.isArray(tags) && {tags:tags.map(tag=>String(tag).trim().slice(0,40)).filter(Boolean).slice(0,10)}),
+    ...(status==='waiting_provider' && {waitingProviderAt:new Date().toISOString()}),
+    ...(status==='resolved' && {resolvedAt:new Date().toISOString()}),
     ...(assignmentEvent && { assignmentHistory:[...(ticket.assignmentHistory || []), assignmentEvent] }),
   });
   if (!updated) return res.status(404).json({ error: 'Тікет не знайдено' });
@@ -1095,6 +1109,40 @@ app.get('/api/admin/dashboard', adminAuth.requireAdmin, (req, res) => {
     recentTickets: tickets.slice(0, 5),
   });
 });
+
+function controlContext(){
+  const users=Object.values(getAllUsers()),tickets=ticketStore.getAllTickets(),diagnostics=diagnosticsStore.list({limit:1000}),operations=operationsStore.store(),audit=auditStore.getAll({limit:1000});
+  const support=controlCenter.supportMetrics(tickets),attention=controlCenter.buildAttention({users,tickets,diagnostics,operations});
+  return {users,tickets,diagnostics,operations,audit,support,attention};
+}
+async function runDailySuperAdminReport(){
+  const c=controlContext(),settings=c.operations.reportSettings||{};
+  if(settings.enabled===false)return;
+  const now=new Date(),localDate=new Intl.DateTimeFormat('en-CA',{timeZone:process.env.REPORT_TIMEZONE||'Europe/Prague'}).format(now);
+  const localHour=Number(new Intl.DateTimeFormat('en-US',{timeZone:process.env.REPORT_TIMEZONE||'Europe/Prague',hour:'2-digit',hour12:false}).format(now));
+  if(settings.lastSentDate===localDate||localHour<Number(settings.hour??8))return;
+  const report=controlCenter.dailyReport(c);c.operations.dailyReports.unshift(report);c.operations.dailyReports=c.operations.dailyReports.slice(0,90);settings.lastSentDate=localDate;c.operations.reportSettings=settings;operationsStore.save();
+  const message=`Нові користувачі: ${report.newUsers}. Покупки: ${report.purchases}, дохід: $${report.revenueUsd}. Видано eSIM: ${report.issuedEsims}. Помилки: ${report.failures}. Відкриті звернення: ${report.openTickets}, прострочені: ${report.overdueTickets}. Підозрілі входи: ${report.suspiciousLogins}.`;
+  for(const admin of adminAuth.listAdmins().filter(a=>a.role==='super_admin'&&!a.blocked))await sendEmail({to:admin.email,subject:`${report.status==='healthy'?'✅':'⚠️'} Щоденний звіт Signal`,html:emailTemplates.notification({title:'Щоденний звіт Super Admin',message,actionUrl:'/admin-control-center.html#reports',actionLabel:'Відкрити центр керування'})}).catch(error=>console.error('[daily report]',error.message));
+}
+app.get('/api/admin/control-center',adminAuth.requireAdmin,(req,res)=>{
+  const c=controlContext(),recon=controlCenter.reconciliation(c.users),balance=c.operations.providerBalance||{},estimated=balance.amount!=null&&balance.averageOrderCost>0?Math.floor(balance.amount/balance.averageOrderCost):null;
+  const providerLevel=estimated==null?'unknown':estimated<3?'critical':estimated<10?'warning':'healthy';
+  res.json({generatedAt:new Date().toISOString(),summary:{attention:c.attention.length,critical:c.attention.filter(i=>i.severity==='critical').length,jobsFailed:(c.operations.jobs||[]).filter(j=>j.status==='failed').length,deliveriesFailed:(c.operations.deliveryEvents||[]).filter(d=>d.status==='failed').length,reconciliationIssues:recon.summary.issues},attention:c.attention.slice(0,300),reconciliation:recon,support:c.support,provider:{...balance,estimatedOrders:estimated,level:providerLevel,salesPaused:providerLevel==='critical'},services:{server:true,database:Boolean(process.env.DATABASE_URL),stripe:Boolean(process.env.STRIPE_SECRET_KEY),esim:Boolean(process.env.ESIM_PROVIDER_API_KEY||process.env.ESIM_ACCESS_CODE),email:isEmailConfigured(),push:isPushConfigured(),deepl:translationService.status()},jobs:(c.operations.jobs||[]).slice(0,300),deliveries:(c.operations.deliveryEvents||[]).slice(0,300),featureFlags:c.operations.featureFlags,versionInfo:c.operations.versionInfo,latestReport:(c.operations.dailyReports||[])[0]||null});
+});
+app.post('/api/admin/attention/:id/resolve',adminAuth.requireAdmin,adminAuth.requirePermission('operations.manage'),(req,res)=>{const state=operationsStore.store();state.resolvedAttention[req.params.id]={by:req.admin.email,at:new Date().toISOString(),note:String(req.body?.note||'').slice(0,500)};operationsStore.save();auditStore.log({adminEmail:req.admin.email,action:'attention_resolved',target:req.params.id});res.json({ok:true});});
+app.post('/api/admin/jobs',adminAuth.requireAdmin,adminAuth.requirePermission('operations.manage'),(req,res)=>{const job=operationsStore.addJob({type:req.body?.type,email:req.body?.email,purchaseId:req.body?.purchaseId,payload:req.body?.payload,retryable:req.body?.retryable!==false});auditStore.log({adminEmail:req.admin.email,action:'job_created',target:job.id,details:{type:job.type}});res.json(job);});
+app.post('/api/admin/jobs/:id/retry',adminAuth.requireAdmin,adminAuth.requirePermission('operations.manage'),(req,res)=>{const current=operationsStore.store().jobs.find(j=>j.id===req.params.id);if(!current)return res.status(404).json({error:'Завдання не знайдено'});if(!current.retryable)return res.status(409).json({error:'Ця помилка не допускає автоматичного повтору'});const job=operationsStore.updateJob(current.id,{status:'pending',attempts:Number(current.attempts||0)+1,error:null,nextAttemptAt:new Date().toISOString()});auditStore.log({adminEmail:req.admin.email,action:'job_retried',target:job.id});res.json(job);});
+app.post('/api/admin/deliveries/:id/retry',adminAuth.requireAdmin,adminAuth.requirePermission('operations.manage'),async(req,res)=>{const item=operationsStore.store().deliveryEvents.find(d=>d.id===req.params.id);if(!item)return res.status(404).json({error:'Подію доставки не знайдено'});try{if(item.channel==='push')await sendToEmail(item.recipient,{title:item.subject||'Signal',body:'Повторне повідомлення від Signal',url:'/dashboard.html',tag:`retry-${item.id}`});else await sendEmail({to:item.recipient,subject:item.subject||'Повторне повідомлення Signal',html:emailTemplates.notification({title:item.subject||'Signal',message:'Повторне службове повідомлення. Відкрийте застосунок для деталей.'})});operationsStore.updateDelivery(item.id,{status:'retried',attempts:Number(item.attempts||1)+1,error:null});res.json({ok:true});}catch(error){operationsStore.updateDelivery(item.id,{status:'failed',attempts:Number(item.attempts||1)+1,error:error.message});res.status(502).json({error:error.message});}});
+app.get('/api/admin/users/:email/timeline',adminAuth.requireAdmin,adminAuth.requirePermission('users.read'),(req,res)=>{const c=controlContext(),result=controlCenter.userTimeline(String(req.params.email).toLowerCase(),c);if(!result)return res.status(404).json({error:'Користувача не знайдено'});res.json(result);});
+app.get('/api/admin/localization-health',adminAuth.requireAdmin,(req,res)=>res.json(translationService.status()));
+app.delete('/api/admin/localization-cache',adminAuth.requireAdmin,adminAuth.requirePermission('settings.manage',{requireTwoFactor:true}),(req,res)=>{const removed=translationService.clearCache();auditStore.log({adminEmail:req.admin.email,action:'translation_cache_cleared',details:{removed}});res.json({ok:true,removed});});
+app.post('/api/admin/localization-manual',adminAuth.requireAdmin,adminAuth.requirePermission('settings.manage'),(req,res)=>{try{const result=translationService.setManual(req.body?.source,req.body?.translated);auditStore.log({adminEmail:req.admin.email,action:'manual_translation_saved',target:result.source});res.json(result);}catch(error){res.status(400).json({error:error.message});}});
+app.patch('/api/admin/feature-flags',adminAuth.requireAdmin,adminAuth.requirePermission('settings.manage',{requireTwoFactor:true}),(req,res)=>{const state=operationsStore.store(),allowed=Object.keys(state.featureFlags);for(const [key,value] of Object.entries(req.body||{}))if(allowed.includes(key))state.featureFlags[key]=Boolean(value);operationsStore.save();auditStore.log({adminEmail:req.admin.email,action:'feature_flags_updated',details:state.featureFlags});res.json(state.featureFlags);});
+app.patch('/api/admin/provider-balance',adminAuth.requireAdmin,adminAuth.requirePermission('settings.manage'),async(req,res)=>{const amount=req.body?.amount==null?null:Number(req.body.amount),averageOrderCost=req.body?.averageOrderCost==null?null:Number(req.body.averageOrderCost);if((amount!=null&&!Number.isFinite(amount))||(averageOrderCost!=null&&(!Number.isFinite(averageOrderCost)||averageOrderCost<=0)))return res.status(400).json({error:'Вкажіть коректні числові значення'});const balance={amount,currency:String(req.body?.currency||'USD').slice(0,8),averageOrderCost,updatedAt:new Date().toISOString(),source:'manual'};operationsStore.store().providerBalance=balance;operationsStore.save();auditStore.log({adminEmail:req.admin.email,action:'provider_balance_updated',details:balance});const orders=amount!=null&&averageOrderCost>0?Math.floor(amount/averageOrderCost):null;if(orders!=null&&orders<10){for(const admin of adminAuth.listAdmins().filter(a=>a.role==='super_admin'&&!a.blocked))sendEmail({to:admin.email,subject:`${orders<3?'🚨':'⚠️'} Низький баланс eSIM Access`,html:emailTemplates.notification({title:orders<3?'Продажі призупинено':'Потрібно поповнити баланс',message:`Поточного балансу орієнтовно вистачить на ${orders} замовлень.`,actionUrl:'/admin-control-center.html#settings',actionLabel:'Відкрити баланс'})}).catch(()=>{});}res.json(balance);});
+app.patch('/api/admin/version-info',adminAuth.requireAdmin,adminAuth.requirePermission('settings.manage'),(req,res)=>{const state=operationsStore.store(),current=state.versionInfo;state.versionInfo={...current,frontend:String(req.body?.frontend||current.frontend).slice(0,40),backend:String(req.body?.backend||current.backend).slice(0,40),serviceWorker:String(req.body?.serviceWorker||current.serviceWorker).slice(0,40),deployedAt:req.body?.deployedAt||new Date().toISOString(),changelog:Array.isArray(req.body?.changelog)?req.body.changelog.slice(0,50):current.changelog};operationsStore.save();auditStore.log({adminEmail:req.admin.email,action:'version_info_updated',details:state.versionInfo});res.json(state.versionInfo);});
+app.post('/api/admin/daily-report/generate',adminAuth.requireAdmin,adminAuth.requirePermission('operations.manage'),(req,res)=>{const c=controlContext(),report=controlCenter.dailyReport(c);c.operations.dailyReports.unshift(report);c.operations.dailyReports=c.operations.dailyReports.slice(0,90);operationsStore.save();auditStore.log({adminEmail:req.admin.email,action:'daily_report_generated',details:{status:report.status}});res.json(report);});
+app.patch('/api/admin/team/:email/permissions',adminAuth.requireAdmin,adminAuth.requireRole('super_admin'),(req,res)=>{try{const result=adminAuth.setPermissions({email:req.params.email,permissions:req.body?.permissions});auditStore.log({adminEmail:req.admin.email,action:'admin_permissions_updated',target:result.email,details:{permissions:result.permissions}});res.json(result);}catch(error){res.status(400).json({error:error.message});}});
 
 app.get('/api/admin/operations', adminAuth.requireAdmin, (req, res) => res.json(operationsStore.store()));
 app.post('/api/admin/announcements', adminAuth.requireAdmin, adminAuth.requireRole('super_admin','admin'), async (req,res) => {
@@ -1231,7 +1279,7 @@ app.get('/api/admin/backup/status',adminAuth.requireAdmin,adminAuth.requireRole(
   const safety=await storage.load('safety-backup.json',null);
   res.json({configured:String(process.env.BACKUP_ENCRYPTION_KEY||'').length>=24,safetyBackup:safety?{createdAt:safety.createdAt,createdBy:safety.createdBy}:null,current:backupService.summary(buildBackupPayload())});
 });
-app.get('/api/admin/backup',adminAuth.requireAdmin,adminAuth.requireRole('super_admin'),(req,res)=>{
+app.get('/api/admin/backup',adminAuth.requireAdmin,adminAuth.requireRole('super_admin'),adminAuth.requirePermission('backups.manage',{requireTwoFactor:true}),(req,res)=>{
   try{const payload=buildBackupPayload(),encrypted=backupService.encrypt(payload);auditStore.log({adminEmail:req.admin.email,action:'encrypted_backup_exported',details:backupService.summary(payload)});sendBackupFile(res,encrypted,backupFilename());}
   catch(error){res.status(error.code==='BACKUP_NOT_CONFIGURED'?503:500).json({error:error.message,code:error.code});}
 });
@@ -1244,7 +1292,7 @@ app.post('/api/admin/backup/inspect',express.raw({type:'application/octet-stream
   try{if(!Buffer.isBuffer(req.body)||!req.body.length)return res.status(400).json({error:'Оберіть файл .signalbackup'});const payload=backupService.validate(backupService.decrypt(req.body));const restoreToken=crypto.randomBytes(32).toString('hex');pendingBackupRestores.set(restoreToken,{payload,adminEmail:req.admin.email,expiresAt:Date.now()+10*60*1000});for(const [token,item] of pendingBackupRestores)if(item.expiresAt<Date.now())pendingBackupRestores.delete(token);auditStore.log({adminEmail:req.admin.email,action:'backup_restore_inspected',target:payload.backupId,details:backupService.summary(payload)});res.json({ok:true,restoreToken,expiresIn:600,summary:backupService.summary(payload)});}
   catch(error){recordSecurityFailure(req,'backup_restore',error.code,req.admin.email);auditStore.log({adminEmail:req.admin.email,action:'backup_restore_rejected',details:{code:error.code}});res.status(400).json({error:error.message,code:error.code});}
 });
-app.post('/api/admin/backup/restore',adminAuth.requireAdmin,adminAuth.requireRole('super_admin'),async(req,res)=>{
+app.post('/api/admin/backup/restore',adminAuth.requireAdmin,adminAuth.requireRole('super_admin'),adminAuth.requirePermission('backups.manage',{requireTwoFactor:true}),async(req,res)=>{
   const item=pendingBackupRestores.get(String(req.body?.restoreToken||''));
   if(!item||item.expiresAt<Date.now()||item.adminEmail!==req.admin.email)return res.status(400).json({error:'Перевірка копії завершилася. Завантажте файл ще раз'});
   if(String(req.body?.confirmation||'')!=='ВІДНОВИТИ'||String(req.body?.adminEmail||'').trim().toLowerCase()!==req.admin.email)return res.status(400).json({error:'Введіть слово ВІДНОВИТИ та точний email Super Admin'});
@@ -1406,7 +1454,7 @@ app.post('/api/admin/purchases/sync-all', adminAuth.requireAdmin, adminAuth.requ
   res.json({ ok:true, users:emails.length, imported, errors });
 });
 
-app.post('/api/admin/users/:email/refund', adminAuth.requireAdmin, adminAuth.requireRole('super_admin'), async (req, res) => {
+app.post('/api/admin/users/:email/refund', adminAuth.requireAdmin, adminAuth.requireRole('super_admin'), adminAuth.requirePermission('refunds.manage',{requireTwoFactor:true}), async (req, res) => {
   const email = String(req.params.email || '').trim().toLowerCase();
   const { chargeId, amount, reason = 'requested_by_customer', confirmationEmail, requestId } = req.body || {};
   if (String(confirmationEmail || '').trim().toLowerCase() !== email) return res.status(400).json({ error: 'Email підтвердження не збігається' });
@@ -1452,7 +1500,7 @@ app.post('/api/admin/users/:email/refund', adminAuth.requireAdmin, adminAuth.req
 // Permanently remove the application account so the same email can register
 // again. Billing is stopped before local identity data is erased. Historical
 // financial/audit records may still be retained by Stripe or the audit log.
-app.delete('/api/admin/users/:email', adminAuth.requireAdmin, adminAuth.requireRole('super_admin'), async (req, res) => {
+app.delete('/api/admin/users/:email', adminAuth.requireAdmin, adminAuth.requireRole('super_admin'), adminAuth.requirePermission('users.delete',{requireTwoFactor:true}), async (req, res) => {
   const email = String(req.params.email || '').trim().toLowerCase();
   const confirmationEmail = String(req.body?.confirmationEmail || '').trim().toLowerCase();
   if (confirmationEmail !== email) return res.status(400).json({ error: 'Для підтвердження введіть точний email користувача' });
@@ -1664,7 +1712,7 @@ app.post('/api/admin/users/:email/resync-esim', adminAuth.requireAdmin, adminAut
   } catch (error) { res.status(502).json({ error: error.message }); }
 });
 
-app.post('/api/admin/users/:email/resend-esim-instructions', adminAuth.requireAdmin, adminAuth.requireRole('super_admin', 'admin', 'support'), async (req, res) => {
+app.post('/api/admin/users/:email/resend-esim-instructions', adminAuth.requireAdmin, adminAuth.requireRole('super_admin', 'admin', 'support'), adminAuth.requirePermission('activation_code.read'), async (req, res) => {
   const email = req.params.email;
   const esim = getUser(email)?.esim;
   if (!esim?.activationCode) return res.status(404).json({ error: 'Код активації eSIM не знайдено' });
@@ -1727,7 +1775,7 @@ app.post('/api/admin/users/:email/retry-esim', adminAuth.requireAdmin, adminAuth
   }
 });
 
-app.post('/api/admin/users/:email/purchases/:purchaseId/retry-provision', adminAuth.requireAdmin, adminAuth.requireRole('super_admin','admin'), async (req, res) => {
+app.post('/api/admin/users/:email/purchases/:purchaseId/retry-provision', adminAuth.requireAdmin, adminAuth.requireRole('super_admin','admin'), adminAuth.requirePermission('esim.retry'), async (req, res) => {
   const email = String(req.params.email || '').trim().toLowerCase();
   const purchaseId = String(req.params.purchaseId || '');
   const user = getUser(email);
@@ -1794,7 +1842,7 @@ app.post('/api/admin/users/:email/recover-esim', adminAuth.requireAdmin, adminAu
 
 // ---------- 1. Створити сесію оплати підписки ----------
 // Фронтенд викликає це, коли людина натискає "Оформити підписку"
-app.post('/api/create-subscription', requireUserSession,rateLimit('checkout',60*60*1000,10,req=>req.userEmail), async (req, res) => {
+app.post('/api/create-subscription', requireUserSession,requireFeature('monthlyPlans','Місячні тарифи тимчасово недоступні'),requireFeature('cardPayments','Оплати тимчасово призупинено'),requireProviderCapacity,rateLimit('checkout',60*60*1000,10,req=>req.userEmail), async (req, res) => {
   try {
     const { plan } = req.body;
     const email=req.userEmail;
@@ -1820,6 +1868,7 @@ app.post('/api/create-subscription', requireUserSession,rateLimit('checkout',60*
 async function processSubscriptionRenewal(invoice) {
   const invoiceId = String(invoice.id || '');
   if (!invoiceId) return { ok: false, error: 'Stripe invoice ID is missing' };
+  if(!featureEnabled('autoRenew'))return {ok:false,error:'Автоматичні поновлення вимкнені Super Admin'};
   if (renewalInvoicesInProgress.has(invoiceId)) return { ok: false, error: 'Поновлення вже виконується' };
   const customerId = typeof invoice.customer === 'string' ? invoice.customer : invoice.customer?.id;
   const user = getUserByStripeCustomerId(customerId);
@@ -1830,6 +1879,7 @@ async function processSubscriptionRenewal(invoice) {
   if (user.lastRenewalInvoiceId === invoiceId || user.renewalInvoices?.[invoiceId]?.status === 'succeeded') return { ok: true, duplicate: true };
 
   renewalInvoicesInProgress.add(invoiceId);
+  const trackedJob=operationsStore.addJob({type:'subscription_renewal',status:'running',purchaseId:invoiceId,email:user.email,maxAttempts:3});
   saveUser(user.email, { renewalInvoices: { ...(user.renewalInvoices || {}), [invoiceId]: { status: 'processing', startedAt: new Date().toISOString() } } });
   try {
     const selected = await findRenewalTopup({ iccid: user.esim.iccid, plan: user.plan });
@@ -1860,7 +1910,7 @@ async function processSubscriptionRenewal(invoice) {
     });
     sendToEmail(user.email, { title: 'Тариф успішно поновлено', body: `Оплату отримано. Пакет ${user.plan} автоматично поновлено.`, url: '/dashboard.html', tag: `renewal-${invoiceId.slice(-12)}` }).catch(error => console.error(`[renewal push] ${user.email}:`, error.message));
     console.log(`[renewal] ${user.email}: ${invoiceId} -> ${selected.packageCode}`);
-    return { ok: true, packageCode: selected.packageCode };
+    operationsStore.updateJob(trackedJob.id,{status:'succeeded',completedAt:new Date().toISOString()});return { ok: true, packageCode: selected.packageCode };
   } catch (error) {
     const current = getUser(user.email) || user;
     const failedAt = new Date().toISOString();
@@ -1872,7 +1922,7 @@ async function processSubscriptionRenewal(invoice) {
     });
     sendToEmail(user.email, { title: 'Потрібна увага до тарифу', body: 'Оплату отримано, але пакет eSIM ще не поновлено. Підтримка вже бачить помилку.', url: '/support.html', tag: `renewal-failed-${invoiceId.slice(-8)}` }).catch(() => {});
     console.error(`[renewal] ${user.email}: ${invoiceId} failed:`, error.message);
-    return { ok: false, error: error.message };
+    const nonRetryable=/balance is insufficient|doesn.t exist|invalid package/i.test(String(error.message||''));operationsStore.updateJob(trackedJob.id,{status:'failed',error:error.message,retryable:!nonRetryable,completedAt:new Date().toISOString()});return { ok: false, error: error.message };
   } finally {
     renewalInvoicesInProgress.delete(invoiceId);
   }
@@ -2170,6 +2220,9 @@ storage.init().then(() => Promise.all([
   processDuePlanChanges().catch(error=>console.error('[plan change scheduler]',error.message));
   const planChangeTimer=setInterval(()=>processDuePlanChanges().catch(error=>console.error('[plan change scheduler]',error.message)),60*1000);
   planChangeTimer.unref?.();
+  runDailySuperAdminReport().catch(error=>console.error('[daily report]',error.message));
+  const dailyReportTimer=setInterval(()=>runDailySuperAdminReport().catch(error=>console.error('[daily report]',error.message)),30*60*1000);
+  dailyReportTimer.unref?.();
 }).catch((error) => {
   console.error('Failed to start persistent storage:', error);
   process.exit(1);

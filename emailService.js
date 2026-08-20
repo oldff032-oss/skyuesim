@@ -1,6 +1,7 @@
 require('dotenv').config();
 const crypto=require('crypto');
 const emailTemplates=require('./emailTemplates');
+const operationsStore=require('./operationsStore');
 
 function isEmailConfigured(){return Boolean(process.env.RESEND_API_KEY&&process.env.RESEND_API_KEY!=='your_resend_api_key_here');}
 
@@ -11,10 +12,13 @@ async function resendRequest(path,options={}){
 }
 
 async function sendEmail({to,subject,html,replyTo}){
-  if(!isEmailConfigured()){console.log(`[emailService] MOCK: "${subject}" to ${to}`);return {mocked:true};}
+  const recipient=Array.isArray(to)?to.join(', '):to;
+  const delivery=operationsStore.recordDelivery({channel:'email',recipient,subject,status:'pending'});
+  if(!isEmailConfigured()){operationsStore.updateDelivery(delivery.id,{status:'disabled',error:'RESEND_API_KEY не налаштовано'});console.log(`[emailService] MOCK: "${subject}" to ${to}`);return {mocked:true};}
   const payload={from:process.env.RESEND_FROM_EMAIL||'Signal <onboarding@resend.dev>',to:Array.isArray(to)?to:[to],subject,html};
   if(replyTo)payload.reply_to=replyTo;
-  return resendRequest('/emails',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+  try{const result=await resendRequest('/emails',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});operationsStore.updateDelivery(delivery.id,{status:'sent',providerId:result?.id||null});return result;}
+  catch(error){operationsStore.updateDelivery(delivery.id,{status:'failed',error:error.message});throw error;}
 }
 
 async function sendVerificationCode(email,code){

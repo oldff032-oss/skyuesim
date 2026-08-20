@@ -11,6 +11,13 @@ const { readAll, writeAll } = require('./adminStore');
 
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000; // 12 годин
 const TWO_FACTOR_TTL_MS = 10 * 60 * 1000;
+const ALL_PERMISSIONS=['users.read','support.reply','refunds.manage','esim.retry','activation_code.read','broadcasts.manage','users.delete','backups.manage','security.manage','operations.manage','settings.manage'];
+const ROLE_PERMISSIONS={
+  super_admin:ALL_PERMISSIONS,
+  admin:['users.read','support.reply','refunds.manage','esim.retry','activation_code.read','operations.manage'],
+  support:['users.read','support.reply'],
+  viewer:['users.read'],
+};
 
 function normalizeEmail(email) { return String(email || '').trim().toLowerCase(); }
 function codeHash(challengeId, code) { return crypto.createHash('sha256').update(`${challengeId}:${code}`).digest('hex'); }
@@ -141,6 +148,9 @@ function requireRole(...roles) {
     next();
   };
 }
+function permissionsFor(email,role){const admin=readAll().admins[normalizeEmail(email)]||{};return Array.isArray(admin.permissions)?admin.permissions:ROLE_PERMISSIONS[role]||[];}
+function requirePermission(permission,{requireTwoFactor=false}={}){return(req,res,next)=>{const permissions=permissionsFor(req.admin.email,req.admin.role);if(!permissions.includes(permission))return res.status(403).json({error:'Недостатньо прав для цієї дії',permission});if(requireTwoFactor&&(!req.admin.twoFactorVerified||req.admin.role!=='super_admin'))return res.status(403).json({error:'Для небезпечної дії потрібен Super Admin із підтвердженою 2FA',code:'STEP_UP_REQUIRED'});next();};}
+function setPermissions({email,permissions}){const store=readAll();email=normalizeEmail(email);const admin=store.admins[email];if(!admin)throw new Error('Адміністратора не знайдено');admin.permissions=[...new Set((permissions||[]).filter(item=>ALL_PERMISSIONS.includes(item)))];writeAll(store);return {email,permissions:admin.permissions};}
 
 async function createAdmin({ email, password, role }) {
   const store = readAll();
@@ -164,6 +174,7 @@ function listAdmins() {
     blocked: Boolean(a.blocked),
     blockedAt: a.blockedAt || null,
     twoFactorEnabled: Boolean(a.twoFactorEnabled),
+    permissions: Array.isArray(a.permissions) ? a.permissions : ROLE_PERMISSIONS[a.role] || [],
   }));
 }
 
@@ -220,4 +231,4 @@ async function emergencyResetTwoFactor({email,password,recoverySecret}){
   writeAll(store);return {email,enabled:false};
 }
 
-module.exports = { bootstrap, login, completeLogin, twoFactorStatus, startTwoFactorChange, completeTwoFactorChange, resetTwoFactor, emergencyResetTwoFactor, requireAdmin, requireRole, createAdmin, listAdmins, setAdminBlocked, deleteAdmin };
+module.exports = { bootstrap, login, completeLogin, twoFactorStatus, startTwoFactorChange, completeTwoFactorChange, resetTwoFactor, emergencyResetTwoFactor, requireAdmin, requireRole, requirePermission, permissionsFor, setPermissions, createAdmin, listAdmins, setAdminBlocked, deleteAdmin, ALL_PERMISSIONS };

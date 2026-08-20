@@ -171,7 +171,7 @@ test('maintenance support works without account unlock and remains rate limited'
 test('service worker bypasses stale cache for maintenance and localization assets', () => {
   const worker=read('sw.js');
   const support=read('support.html');
-  assert.match(worker, /signal-shell-v37-translation-throttle/);
+  assert.match(worker, /signal-shell-v39-control-center/);
   assert.match(worker, /fetch\(event\.request, \{ cache:'no-store' \}\)/);
   assert.match(worker, /'\/i18n\.js'/);
   assert.match(worker, /'\/style\.css'/);
@@ -207,4 +207,26 @@ test('suspicious sign-ins automatically notify only super admins', () => {
   assert.match(server, /securityNotificationAtByKey/);
   assert.match(server, /sendEmail\(\{to:admin\.email,subject:`🚨 Підозріла спроба входу/);
   assert.match(server, /Паролі, PIN, токени та повна IP-адреса в лист не додаються/);
+});
+
+test('control center covers operations reconciliation jobs delivery and reporting',()=>{
+  const server=read('server.js'),page=read('admin-control-center.html'),service=read('controlCenterService.js');
+  for(const route of ['/api/admin/control-center','/api/admin/jobs/:id/retry','/api/admin/deliveries/:id/retry','/api/admin/feature-flags','/api/admin/provider-balance','/api/admin/daily-report/generate'])assert.match(server,new RegExp(route.replaceAll('/','\\/')));
+  for(const section of ['attention','reconciliation','jobs','delivery','support','localization','settings','reports'])assert.match(page,new RegExp(`id="${section}"`));
+  assert.match(service,/function buildAttention/);assert.match(service,/function reconciliation/);assert.match(service,/function userTimeline/);assert.match(service,/function dailyReport/);
+});
+
+test('granular permissions and dangerous two-factor gates are enforced',()=>{
+  const auth=read('adminAuthService.js'),server=read('server.js');
+  assert.match(auth,/ALL_PERMISSIONS/);assert.match(auth,/function requirePermission/);assert.match(auth,/STEP_UP_REQUIRED/);
+  assert.match(server,/requirePermission\('refunds\.manage',\{requireTwoFactor:true\}\)/);
+  assert.match(server,/requirePermission\('users\.delete',\{requireTwoFactor:true\}\)/);
+  assert.match(server,/requirePermission\('backups\.manage',\{requireTwoFactor:true\}\)/);
+});
+
+test('delivery translation health and user timeline remain persistent and protected',()=>{
+  const operations=read('operationsStore.js'),translation=read('translationService.js'),server=read('server.js');
+  assert.match(operations,/deliveryEvents/);assert.match(operations,/function recordDelivery/);assert.match(operations,/featureFlags/);
+  assert.match(translation,/function status/);assert.match(translation,/rateLimits/);assert.match(translation,/function setManual/);
+  assert.match(server,/\/api\/admin\/users\/:email\/timeline/);assert.match(server,/adminAuth\.requirePermission\('users\.read'\)/);
 });

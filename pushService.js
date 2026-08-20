@@ -1,5 +1,6 @@
 const webpush = require('web-push');
 const pushStore = require('./pushStore');
+const operationsStore = require('./operationsStore');
 
 function isConfigured() {
   return Boolean(process.env.VAPID_SUBJECT && process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY);
@@ -11,7 +12,8 @@ function configure() {
 }
 
 async function sendToEmail(email, notification) {
-  configure();
+  const delivery=operationsStore.recordDelivery({channel:'push',recipient:email,subject:notification.title||'Signal',status:'pending'});
+  try{configure();}catch(error){operationsStore.updateDelivery(delivery.id,{status:'disabled',error:error.message});throw error;}
   const payload = JSON.stringify({
     title: notification.title || 'Сигнал',
     body: notification.body || '',
@@ -28,8 +30,10 @@ async function sendToEmail(email, notification) {
       throw error;
     }
   }));
-  return results.filter((result) => result.status === 'fulfilled').length;
+  const delivered=results.filter((result) => result.status === 'fulfilled').length;
+  const failed=results.filter((result)=>result.status==='rejected');
+  operationsStore.updateDelivery(delivery.id,{status:failed.length?(delivered?'partial':'failed'):'sent',error:failed[0]?.reason?.message||null,delivered,attempts:subscriptions.length||1});
+  return delivered;
 }
 
 module.exports = { isConfigured, sendToEmail };
-
