@@ -83,7 +83,7 @@
           const status = a.blocked ? '<span class="status-pill off"><span class="dot"></span>Заблокований</span>' : '<span class="status-pill on"><span class="dot"></span>Активний</span>';
           const actions = protectedAdmin ? '<span class="muted">—</span>' : `
             <button class="btn ghost" style="padding:7px 10px;font-size:12px;" onclick="setAdminBlocked('${encodeURIComponent(a.email)}', ${a.blocked})">${a.blocked ? 'Розблокувати' : 'Заблокувати'}</button>
-            ${a.twoFactorEnabled?`<button class="btn ghost" style="padding:7px 10px;font-size:12px" onclick="resetTwoFactor('${encodeURIComponent(a.email)}')">Скинути 2FA</button>`:''}<button class="btn ghost" style="padding:7px 10px;font-size:12px;color:var(--danger);" onclick="deleteAdmin('${encodeURIComponent(a.email)}')">Видалити</button>`;
+            <button class="btn ghost" style="padding:7px 10px;font-size:12px" onclick='editPermissions(${JSON.stringify(a.email)},${JSON.stringify(a.permissions||[])})'>Права</button>${a.twoFactorEnabled?`<button class="btn ghost" style="padding:7px 10px;font-size:12px" onclick="resetTwoFactor('${encodeURIComponent(a.email)}')">Скинути 2FA</button>`:''}<button class="btn ghost" style="padding:7px 10px;font-size:12px;color:var(--danger);" onclick="deleteAdmin('${encodeURIComponent(a.email)}')">Видалити</button>`;
           return `<tr>
             <td>${escapeHtml(a.email)}</td>
             <td><span class="role-badge ${a.role}">${escapeHtml(a.role)}</span></td>
@@ -132,6 +132,12 @@
       const email=decodeURIComponent(encodedEmail);
       if(!confirm(`Скинути 2FA для ${email}? Усі його активні входи буде завершено.`))return;
       try{const res=await adminFetch(`/api/admin/team/${encodedEmail}/reset-2fa`,{method:'POST'}),data=await res.json();if(!res.ok)throw new Error(data.error||'Не вдалося скинути 2FA');alert('2FA скинуто. Працівник має увійти паролем і ввімкнути захист знову.');load()}catch(e){alert(e.message)}
+    }
+    async function editPermissions(email,current){
+      const all=['users.read','support.reply','refunds.manage','esim.retry','activation_code.read','broadcasts.manage','users.delete','backups.manage','security.manage','operations.manage','settings.manage'];
+      const value=prompt('Вкажіть дозволи через кому:\n'+all.join('\n'),current.join(', '));if(value===null)return;
+      const permissions=value.split(',').map(x=>x.trim()).filter(x=>all.includes(x));
+      try{const res=await adminFetch(`/api/admin/team/${encodeURIComponent(email)}/permissions`,{method:'PATCH',body:JSON.stringify({permissions})}),data=await res.json();if(!res.ok)throw new Error(data.error);alert('Права оновлено');load()}catch(e){alert(e.message)}
     }
 
     async function deleteAdmin(encodedEmail){

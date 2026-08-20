@@ -5,7 +5,9 @@ async function bootstrap() { store = { tickets: [], nextId: 1001, ...(await stor
 function writeAll(data) { store = data; storage.save('tickets.json', store); }
 function createTicket({ email, category, subject, message, attachment, recoveryRequest = null }) {
   const now = new Date().toISOString();
-  const ticket = { id: store.nextId++, email, category, subject, status: 'open', priority: category === 'access_recovery' ? 'high' : 'normal', createdAt: now, updatedAt: now, messages: [{ from: 'user', text: message, attachment: attachment || null, createdAt: now }], ...(recoveryRequest ? { recoveryRequest } : {}) };
+  const priority=category === 'access_recovery' ? 'high' : 'normal';
+  const slaMinutes=priority==='high'?240:1440;
+  const ticket = { id: store.nextId++, email, category, subject, status: 'open', priority, tags:[], createdAt: now, updatedAt: now, slaDueAt:new Date(Date.now()+slaMinutes*60000).toISOString(), messages: [{ from: 'user', text: message, attachment: attachment || null, createdAt: now }], ...(recoveryRequest ? { recoveryRequest } : {}) };
   store.tickets.push(ticket); writeAll(store); return ticket;
 }
 function getTicketsByEmail(email) { return store.tickets.filter(t => t.email === email).sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt)); }
@@ -20,7 +22,9 @@ function getTicket(id) { return store.tickets.find(t => t.id === Number(id)) || 
 function addMessage(id, { from, text, attachment }) {
   const ticket = getTicket(id); if (!ticket) return null;
   ticket.messages.push({ from, text, attachment: attachment || null, createdAt: new Date().toISOString() }); ticket.updatedAt = new Date().toISOString();
-  if (from === 'admin' && ticket.status === 'open') ticket.status = 'in_progress'; writeAll(store); return ticket;
+  if (from === 'admin') { if (!ticket.firstResponseAt) ticket.firstResponseAt=new Date().toISOString(); if (ticket.status === 'open') ticket.status = 'in_progress'; }
+  if(from==='user'&&['resolved','closed'].includes(ticket.status)){ticket.status='open';ticket.reopenedAt=new Date().toISOString();}
+  writeAll(store); return ticket;
 }
 function updateTicket(id, patch) { const ticket = getTicket(id); if (!ticket) return null; Object.assign(ticket, patch, { updatedAt: new Date().toISOString() }); writeAll(store); return ticket; }
 function deleteTicket(id) {
