@@ -230,3 +230,32 @@ test('delivery translation health and user timeline remain persistent and protec
   assert.match(translation,/function status/);assert.match(translation,/rateLimits/);assert.match(translation,/function setManual/);
   assert.match(server,/\/api\/admin\/users\/:email\/timeline/);assert.match(server,/adminAuth\.requirePermission\('users\.read'\)/);
 });
+
+test('daily Super Admin report is branded and switches between green and red states',()=>{
+  const templates=read('emailTemplates.js'),server=read('server.js');
+  assert.match(templates,/function dailyAdminReport/);assert.match(templates,/ЩОДЕННИЙ ЗВІТ · SUPER ADMIN/);
+  for(const label of ['Нові користувачі','Покупки','Виторг','Повернення','Видані eSIM','Невдалі операції','Відкриті звернення','Середній час відповіді','Середня оцінка','Підозрілі входи','Баланс провайдера','Stripe','Email','Push','eSIM Access'])assert.match(templates,new RegExp(label));
+  assert.match(server,/emailTemplates\.dailyAdminReport/);assert.match(server,/lastSentDate===localDate/);
+});
+
+test('Super Admin feature switches are enforced and fully audited',()=>{
+  const server=read('server.js'),operations=read('operationsStore.js'),translation=read('translationService.js'),push=read('pushService.js'),page=read('admin-control-center.html');
+  for(const flag of ['monthlyPlans','travelPackages','referrals','autoRenew','push','registration','deepl','photoUploads','cardPayments'])assert.match(operations,new RegExp(flag));
+  assert.match(operations,/disabledCountries/);assert.match(operations,/disabledPackages/);assert.match(operations,/stripeCard/);
+  assert.match(server,/function packageAllowed/);assert.match(server,/PAYMENT_METHOD_DISABLED/);assert.match(server,/feature_rules_updated/);assert.match(server,/before,after/);
+  assert.match(translation,/featureFlags\?\.deepl !== false/);assert.match(push,/featureFlags\?\.push !== false/);
+  assert.match(page,/saveRules/);assert.match(page,/disabledCountries/);assert.match(page,/disabledPackages/);
+});
+
+test('version control tracks clients and refreshes only approved critical assets',()=>{
+  const server=read('server.js'),pwa=read('pwa.js'),worker=read('sw.js'),page=read('admin-versions.html');
+  for(const route of ['/api/app-version','/api/account/client-version','/api/admin/versions','/api/admin/versions/request-update','/api/admin/versions/critical-refresh'])assert.match(server,new RegExp(route.replaceAll('/','\\/')));
+  assert.match(worker,/REFRESH_CRITICAL/);assert.match(worker,/cache\.delete\(path\)/);assert.match(pwa,/criticalRefreshToken/);
+  assert.match(page,/Попросити оновити застосунок/);assert.match(page,/Журнал змін/);assert.match(page,/Старих версій/);
+});
+
+test('support performance is attributed to individual administrators',()=>{
+  const tickets=read('ticketStore.js'),service=read('controlCenterService.js'),page=read('admin-control-center.html');
+  assert.match(tickets,/adminEmail/);assert.match(service,/byAdmin/);assert.match(service,/averageFirstResponseMinutes/);assert.match(service,/averageResolutionMinutes/);assert.match(service,/reopened/);
+  assert.match(page,/Результати адміністраторів/);assert.match(page,/Повторно відкрито/);
+});

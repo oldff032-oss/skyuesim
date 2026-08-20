@@ -32,6 +32,7 @@ self.addEventListener('activate', (event) => {
   );
   self.clients.claim();
 });
+self.addEventListener('message',event=>{if(event.data?.type!=='REFRESH_CRITICAL')return;const allowed=new Set(['/i18n.js','/style.css','/pwa.js','/sw.js','/config.js','/admin-common.js']),assets=(event.data.assets||[]).filter(item=>allowed.has(item));event.waitUntil(caches.open(CACHE_NAME).then(cache=>Promise.all(assets.map(path=>cache.delete(path)))));});
 
 self.addEventListener('fetch', (event) => {
   // Ніколи не кешуємо запити до API — там завжди мають бути свіжі дані

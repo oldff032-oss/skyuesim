@@ -1,6 +1,7 @@
 // Server-only DeepL integration. The API key is deliberately never sent to
 // the browser. Failed translations fall back to the original text.
 const storage = require('./persistentState');
+const operationsStore = require('./operationsStore');
 
 let cache = {};
 let cooldownUntil = 0;
@@ -12,7 +13,7 @@ async function bootstrap() {
 }
 
 function enabled() {
-  return Boolean(process.env.DEEPL_API_KEY);
+  return Boolean(process.env.DEEPL_API_KEY) && operationsStore.store().featureFlags?.deepl !== false;
 }
 
 async function translate(text, targetLanguage) {
