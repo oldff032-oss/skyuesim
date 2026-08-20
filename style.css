@@ -220,9 +220,16 @@ code.qr{ display:block; background:#000; color:var(--success); font-family:'Spac
 .admin-shell{ display:flex; min-height:100vh; }
 .admin-sidebar{
   width:230px; flex-shrink:0; background:var(--surface); border-right:1px solid var(--glass-border);
-  padding:24px 16px; position:sticky; top:0; height:100vh;
+  padding:24px 12px 30px 16px; position:sticky; top:0; height:100vh; box-sizing:border-box;
+  overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain; scrollbar-gutter:stable;
+  -webkit-overflow-scrolling:touch;
 }
 .admin-sidebar .brand{ padding:0 8px; margin-bottom:28px; }
+.admin-sidebar::-webkit-scrollbar{ width:7px; }
+.admin-sidebar::-webkit-scrollbar-track{ background:transparent; }
+.admin-sidebar::-webkit-scrollbar-thumb{ background:rgba(126,140,177,.35); border-radius:999px; }
+.admin-sidebar::-webkit-scrollbar-thumb:hover{ background:rgba(126,140,177,.58); }
+.admin-nav{ min-height:max-content; padding-bottom:12px; }
 .admin-nav a{
   display:flex; align-items:center; gap:10px; padding:11px 12px; border-radius:12px;
   text-decoration:none; color:var(--text-muted); font-size:13.5px; margin-bottom:3px; transition:all .15s ease;
@@ -230,6 +237,10 @@ code.qr{ display:block; background:#000; color:var(--success); font-family:'Spac
 .admin-nav a:hover{ background:var(--glass); color:var(--text); }
 .admin-nav a.active{ background:linear-gradient(135deg, rgba(59,130,246,0.18), rgba(139,92,246,0.12)); color:var(--text); }
 .admin-main{ flex:1; padding:28px 32px; max-width:1200px; }
+@media(max-width:760px){
+  .admin-shell{display:block}.admin-sidebar{position:sticky;top:0;z-index:40;width:100%;height:auto;max-height:44vh;padding:12px 12px 14px;border-right:0;border-bottom:1px solid var(--glass-border);box-shadow:0 12px 34px rgba(0,0,0,.28)}
+  .admin-sidebar .brand{margin-bottom:10px}.admin-nav{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px}.admin-nav a{margin:0;min-width:0;font-size:12px;padding:10px}.admin-main{padding:20px 14px;max-width:none}
+}
 
 .stat-grid{ display:grid; grid-template-columns:repeat(auto-fit, minmax(160px,1fr)); gap:14px; margin-top:20px; }
 .stat-card{ padding:18px; }

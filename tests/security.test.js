@@ -73,6 +73,8 @@ test('language selection is explicit, persistent, and synchronized', () => {
   assert.match(i18n, /catch \{ synced = false; \}/);
   assert.match(i18n, /translations\/batch/);
   assert.match(read('server.js'), /app\.post\('\/api\/translations\/batch', requireUserSession/);
+  assert.match(read('translationService.js'), /translateBatch/);
+  assert.match(read('translationService.js'), /cooldownUntil/);
 });
 
 test('all customer pages load localization support', () => {
@@ -169,7 +171,7 @@ test('maintenance support works without account unlock and remains rate limited'
 test('service worker bypasses stale cache for maintenance and localization assets', () => {
   const worker=read('sw.js');
   const support=read('support.html');
-  assert.match(worker, /signal-shell-v36-feedback-admin/);
+  assert.match(worker, /signal-shell-v37-translation-throttle/);
   assert.match(worker, /fetch\(event\.request, \{ cache:'no-store' \}\)/);
   assert.match(worker, /'\/i18n\.js'/);
   assert.match(worker, /'\/style\.css'/);
@@ -188,4 +190,21 @@ test('feedback has a branded customer form and a protected admin inbox', () => {
   assert.match(admin, /summary\.distribution/);
   assert.match(admin, /avatarDataUrl/);
   assert.match(users, /userDetailsAvatar/);
+});
+
+test('admin navigation exposes every section and scrolls independently', () => {
+  const css=read('style.css');
+  const common=read('admin-common.js');
+  assert.match(css, /\.admin-sidebar[\s\S]*overflow-y:auto/);
+  for(const page of ['admin-dashboard.html','admin-tickets.html','admin-users.html','admin-operations.html','admin-feedback.html','admin-diagnostics.html','admin-error-guide.html']) assert.match(common,new RegExp(page.replace('.','\\.')));
+  assert.match(common, /nav\.innerHTML=links\.map/);
+});
+
+test('suspicious sign-ins automatically notify only super admins', () => {
+  const server=read('server.js');
+  assert.match(server, /role==='super_admin'/);
+  assert.match(server, /immediateSurfaces=\['admin_login','admin_2fa','admin_emergency_recovery','backup_restore'\]/);
+  assert.match(server, /securityNotificationAtByKey/);
+  assert.match(server, /sendEmail\(\{to:admin\.email,subject:`🚨 Підозріла спроба входу/);
+  assert.match(server, /Паролі, PIN, токени та повна IP-адреса в лист не додаються/);
 });

@@ -153,11 +153,14 @@
     let remoteCache = {};
     try { remoteCache = JSON.parse(localStorage.getItem('signal_translation_cache_en') || '{}'); } catch {}
     let translationTimer = null;
+    let remoteRequestInFlight = false;
+    let nextRemoteAttemptAt = 0;
+    const attemptedSources = new Map();
     const translateRemainingText = () => {
       clearTimeout(translationTimer);
       translationTimer = setTimeout(async () => {
         const token = localStorage.getItem('signal_session_token');
-        if (!token || typeof API_URL === 'undefined') return;
+        if (!token || typeof API_URL === 'undefined' || remoteRequestInFlight || Date.now()<nextRemoteAttemptAt) return;
         const candidates = [];
         const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
         while (walker.nextNode()) {
@@ -166,18 +169,20 @@
           const source = node.nodeValue.trim();
           if (!/[А-ЯІЇЄҐа-яіїєґ]/u.test(source)) continue;
           if (remoteCache[source]) node.nodeValue = node.nodeValue.replace(source, remoteCache[source]);
-          else candidates.push({node,source});
+          else if(Date.now()-(attemptedSources.get(source)||0)>10*60*1000)candidates.push({node,source});
         }
         const texts = [...new Set(candidates.map(item=>item.source))].slice(0,40);
         if (!texts.length) return;
         try {
+          remoteRequestInFlight=true;texts.forEach(source=>attemptedSources.set(source,Date.now()));
           const response = await fetch(`${API_URL}/api/translations/batch`, {method:'POST',headers:{'Content-Type':'application/json','x-session-token':token},body:JSON.stringify({texts})});
-          if (!response.ok) return;
+          if (response.status===429){nextRemoteAttemptAt=Date.now()+2*60*1000;return;}
+          if (!response.ok){nextRemoteAttemptAt=Date.now()+30*1000;return;}
           const result = await response.json();
           Object.assign(remoteCache,result.translations||{});
           localStorage.setItem('signal_translation_cache_en',JSON.stringify(Object.fromEntries(Object.entries(remoteCache).slice(-800))));
           candidates.forEach(({node,source})=>{if(remoteCache[source]&&node.isConnected)node.nodeValue=node.nodeValue.replace(source,remoteCache[source]);});
-        } catch {}
+        } catch {nextRemoteAttemptAt=Date.now()+30*1000;} finally {remoteRequestInFlight=false;}
       }, 120);
     };
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded',translateRemainingText);
