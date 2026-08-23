@@ -1,7 +1,7 @@
 // Register from every entry page so a fresh "Add to Home Screen" install has
 // a service worker even when it starts directly on dashboard.html.
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' }).then(registration => registration.update()).catch(() => {});
+  navigator.serviceWorker.register('/sw.js?v=43', { updateViaCache: 'none' }).then(registration => registration.update()).catch(() => {});
   navigator.serviceWorker.addEventListener('controllerchange',()=>{
     if(sessionStorage.getItem('signal_sw_reloaded_v32')==='1')return;
     sessionStorage.setItem('signal_sw_reloaded_v32','1');
@@ -39,7 +39,7 @@ if (window.location.pathname.endsWith('/app-tools.html')) {
 // auth headers, PINs, tokens, QR data or full URLs/query strings.
 const signalOriginalFetch = window.fetch.bind(window);
 let signalDiagnosticCount = 0;
-const SIGNAL_FRONTEND_VERSION='1.0.3',SIGNAL_SW_VERSION='v42',SIGNAL_CACHE_VERSION='signal-shell-v42-icon-dock';
+const SIGNAL_FRONTEND_VERSION='1.0.4',SIGNAL_SW_VERSION='v43',SIGNAL_CACHE_VERSION='signal-shell-v43-clean-icon-dock';
 window.addEventListener('load',async()=>{
   if(typeof API_URL==='undefined')return;
   const token=localStorage.getItem('signal_session_token');

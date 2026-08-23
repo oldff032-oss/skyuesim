@@ -171,7 +171,7 @@ test('maintenance support works without account unlock and remains rate limited'
 test('service worker bypasses stale cache for maintenance and localization assets', () => {
   const worker=read('sw.js');
   const support=read('support.html');
-  assert.match(worker, /signal-shell-v42-icon-dock/);
+  assert.match(worker, /signal-shell-v43-clean-icon-dock/);
   assert.match(worker, /fetch\(event\.request, \{ cache:'no-store' \}\)/);
   assert.match(worker, /'\/i18n\.js'/);
   assert.match(worker, /'\/style\.css'/);
@@ -292,7 +292,7 @@ test('Stripe profiles recover automatically and checkout reuses one customer',()
 });
 
 test('bottom navigation always identifies usage and charts stay visible without motion',()=>{
-  const pwa=read('pwa.js'),usage=read('usage.html'),css=read('style.css');
+  const pwa=read('pwa.js'),usage=read('usage.html'),css=read('style.css'),headers=read('_headers');
   assert.match(pwa, /'usage\.html':\{label:'Витрати',labelEn:'Usage'/);
   assert.match(pwa, /classList\.toggle\('active',page===current\)/);
   assert.match(pwa, /setTimeout\(enhanceSignalNavigation,500\)/);
@@ -304,6 +304,14 @@ test('bottom navigation always identifies usage and charts stay visible without 
   assert.match(css, /navDraw/);
   assert.match(css, /clip:rect\(0,0,0,0\)/);
   assert.match(pwa, /setAttribute\('aria-label',label\)/);
+  assert.match(pwa, /\/sw\.js\?v=43/);
+  assert.match(headers, /\/pwa\.js[\s\S]*Cache-Control: no-store/);
+  for(const page of ['dashboard.html','plans.html','usage.html','profile.html']){
+    const html=read(page),nav=html.match(/<nav class="bottomnav"[\s\S]*?<\/nav>/)?.[0]||'';
+    assert.match(nav, /<svg/);
+    assert.doesNotMatch(nav, />Моя eSIM<\/a>/);
+    assert.doesNotMatch(nav, />Головна<\/a>/);
+  }
 });
 
 test('email changes require ownership verification at the new address',()=>{

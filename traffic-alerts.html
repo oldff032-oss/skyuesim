@@ -37,9 +37,7 @@
     <p id="message" class="muted" style="text-align:center;margin-top:12px;"></p>
   </div>
 
-  <nav class="bottomnav">
-    <a href="dashboard.html"><span class="ic">🏠</span>Головна</a><a href="plans.html"><span class="ic">📶</span>Тариф</a><a href="usage.html"><span class="ic">📊</span>Витрати</a><a href="profile.html" class="active"><span class="ic">👤</span>Профіль</a>
-  </nav>
+  <nav class="bottomnav" aria-label="Головна навігація"><a href="dashboard.html" aria-label="Головна" title="Головна" data-nav="dashboard"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11.5 12 4l9 7.5"/><path d="M5.5 10.5V20h13v-9.5"/><path d="M9.5 20v-6h5v6"/></svg></span></a><a href="plans.html" aria-label="Тарифи" title="Тарифи" data-nav="plans"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7.5h16M6 4h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z"/><path d="M8 12h8M8 16h5"/></svg></span></a><a href="usage.html" aria-label="Витрати" title="Витрати" data-nav="usage"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 19V12M12 19V5M19 19V9"/><path d="M3 21h18"/></svg></span></a><a href="profile.html" class="active" aria-label="Профіль" title="Профіль" data-nav="profile"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4.5 21a7.5 7.5 0 0 1 15 0"/></svg></span></a></nav>
   <script src="config.js"></script>
   <script>
     const token = localStorage.getItem('signal_session_token');
