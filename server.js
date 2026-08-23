@@ -1218,6 +1218,7 @@ app.post('/api/admin/announcements', adminAuth.requireAdmin, adminAuth.requireRo
   const normalizedAudience = isMaintenance ? 'all' : String(audience || 'all').trim().toLowerCase();
   if (normalizedAudience !== 'all' && !authStore.readAll().users?.[normalizedAudience] && !getUser(normalizedAudience)) return res.status(404).json({error:'Користувача з таким email не знайдено'});
   if (expiresAt && Number.isNaN(new Date(expiresAt).getTime())) return res.status(400).json({error:'Некоректна дата завершення'});
+  if (expiresAt && new Date(expiresAt).getTime() <= Date.now()) return res.status(400).json({error:'Час завершення має бути в майбутньому'});
   const announcement={ id:Date.now().toString(36), title:String(title).replace(/^\s*\[maintenance\]\s*/i,'').slice(0,100), message:String(message).slice(0,500), audience:normalizedAudience, type:isMaintenance?'maintenance':'notice', startsAt:new Date().toISOString(), expiresAt:expiresAt||null, createdBy:req.admin.email };
   operationsStore.store().announcements.unshift(announcement); await operationsStore.saveNow();
   let pushRecipients = 0, pushDelivered = 0;
