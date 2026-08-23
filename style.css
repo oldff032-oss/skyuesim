@@ -199,7 +199,7 @@ input.error{ border-color:var(--danger); animation: shake .3s ease; }
 @keyframes navSelect{0%{transform:translateY(5px) scale(.72) rotate(-6deg);opacity:.5}58%{transform:translateY(-5px) scale(1.14) rotate(3deg);opacity:1}100%{transform:translateY(0) scale(1);opacity:1}}
 @media(max-width:380px){.bottomnav{width:calc(100% - 14px);bottom:max(7px,env(safe-area-inset-bottom));padding-inline:4px}.bottomnav a{font-size:9px}.bottomnav a::before{inset:1px 2px}}
 @media(prefers-reduced-motion:reduce){.bottomnav a,.bottomnav a::before,.bottomnav a::after,.bottomnav .nav-icon,.bottomnav .nav-art,.usage-fill,.history-bar{animation:none!important;transition:none!important}}
-.logo-orbit{width:48px!important;height:48px!important;border-radius:15px!important;background:#050817!important;overflow:hidden!important;box-shadow:0 0 0 1px rgba(70,205,255,.22),0 10px 32px rgba(59,130,246,.38)!important}.logo-orbit img{width:100%;height:100%;display:block;object-fit:cover}
+.logo-orbit{width:48px!important;height:48px!important;border-radius:15px!important;background:#050817 url('/signal-premium-logo.png') center/cover no-repeat!important;overflow:hidden!important;box-shadow:0 0 0 1px rgba(70,205,255,.22),0 10px 32px rgba(59,130,246,.38)!important}.logo-orbit svg{display:none!important}.logo-orbit img{width:100%;height:100%;display:block;object-fit:cover}
 
 /* Signal authentication experience */
 html.signal-auth-page body{background:#03050d;position:relative}

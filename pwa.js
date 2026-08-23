@@ -1,7 +1,7 @@
 // Register from every entry page so a fresh "Add to Home Screen" install has
 // a service worker even when it starts directly on dashboard.html.
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('/sw.js?v=46', { updateViaCache: 'none' }).then(registration => registration.update()).catch(() => {});
+  navigator.serviceWorker.register('/sw.js?v=47', { updateViaCache: 'none' }).then(registration => registration.update()).catch(() => {});
   navigator.serviceWorker.addEventListener('controllerchange',()=>{
     if(sessionStorage.getItem('signal_sw_reloaded_v32')==='1')return;
     sessionStorage.setItem('signal_sw_reloaded_v32','1');
@@ -18,7 +18,7 @@ window.signalAuthLoading=function(active,title,copy){const loader=document.getEl
 window.signalAuthSuccess=function(title='Готово!'){const loader=document.getElementById('signal-auth-loader');if(!loader)return;document.getElementById('signal-auth-loader-title').textContent=title;document.getElementById('signal-auth-loader-copy').textContent='Відкриваємо твій особистий простір';loader.classList.add('visible','success');loader.setAttribute('aria-hidden','false');document.body.classList.add('auth-busy');};
 document.readyState==='loading'?document.addEventListener('DOMContentLoaded',signalMountAuthExperience):signalMountAuthExperience();
 const signalNavItems={'dashboard.html':{label:'Головна',labelEn:'Home',image:'nav-home-v1.png'},'plans.html':{label:'Тарифи',labelEn:'Plans',image:'nav-plans-v1.png'},'usage.html':{label:'Витрати',labelEn:'Usage',image:'nav-usage-v1.png'},'profile.html':{label:'Профіль',labelEn:'Profile',image:'nav-profile-v1.png'}};
-function enhanceSignalNavigation(){const current=location.pathname.split('/').pop(),isCore=Boolean(signalNavItems[current]),english=localStorage.getItem('signal_language')==='en';document.querySelectorAll('.bottomnav a').forEach(link=>{const page=(link.getAttribute('href')||'').split(/[?#]/)[0].split('/').pop(),item=signalNavItems[page];if(!item)return;const label=english?item.labelEn:item.label;if(isCore)link.classList.toggle('active',page===current);link.dataset.nav=page.replace('.html','');link.setAttribute('aria-label',label);link.setAttribute('title',label);link.innerHTML=`<span class="nav-icon" aria-hidden="true"><img class="nav-art" src="${item.image}" alt=""></span><span class="nav-label" data-no-auto-translate>${label}</span>`;});const dashboardLogo=document.querySelector('.logo-orbit');if(current==='dashboard.html'&&dashboardLogo)dashboardLogo.innerHTML='<img src="signal-premium-logo.png" alt="Signal">';}
+function enhanceSignalNavigation(){const current=location.pathname.split('/').pop(),isCore=Boolean(signalNavItems[current]),english=localStorage.getItem('signal_language')==='en';document.querySelectorAll('.bottomnav a').forEach(link=>{const page=(link.getAttribute('href')||'').split(/[?#]/)[0].split('/').pop(),item=signalNavItems[page];if(!item)return;const label=english?item.labelEn:item.label;if(isCore)link.classList.toggle('active',page===current);link.dataset.nav=page.replace('.html','');link.setAttribute('aria-label',label);link.setAttribute('title',label);link.innerHTML=`<span class="nav-icon" aria-hidden="true"><img class="nav-art" src="${item.image}" alt=""></span><span class="nav-label" data-no-auto-translate>${label}</span>`;});const dashboardLogo=document.querySelector('.logo-orbit');if(dashboardLogo&&!dashboardLogo.querySelector('img'))dashboardLogo.innerHTML='<img src="signal-premium-logo.png" alt="Signal">';}
 document.readyState==='loading'?document.addEventListener('DOMContentLoaded',enhanceSignalNavigation):enhanceSignalNavigation();
 window.addEventListener('load',()=>{enhanceSignalNavigation();setTimeout(enhanceSignalNavigation,500);});
 const maintenanceGateStyle=document.createElement('style');
@@ -46,7 +46,7 @@ if (window.location.pathname.endsWith('/app-tools.html')) {
 // auth headers, PINs, tokens, QR data or full URLs/query strings.
 const signalOriginalFetch = window.fetch.bind(window);
 let signalDiagnosticCount = 0;
-const SIGNAL_FRONTEND_VERSION='1.1.0',SIGNAL_SW_VERSION='v46',SIGNAL_CACHE_VERSION='signal-shell-v46-auth-experience';
+const SIGNAL_FRONTEND_VERSION='1.1.1',SIGNAL_SW_VERSION='v47',SIGNAL_CACHE_VERSION='signal-shell-v47-logo-fix';
 window.addEventListener('load',async()=>{
   if(typeof API_URL==='undefined')return;
   const token=localStorage.getItem('signal_session_token');

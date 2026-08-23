@@ -171,7 +171,7 @@ test('maintenance support works without account unlock and remains rate limited'
 test('service worker bypasses stale cache for maintenance and localization assets', () => {
   const worker=read('sw.js');
   const support=read('support.html');
-  assert.match(worker, /signal-shell-v46-auth-experience/);
+  assert.match(worker, /signal-shell-v47-logo-fix/);
   assert.match(worker, /fetch\(event\.request, \{ cache:'no-store' \}\)/);
   assert.match(worker, /'\/i18n\.js'/);
   assert.match(worker, /'\/style\.css'/);
@@ -304,7 +304,7 @@ test('bottom navigation always identifies usage and charts stay visible without 
   assert.match(css, /nav-art/);
   assert.match(css, /clip:rect\(0,0,0,0\)/);
   assert.match(pwa, /setAttribute\('aria-label',label\)/);
-  assert.match(pwa, /\/sw\.js\?v=46/);
+  assert.match(pwa, /\/sw\.js\?v=47/);
   for(const marker of ['nav-home-v1.png','nav-plans-v1.png','nav-usage-v1.png','nav-profile-v1.png']) assert.match(pwa,new RegExp(marker.replace('.', '\\.')));
   assert.doesNotMatch(css, /navBreathe[\s\S]{0,80}infinite/);
   assert.match(headers, /\/pwa\.js[\s\S]*Cache-Control: no-store/);
