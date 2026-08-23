@@ -1,7 +1,7 @@
 // Register from every entry page so a fresh "Add to Home Screen" install has
 // a service worker even when it starts directly on dashboard.html.
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('/sw.js?v=43', { updateViaCache: 'none' }).then(registration => registration.update()).catch(() => {});
+  navigator.serviceWorker.register('/sw.js?v=44', { updateViaCache: 'none' }).then(registration => registration.update()).catch(() => {});
   navigator.serviceWorker.addEventListener('controllerchange',()=>{
     if(sessionStorage.getItem('signal_sw_reloaded_v32')==='1')return;
     sessionStorage.setItem('signal_sw_reloaded_v32','1');
@@ -10,8 +10,8 @@ if ('serviceWorker' in navigator) {
 }
 const applyTheme = () => document.documentElement.classList.toggle('light-theme', localStorage.getItem('signal_theme') === 'light');
 applyTheme();
-const signalNavItems={'dashboard.html':{label:'Головна',labelEn:'Home',paths:'<path d="M3 11.5 12 4l9 7.5"/><path d="M5.5 10.5V20h13v-9.5"/><path d="M9.5 20v-6h5v6"/>'},'plans.html':{label:'Тарифи',labelEn:'Plans',paths:'<path d="M4 7.5h16M6 4h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z"/><path d="M8 12h8M8 16h5"/>'},'usage.html':{label:'Витрати',labelEn:'Usage',paths:'<path d="M5 19V12M12 19V5M19 19V9"/><path d="M3 21h18"/>'},'profile.html':{label:'Профіль',labelEn:'Profile',paths:'<circle cx="12" cy="8" r="4"/><path d="M4.5 21a7.5 7.5 0 0 1 15 0"/>'}};
-function enhanceSignalNavigation(){const current=location.pathname.split('/').pop(),isCore=Boolean(signalNavItems[current]),english=localStorage.getItem('signal_language')==='en';document.querySelectorAll('.bottomnav a').forEach(link=>{const page=(link.getAttribute('href')||'').split(/[?#]/)[0].split('/').pop(),item=signalNavItems[page];if(!item)return;const label=english?item.labelEn:item.label;if(isCore)link.classList.toggle('active',page===current);link.dataset.nav=page.replace('.html','');link.setAttribute('aria-label',label);link.setAttribute('title',label);link.innerHTML=`<span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${item.paths}</svg></span><span class="nav-label" data-no-auto-translate>${label}</span>`;});}
+const signalNavItems={'dashboard.html':{label:'Головна',labelEn:'Home',art:'<path class="home-roof" d="M3 11.5 12 4l9 7.5"/><path d="M5.5 10.5V20h13v-9.5"/><rect class="home-window" x="9.7" y="13" width="4.6" height="7" rx="1" fill="currentColor" stroke="none"/><circle class="home-spark" cx="19" cy="5" r="1.25" fill="currentColor" stroke="none"/>'},'plans.html':{label:'Тарифи',labelEn:'Plans',art:'<rect class="plan-back" x="5.5" y="3" width="15" height="14" rx="2.5"/><rect class="plan-front" x="3" y="6.5" width="16" height="14" rx="2.5"/><path class="plan-scan" d="M3.8 11h14.4"/><path d="M7 16h5"/>'},'usage.html':{label:'Витрати',labelEn:'Usage',art:'<path class="usage-bar bar-one" d="M5 19V13"/><path class="usage-bar bar-two" d="M12 19V7"/><path class="usage-bar bar-three" d="M19 19V10"/><path d="M3 21h18"/><circle class="usage-pulse" cx="19" cy="7.5" r="1.45" fill="currentColor" stroke="none"/>'},'profile.html':{label:'Профіль',labelEn:'Profile',art:'<circle class="profile-head" cx="12" cy="8" r="4"/><path d="M4.5 21a7.5 7.5 0 0 1 15 0"/><path class="profile-orbit" d="M5.5 8c1.8-5.6 11.2-7.2 15-1.6" stroke-dasharray="2 3"/><circle class="profile-star" cx="20.5" cy="6.5" r="1.1" fill="currentColor" stroke="none"/>'}};
+function enhanceSignalNavigation(){const current=location.pathname.split('/').pop(),isCore=Boolean(signalNavItems[current]),english=localStorage.getItem('signal_language')==='en';document.querySelectorAll('.bottomnav a').forEach(link=>{const page=(link.getAttribute('href')||'').split(/[?#]/)[0].split('/').pop(),item=signalNavItems[page];if(!item)return;const label=english?item.labelEn:item.label;if(isCore)link.classList.toggle('active',page===current);link.dataset.nav=page.replace('.html','');link.setAttribute('aria-label',label);link.setAttribute('title',label);link.innerHTML=`<span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${item.art}</svg></span><span class="nav-label" data-no-auto-translate>${label}</span>`;});}
 document.readyState==='loading'?document.addEventListener('DOMContentLoaded',enhanceSignalNavigation):enhanceSignalNavigation();
 window.addEventListener('load',()=>{enhanceSignalNavigation();setTimeout(enhanceSignalNavigation,500);});
 const maintenanceGateStyle=document.createElement('style');
@@ -39,7 +39,7 @@ if (window.location.pathname.endsWith('/app-tools.html')) {
 // auth headers, PINs, tokens, QR data or full URLs/query strings.
 const signalOriginalFetch = window.fetch.bind(window);
 let signalDiagnosticCount = 0;
-const SIGNAL_FRONTEND_VERSION='1.0.4',SIGNAL_SW_VERSION='v43',SIGNAL_CACHE_VERSION='signal-shell-v43-clean-icon-dock';
+const SIGNAL_FRONTEND_VERSION='1.0.5',SIGNAL_SW_VERSION='v44',SIGNAL_CACHE_VERSION='signal-shell-v44-living-icons';
 window.addEventListener('load',async()=>{
   if(typeof API_URL==='undefined')return;
   const token=localStorage.getItem('signal_session_token');

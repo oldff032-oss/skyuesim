@@ -192,13 +192,29 @@ input.error{ border-color:var(--danger); animation: shake .3s ease; }
 .bottomnav .nav-icon{width:31px;height:31px;display:grid;place-items:center;transition:transform .38s cubic-bezier(.2,.9,.2,1),filter .28s ease}
 .bottomnav .nav-icon svg{width:27px;height:27px;display:block}
 .bottomnav a.active .nav-icon{filter:drop-shadow(0 0 10px rgba(51,217,255,.82));animation:navBreathe 2.4s ease-in-out infinite}
-.bottomnav a.active svg>*{stroke-dasharray:60;animation:navDraw .9s cubic-bezier(.2,.8,.2,1) both}
+.bottomnav a.active svg{stroke-dasharray:60;animation:navDraw .9s cubic-bezier(.2,.8,.2,1) both}
+.bottomnav svg>*{transform-box:fill-box;transform-origin:center}
+.bottomnav .home-window{opacity:.35;animation:homeWindow 2.2s ease-in-out infinite}
+.bottomnav .home-spark{animation:homeSpark 1.8s ease-in-out infinite}
+.bottomnav .home-roof{animation:homeRoof 3s ease-in-out infinite}
+.bottomnav .plan-back{animation:planStack 2.8s ease-in-out infinite}
+.bottomnav .plan-scan{stroke-dasharray:4 14;animation:planScan 2.1s linear infinite}
+.bottomnav .usage-bar{transform-origin:center bottom;animation:usageMiniBar 1.8s ease-in-out infinite}
+.bottomnav .bar-two{animation-delay:.18s}.bottomnav .bar-three{animation-delay:.36s}
+.bottomnav .usage-pulse{animation:usageMiniPulse 1.5s ease-in-out infinite}
+.bottomnav .profile-orbit{transform-origin:12px 9px;animation:profileOrbit 6s linear infinite}
+.bottomnav .profile-star{animation:profileStar 1.7s ease-in-out infinite}
+.bottomnav .profile-head{animation:profileHead 2.7s ease-in-out infinite}
 .bottomnav a:active{transform:translateY(1px) scale(.88)}
 .bottomnav a:active .nav-icon{transform:rotate(-7deg) scale(.82)}
 .bottomnav .nav-label{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important}
 @keyframes navHalo{to{transform:rotate(360deg)}}@keyframes navBreathe{0%,100%{transform:translateY(-1px) scale(1)}50%{transform:translateY(-4px) scale(1.1)}}@keyframes navDraw{from{stroke-dashoffset:60;opacity:.25}to{stroke-dashoffset:0;opacity:1}}
+@keyframes homeWindow{0%,100%{opacity:.28;filter:drop-shadow(0 0 0 transparent)}50%{opacity:1;filter:drop-shadow(0 0 3px currentColor)}}@keyframes homeSpark{0%,100%{transform:scale(.55);opacity:.3}50%{transform:scale(1.25);opacity:1}}@keyframes homeRoof{0%,100%{transform:translateY(0)}50%{transform:translateY(-.45px)}}
+@keyframes planStack{0%,100%{transform:translate(0,0);opacity:.55}50%{transform:translate(1px,-1px);opacity:1}}@keyframes planScan{to{stroke-dashoffset:-18}}
+@keyframes usageMiniBar{0%,100%{transform:scaleY(.76)}50%{transform:scaleY(1.08)}}@keyframes usageMiniPulse{0%,100%{transform:scale(.6);opacity:.35}50%{transform:scale(1.35);opacity:1}}
+@keyframes profileOrbit{to{transform:rotate(360deg)}}@keyframes profileStar{0%,100%{transform:scale(.65);opacity:.4}50%{transform:scale(1.3);opacity:1}}@keyframes profileHead{0%,100%{transform:translateY(0)}50%{transform:translateY(-.45px)}}
 @media(max-width:380px){.bottomnav{width:calc(100% - 14px);bottom:max(7px,env(safe-area-inset-bottom));padding-inline:4px}.bottomnav a{font-size:9px}.bottomnav a::before{inset:1px 2px}}
-@media(prefers-reduced-motion:reduce){.bottomnav *,.bottomnav a::before,.bottomnav a::after,.usage-fill,.history-bar{animation:none!important;transition:none!important}}
+@media(prefers-reduced-motion:reduce){.bottomnav a,.bottomnav a::before,.bottomnav a::after,.bottomnav .nav-icon,.usage-fill,.history-bar{animation:none!important;transition:none!important}.bottomnav svg>*{animation:iconSoftGlow 3.5s ease-in-out infinite!important;transform:none!important}@keyframes iconSoftGlow{0%,100%{opacity:.72}50%{opacity:1}}}
 body.has-bottomnav .wrap{ padding-bottom:96px; }
 .admin-nav a,.admin-nav summary{display:flex;align-items:center;gap:10px}
 .admin-nav summary{padding:12px 14px;cursor:pointer;color:var(--text-muted);list-style:none}
