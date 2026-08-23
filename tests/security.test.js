@@ -171,7 +171,7 @@ test('maintenance support works without account unlock and remains rate limited'
 test('service worker bypasses stale cache for maintenance and localization assets', () => {
   const worker=read('sw.js');
   const support=read('support.html');
-  assert.match(worker, /signal-shell-v39-control-center/);
+  assert.match(worker, /signal-shell-v40-motion-nav/);
   assert.match(worker, /fetch\(event\.request, \{ cache:'no-store' \}\)/);
   assert.match(worker, /'\/i18n\.js'/);
   assert.match(worker, /'\/style\.css'/);
@@ -277,6 +277,18 @@ test('customer cancellation is scheduled and billing is self-service',()=>{
   assert.match(server,/cancelSubscriptionAtPeriodEnd\(user\.stripeSubscriptionId\)/);
   assert.match(stripe,/stripe\.billingPortal\.sessions\.create/);
   assert.match(payments,/Керувати карткою та підпискою/);
+});
+
+test('Stripe profiles recover automatically and checkout reuses one customer',()=>{
+  const server=read('server.js'),stripe=read('stripeService.js'),payments=read('payments.html'),admin=read('admin-users.html');
+  assert.match(stripe,/resolveStripeCustomerProfile/);
+  assert.match(stripe,/customerId \? \{ customer:customerId \} : \{ customer_email:email \}/);
+  assert.match(server,/recoverStripeProfile\(req\.userEmail\)/);
+  assert.match(server,/\/api\/account\/billing-profile/);
+  assert.match(server,/stripeProfileLastCheckedAt/);
+  assert.match(payments,/Stripe-профіль прив’язано/);
+  assert.match(admin,/Знайти й прив’язати Stripe/);
+  assert.match(admin,/Додаткових Stripe-профілів/);
 });
 
 test('email changes require ownership verification at the new address',()=>{

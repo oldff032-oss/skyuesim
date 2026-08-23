@@ -110,7 +110,7 @@
           <td>${escapeHtml(user.email)}</td>
           <td>${user.createdAt ? new Date(user.createdAt).toLocaleDateString('uk-UA') : '—'}</td>
           <td>${escapeHtml(subscription.plan || '—')}</td>
-          <td>${escapeHtml(subscription.status || 'Немає підписки')}${subscription.referredBy ? '<br><span class="muted" style="font-size:11px;">🎁 Запрошення</span>' : ''}</td>
+          <td>${escapeHtml(subscription.status || 'Немає підписки')}<br><span style="font-size:11px;color:${subscription.stripeCustomerId?'var(--success)':'var(--danger)'}">${subscription.stripeCustomerId?'● Stripe прив’язано':'○ Stripe не прив’язано'}</span>${subscription.referredBy ? '<br><span class="muted" style="font-size:11px;">Запрошення</span>' : ''}</td>
           <td>${usage}</td>
           <td style="display:flex;gap:6px;flex-wrap:wrap;">${detailsButton}${recoveryButton}${blockButton}</td>
         </tr>`;
@@ -189,6 +189,14 @@
           `Останній вхід: ${data.account?.lastLoginAt ? new Date(data.account.lastLoginAt).toLocaleString('uk-UA') : '—'}`,
           `Тариф: ${subscription.plan || '—'}`,
           `Статус: ${subscription.status || '—'}`,
+          '',
+          'STRIPE / ОПЛАТА',
+          `Профіль: ${data.billing?.linked ? 'прив’язано' : 'не прив’язано'}`,
+          `Customer ID: ${data.billing?.customerId || '—'}`,
+          `Subscription ID: ${data.billing?.subscriptionId || '—'}`,
+          `Джерело прив’язки: ${data.billing?.source || '—'}`,
+          `Перевірено: ${data.billing?.lastCheckedAt ? new Date(data.billing.lastCheckedAt).toLocaleString('uk-UA') : '—'}`,
+          `Додаткових Stripe-профілів: ${data.billing?.duplicateProfiles || 0}`,
           `Запросив: ${subscription.referredBy || '—'}`,
           `Винагорода: ${subscription.referralRewardStatus || '—'}`,
           `Код бонусу: ${subscription.referralRewardPackageCode || '—'}`,
@@ -231,7 +239,7 @@
           <button class="btn ghost" style="width:auto;padding:9px 12px;font-size:12px;" onclick="notifyUser('${encodedEmail}','push')">Push</button>
           <button class="btn ghost" style="width:auto;padding:9px 12px;font-size:12px;" onclick="notifyUser('${encodedEmail}','email')">Email</button>
           ${subscription.status === 'renewal_failed' ? `<button class="btn primary" style="width:auto;padding:9px 12px;font-size:12px;" onclick="adminUserAction('${encodedEmail}','retry-renewal')">Повторити автопоновлення</button>` : ''}
-          <button class="btn ghost" style="width:auto;padding:9px 12px;font-size:12px;" onclick="adminUserAction('${encodedEmail}','sync-stripe-status')">Синхронізувати Stripe</button>
+          <button class="btn primary" style="width:auto;padding:9px 12px;font-size:12px;" onclick="adminUserAction('${encodedEmail}','sync-stripe-status')">Знайти й прив’язати Stripe</button>
           <button class="btn ghost" style="width:auto;padding:9px 12px;font-size:12px;" onclick="syncPurchasesAndOpen('${encodedEmail}')">Завантажити покупки зі Stripe</button>
           ${purchases.filter(item => item.fulfillmentStatus === 'failed').map(item => `<button class="btn primary" style="width:auto;padding:9px 12px;font-size:12px;" onclick="retryPurchaseProvision('${encodedEmail}','${encodeURIComponent(item.id)}')">Повторити видачу: ${String(item.packageName || item.plan || 'пакет').replace(/[&<>"']/g, '')}</button>`).join('')}
           ${localStorage.getItem('signal_admin_role') === 'super_admin' ? `<button class="btn ghost" style="width:auto;padding:9px 12px;font-size:12px;color:#f6b84a;" onclick="refundUserPayment('${encodedEmail}')">Повернути кошти</button>` : ''}

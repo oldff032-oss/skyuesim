@@ -9,7 +9,7 @@ const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const { generateRegistrationOptions, verifyRegistrationResponse } = require('@simplewebauthn/server');
 
-const { createCheckoutSession, createCustomPackageCheckout, createBillingPortalSession, cancelSubscription, cancelSubscriptionAtPeriodEnd, cancelAllSubscriptionsForCustomers, deleteStripeCustomer, constructWebhookEvent, getNextBillingDate, getBillingHistory, getRecoveryPaymentEvidence, findCustomerIdsByEmail, getCustomerEmail, getSubscriptionStateByEmail, listCompletedCheckoutPurchasesByEmail, getCheckoutPurchaseDetails, listRefundablePaymentsByEmail, refundPayment } = require('./stripeService');
+const { createCheckoutSession, createCustomPackageCheckout, createBillingPortalSession, cancelSubscription, cancelSubscriptionAtPeriodEnd, cancelAllSubscriptionsForCustomers, deleteStripeCustomer, constructWebhookEvent, getNextBillingDate, getBillingHistory, getRecoveryPaymentEvidence, findCustomerIdsByEmail, resolveStripeCustomerProfile, getCustomerEmail, getSubscriptionStateByEmail, listCompletedCheckoutPurchasesByEmail, getCheckoutPurchaseDetails, listRefundablePaymentsByEmail, refundPayment } = require('./stripeService');
 const crypto = require('crypto');
 const { provisionEsim, checkUsage, recoverEsim, topupEsim, listPackages, findRenewalTopup } = require('./esimService');
 const { bootstrap: bootstrapUsers, getUser, saveUser, deleteUser, getUserByStripeCustomerId, getAllUsers } = require('./db');
@@ -161,6 +161,23 @@ async function executePaidPlanChange({email,purchaseId,packageCode,packageName,d
 async function processDuePlanChanges() {
   const due=Object.values(getAllUsers()).filter(user=>user?.pendingPlanChange?.scheduledFor&&new Date(user.pendingPlanChange.scheduledFor).getTime()<=Date.now());
   for(const user of due){const change=user.pendingPlanChange;await executePaidPlanChange({email:user.email,purchaseId:change.purchaseId,packageCode:change.packageCode,packageName:change.packageName,dataLimitGb:change.dataLimitGb,durationDays:change.durationDays,location:change.location,previousPlan:change.previousPlan,previousSubscriptionId:change.previousSubscriptionId,requestId:change.requestId});}
+}
+
+async function recoverStripeProfile(email) {
+  const normalizedEmail=String(email||'').trim().toLowerCase(),user=getUser(normalizedEmail)||{};
+  const purchaseCustomerIds=(user.purchases||[]).map(purchase=>purchase.stripeCustomerId).filter(Boolean);
+  const profile=await resolveStripeCustomerProfile({email:normalizedEmail,knownCustomerId:user.stripeCustomerId||null,purchaseCustomerIds});
+  if(profile.customerId){
+    saveUser(normalizedEmail,{
+      stripeCustomerId:profile.customerId,
+      ...(profile.subscriptionId?{stripeSubscriptionId:profile.subscriptionId}:{}),
+      stripeProfileLinkedAt:user.stripeCustomerId===profile.customerId?(user.stripeProfileLinkedAt||new Date().toISOString()):new Date().toISOString(),
+      stripeProfileSource:profile.source,
+      stripeProfileCustomerCount:profile.customerCount,
+      stripeProfileLastCheckedAt:new Date().toISOString(),
+    });
+  }
+  return profile;
 }
 
 let operationalJobsRunning=false;
@@ -529,8 +546,10 @@ app.post('/api/travel-packages/checkout', requireUserSession, requireFeature('tr
       scheduledFor=scheduledFor||currentUser.subscriptionPeriodEnd||currentUser.esim?.expiredTime||'';
       if(!scheduledFor||Number.isNaN(new Date(scheduledFor).getTime())||new Date(scheduledFor).getTime()<=Date.now()) return res.status(409).json({error:'Не вдалося визначити дату завершення поточного тарифу. Вибери «Змінити зараз» або звернися в підтримку.',code:'CURRENT_PLAN_END_UNKNOWN'});
     }
+    const recoveredProfile=await recoverStripeProfile(req.userEmail).catch(()=>({customerId:currentUser?.stripeCustomerId||null}));
     const session=await createCustomPackageCheckout({
       email:req.userEmail,
+      customerId:recoveredProfile.customerId||currentUser?.stripeCustomerId||null,
       packageCode:selected.packageCode,
       packageName:selected.name,
       amountCents:selected.amountCents,
@@ -1387,6 +1406,7 @@ app.get('/api/admin/users/:email', adminAuth.requireAdmin, (req, res) => {
     } : null,
     subscription: safeSubscription,
     security: { activeSessions: sessions, pushDevices },
+    billing: subscription ? {linked:Boolean(subscription.stripeCustomerId),customerId:subscription.stripeCustomerId||null,subscriptionId:subscription.stripeSubscriptionId||null,linkedAt:subscription.stripeProfileLinkedAt||null,lastCheckedAt:subscription.stripeProfileLastCheckedAt||null,source:subscription.stripeProfileSource||null,duplicateProfiles:Math.max(0,Number(subscription.stripeProfileCustomerCount||0)-1)} : {linked:false},
     notes: operationsStore.store().notes[email] || [],
     tickets: ticketStore.getTicketsByEmail(email),
   });
@@ -1408,17 +1428,20 @@ app.post('/api/admin/users/:email/sync-stripe-status', adminAuth.requireAdmin, a
   const user = getUser(email);
   if (!user && !authStore.readAll().users?.[email]) return res.status(404).json({ error:'Користувача не знайдено' });
   try {
-    const state = await getSubscriptionStateByEmail(email, user?.stripeCustomerId || null);
-    const status = state.active.length ? 'active' : 'canceled';
+    const profile=await recoverStripeProfile(email);
+    const state = await getSubscriptionStateByEmail(email, profile.customerId || user?.stripeCustomerId || null);
+    const status = state.active.length ? 'active' : state.subscriptions.length ? 'canceled' : (user?.status || 'registered');
     saveUser(email, {
       status,
       stripeCustomerIds: state.customerIds,
       stripeSubscriptionIds: state.subscriptions.map(subscription => subscription.id),
+      ...(profile.customerId?{stripeCustomerId:profile.customerId}:{}),
+      ...(profile.subscriptionId?{stripeSubscriptionId:profile.subscriptionId}:{}),
       stripeStatusSyncedAt: new Date().toISOString(),
       ...(status === 'canceled' ? { canceledAt:new Date().toISOString(), canceledReason:'stripe_sync' } : {}),
     });
     auditStore.log({ adminEmail:req.admin.email, action:'stripe_status_synchronized', target:email, details:{ status, customerIds:state.customerIds, subscriptions:state.subscriptions } });
-    res.json({ ok:true, status, activeSubscriptions:state.active.length, subscriptions:state.subscriptions });
+    res.json({ ok:true, status, linked:Boolean(profile.customerId), customerId:profile.customerId, duplicateProfiles:Math.max(0,profile.customerCount-1), activeSubscriptions:state.active.length, subscriptions:state.subscriptions });
   } catch (error) {
     res.status(502).json({ error:`Не вдалося перевірити Stripe: ${error.message}` });
   }
@@ -1657,7 +1680,8 @@ app.post('/api/admin/users/:email/custom-package-checkout', adminAuth.requireAdm
   if (!Number.isInteger(Number(amountCents)) || Number(amountCents) < 50 || Number(amountCents) > 1000000) return res.status(400).json({ error: 'Вкажіть ціну в центах: від $0.50 до $10,000' });
   if (!/^[a-z]{3}$/i.test(currency)) return res.status(400).json({ error: 'Некоректна валюта' });
   try {
-    const session = await createCustomPackageCheckout({ email, packageCode: String(packageCode), packageName: String(packageName).trim(), amountCents: Number(amountCents), currency: String(currency).toLowerCase(), dataLimitGb, durationDays, location });
+    const profile=await recoverStripeProfile(email);
+    const session = await createCustomPackageCheckout({ email, customerId:profile.customerId||user.stripeCustomerId||null, packageCode: String(packageCode), packageName: String(packageName).trim(), amountCents: Number(amountCents), currency: String(currency).toLowerCase(), dataLimitGb, durationDays, location });
     auditStore.log({ adminEmail: req.admin.email, action: 'custom_package_checkout_created', target: email, details: { packageCode, amountCents, currency } });
     res.json({ ok: true, url: session.url });
   } catch (error) { res.status(502).json({ error: error.message }); }
@@ -1896,7 +1920,8 @@ app.post('/api/create-subscription', requireUserSession,requireFeature('monthlyP
     if (!plan) return res.status(400).json({ error: 'Потрібен plan' });
     if (operationsStore.store().blacklist.emails.includes(email.toLowerCase())) return res.status(403).json({ error: 'Цей email недоступний для оплати' });
 
-    const session = await createCheckoutSession({ email, plan });
+    const recovered=await recoverStripeProfile(email).catch(()=>({customerId:currentUser?.stripeCustomerId||null}));
+    const session = await createCheckoutSession({ email, plan, customerId:recovered.customerId||currentUser?.stripeCustomerId||null });
     // Do not change the current subscription before Stripe confirms payment.
     // If the customer closes Checkout, their existing plan and eSIM stay intact.
     res.json({ url: session.url });
@@ -2282,8 +2307,13 @@ app.get('/api/billing', requireUserSession, async (req, res) => {
   }
 });
 
+app.get('/api/account/billing-profile',requireUserSession,async(req,res)=>{
+  try{const profile=await recoverStripeProfile(req.userEmail);res.json({linked:Boolean(profile.customerId),activeSubscription:profile.activeSubscription,subscriptionStatus:profile.subscriptionStatus,paidInvoiceCount:profile.paidInvoiceCount,duplicateProfiles:Math.max(0,profile.customerCount-1),customerReference:profile.customerId?`…${profile.customerId.slice(-8)}`:null});}
+  catch(error){console.error('[billing profile]',error.message);res.status(502).json({error:'Не вдалося перевірити платіжний профіль'});}
+});
+
 app.post('/api/billing/portal',requireUserSession,rateLimit('billing_portal',15*60*1000,10,req=>req.userEmail),async(req,res)=>{
-  try{const user=getUser(req.userEmail);if(!user?.stripeCustomerId)return res.status(404).json({error:'Платіжний профіль не знайдено'});const session=await createBillingPortalSession(user.stripeCustomerId);res.json({url:session.url});}
+  try{const profile=await recoverStripeProfile(req.userEmail);if(!profile.customerId)return res.status(404).json({error:'У Stripe ще немає платіжного профілю для цього акаунта. Він створиться автоматично під час першої оплати.'});const session=await createBillingPortalSession(profile.customerId);res.json({url:session.url,recovered:profile.source!=='stored_or_purchase'});}
   catch(error){console.error('[billing portal]',error.message);res.status(502).json({error:'Не вдалося відкрити керування оплатою'});}
 });
 
@@ -2344,7 +2374,8 @@ app.get('/api/account/billing-history', requireUserSession, async (req, res) => 
       detail:[purchase.location, purchase.dataLimitGb == null ? null : `${purchase.dataLimitGb} ГБ`, purchase.durationDays ? `${purchase.durationDays} днів` : null].filter(Boolean).join(' · '),
       receiptUrl:purchase.receiptUrl || null, receiptEmailSentAt:purchase.receiptEmailSentAt || null,
     }));
-    const stripeInvoices = user?.stripeCustomerId ? await getBillingHistory(user.stripeCustomerId) : [];
+    const profile=await recoverStripeProfile(req.userEmail).catch(()=>({customerId:user?.stripeCustomerId||null}));
+    const stripeInvoices = profile.customerId ? await getBillingHistory(profile.customerId) : [];
     const combined = [...local, ...stripeInvoices.filter(invoice => !local.some(item => item.id === invoice.id))]
       .sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt));
     res.json({ invoices:combined });
