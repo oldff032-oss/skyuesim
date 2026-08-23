@@ -24,6 +24,14 @@ async function bootstrap(){
   store.reportSettings = {...defaults().reportSettings, ...(loaded.reportSettings||{})};
 }
 function save(){ storage.save('operations.json', store); }
+async function saveNow(){ await storage.saveNow('operations.json',store); }
+async function refresh(){
+  const loaded=await storage.reload('operations.json',defaults());
+  store={...defaults(),...loaded};
+  store.blacklist={...defaults().blacklist,...(loaded.blacklist||{})};
+  store.featureFlags={...defaults().featureFlags,...(loaded.featureFlags||{})};
+  return store;
+}
 function activeAnnouncements(email){ const now=Date.now(); return store.announcements.filter(a => (!a.startsAt || new Date(a.startsAt)<=now) && (!a.expiresAt || new Date(a.expiresAt)>now) && (a.audience==='all'||a.audience===email)); }
 function addJob(job={}){
   const record={id:`job_${Date.now().toString(36)}_${Math.random().toString(36).slice(2,7)}`,type:String(job.type||'general').slice(0,80),status:job.status||'pending',email:job.email||null,purchaseId:job.purchaseId||null,payload:job.payload||{},attempts:Number(job.attempts||0),maxAttempts:Number(job.maxAttempts||3),retryable:job.retryable!==false,error:job.error||null,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()};
@@ -45,4 +53,4 @@ function beginEvent(provider,eventId,type){
   store.processedEvents=Object.fromEntries(entries);save();return {accepted:true,key,event};
 }
 function finishEvent(key,status='completed',error=null){const event=store.processedEvents[key];if(!event)return null;Object.assign(event,{status,error:error?String(error).slice(0,500):null,finishedAt:new Date().toISOString()});save();return event;}
-module.exports={ bootstrap, store:()=>store, save, activeAnnouncements, addJob, updateJob, recordDelivery, updateDelivery, beginEvent, finishEvent };
+module.exports={ bootstrap, store:()=>store, save, saveNow, refresh, activeAnnouncements, addJob, updateJob, recordDelivery, updateDelivery, beginEvent, finishEvent };

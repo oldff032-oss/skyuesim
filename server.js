@@ -408,6 +408,7 @@ app.post('/api/account/diagnostics', requireUserSession, (req, res) => {
 });
 
 async function localizedAnnouncements(email) {
+  await operationsStore.refresh();
   const announcements = operationsStore.activeAnnouncements(email);
   const userLanguage = getUser(email)?.language || 'uk';
   if (userLanguage !== 'en') return announcements;
@@ -489,9 +490,11 @@ app.get('/api/admin/feedback', adminAuth.requireAdmin, (req,res) => {
 });
 app.patch('/api/admin/feedback/:id',adminAuth.requireAdmin,adminAuth.requirePermission('operations.manage'),(req,res)=>{const item=(operationsStore.store().feedback||[]).find(x=>x.id===req.params.id);if(!item)return res.status(404).json({error:'Відгук не знайдено'});if(req.body?.status&&['new','reviewed','planned','done'].includes(req.body.status))item.status=req.body.status;if(req.body?.assignedTo!==undefined)item.assignedTo=String(req.body.assignedTo||'').slice(0,254)||null;if(req.body?.createTask){item.task={id:`feedback_${item.id}`,title:String(req.body.taskTitle||item.message||'Опрацювати відгук').slice(0,200),status:'open',createdAt:new Date().toISOString(),createdBy:req.admin.email};}item.updatedAt=new Date().toISOString();operationsStore.save();auditStore.log({adminEmail:req.admin.email,action:'feedback_updated',target:item.id,details:{status:item.status,assignedTo:item.assignedTo,task:Boolean(item.task)}});res.json(item);});
 
-app.get('/api/service-status', (req, res) => {
+app.get('/api/service-status', async (req, res) => {
+  await operationsStore.refresh();
   const maintenance = operationsStore.activeAnnouncements(null).find((item) => item.type === 'maintenance');
-  res.json({ status: maintenance ? 'maintenance' : 'operational', message: maintenance?.message || null, checkedAt: new Date().toISOString() });
+  res.set('Cache-Control','no-store, no-cache, must-revalidate');
+  res.json({ status: maintenance ? 'maintenance' : 'operational', maintenanceId:maintenance?.id||null, title:maintenance?.title||null, message: maintenance?.message || null, expiresAt:maintenance?.expiresAt||null, checkedAt: new Date().toISOString() });
 });
 
 app.get('/api/travel-packages', requireUserSession, requireFeature('travelPackages','Пакети для подорожей тимчасово недоступні'), rateLimit('travel_catalog',60*1000,30,req=>req.userEmail), async (req,res) => {
@@ -1205,8 +1208,9 @@ app.patch('/api/admin/version-info',adminAuth.requireAdmin,adminAuth.requirePerm
 app.post('/api/admin/daily-report/generate',adminAuth.requireAdmin,adminAuth.requirePermission('operations.manage'),(req,res)=>{const c=controlContext(),report=controlCenter.dailyReport(c);c.operations.dailyReports.unshift(report);c.operations.dailyReports=c.operations.dailyReports.slice(0,90);operationsStore.save();auditStore.log({adminEmail:req.admin.email,action:'daily_report_generated',details:{status:report.status}});res.json(report);});
 app.patch('/api/admin/team/:email/permissions',adminAuth.requireAdmin,adminAuth.requireRole('super_admin'),(req,res)=>{try{const result=adminAuth.setPermissions({email:req.params.email,permissions:req.body?.permissions});auditStore.log({adminEmail:req.admin.email,action:'admin_permissions_updated',target:result.email,details:{permissions:result.permissions}});res.json(result);}catch(error){res.status(400).json({error:error.message});}});
 
-app.get('/api/admin/operations', adminAuth.requireAdmin, (req, res) => res.json(operationsStore.store()));
+app.get('/api/admin/operations', adminAuth.requireAdmin, async (req, res) => {await operationsStore.refresh();res.json(operationsStore.store());});
 app.post('/api/admin/announcements', adminAuth.requireAdmin, adminAuth.requireRole('super_admin','admin'), async (req,res) => {
+  await operationsStore.refresh();
   const { title, message, audience='all', expiresAt=null, sendPush=false, type='notice' } = req.body || {};
   if(!title || !message) return res.status(400).json({error:'Вкажіть заголовок і текст'});
   const isMaintenance = type === 'maintenance' || /^\s*\[maintenance\]/i.test(String(title));
@@ -1214,7 +1218,7 @@ app.post('/api/admin/announcements', adminAuth.requireAdmin, adminAuth.requireRo
   if (normalizedAudience !== 'all' && !authStore.readAll().users?.[normalizedAudience] && !getUser(normalizedAudience)) return res.status(404).json({error:'Користувача з таким email не знайдено'});
   if (expiresAt && Number.isNaN(new Date(expiresAt).getTime())) return res.status(400).json({error:'Некоректна дата завершення'});
   const announcement={ id:Date.now().toString(36), title:String(title).replace(/^\s*\[maintenance\]\s*/i,'').slice(0,100), message:String(message).slice(0,500), audience:normalizedAudience, type:isMaintenance?'maintenance':'notice', startsAt:new Date().toISOString(), expiresAt:expiresAt||null, createdBy:req.admin.email };
-  operationsStore.store().announcements.unshift(announcement); operationsStore.save();
+  operationsStore.store().announcements.unshift(announcement); await operationsStore.saveNow();
   let pushRecipients = 0, pushDelivered = 0;
   if(sendPush && isPushConfigured()) {
     const recipients = normalizedAudience === 'all' ? Object.keys(authStore.readAll().users || {}) : [normalizedAudience];
@@ -1324,7 +1328,7 @@ app.post('/api/admin/email-broadcasts/:audience',adminAuth.requireAdmin,adminAut
   auditStore.log({adminEmail:req.admin.email,action:'email_broadcast_sent',target:audience,details:{id:record.id,filter,recipients:recipients.length,delivered:delivery.delivered.length,failed:delivery.failed.length}});
   res.json({ok:delivery.failed.length===0,...record});
 });
-app.delete('/api/admin/announcements/:id', adminAuth.requireAdmin, adminAuth.requireRole('super_admin','admin'), (req,res)=>{ const s=operationsStore.store(),found=s.announcements.find(a=>a.id===req.params.id);if(found?.type==='security'&&req.admin.role!=='super_admin')return res.status(403).json({error:'Режим безпеки може вимкнути лише Super Admin'});s.announcements=s.announcements.filter(a=>a.id!==req.params.id); operationsStore.save(); auditStore.log({adminEmail:req.admin.email,action:'announcement_deleted',target:req.params.id}); res.json({ok:true}); });
+app.delete('/api/admin/announcements/:id', adminAuth.requireAdmin, adminAuth.requireRole('super_admin','admin'), async (req,res)=>{ await operationsStore.refresh();const s=operationsStore.store(),found=s.announcements.find(a=>a.id===req.params.id);if(found?.type==='security'&&req.admin.role!=='super_admin')return res.status(403).json({error:'Режим безпеки може вимкнути лише Super Admin'});s.announcements=s.announcements.filter(a=>a.id!==req.params.id);await operationsStore.saveNow();auditStore.log({adminEmail:req.admin.email,action:'announcement_deleted',target:req.params.id});res.json({ok:true}); });
 app.post('/api/admin/users/:email/note', adminAuth.requireAdmin, adminAuth.requireRole('super_admin','admin','support'), (req,res)=>{ const text=String(req.body?.text||'').trim(); if(!text) return res.status(400).json({error:'Введіть нотатку'}); const s=operationsStore.store(); (s.notes[req.params.email] ||= []).push({text:text.slice(0,1000),by:req.admin.email,createdAt:new Date().toISOString()}); operationsStore.save(); auditStore.log({adminEmail:req.admin.email,action:'user_note_added',target:req.params.email}); res.json({ok:true}); });
 app.post('/api/admin/blacklist', adminAuth.requireAdmin, adminAuth.requireRole('super_admin','admin'), (req,res)=>{ const {type,value}=req.body||{}; if(!['emails','iccids'].includes(type)||!value) return res.status(400).json({error:'Некоректні дані'}); const list=operationsStore.store().blacklist[type]; if(!list.includes(value)) list.push(value); operationsStore.save(); auditStore.log({adminEmail:req.admin.email,action:'blacklist_added',target:value}); res.json({ok:true}); });
 app.delete('/api/admin/blacklist/:type/:value', adminAuth.requireAdmin, adminAuth.requireRole('super_admin','admin'), (req,res)=>{ const list=operationsStore.store().blacklist[req.params.type]; if(!list) return res.status(400).json({error:'Некоректний список'}); operationsStore.store().blacklist[req.params.type]=list.filter(v=>v!==req.params.value); operationsStore.save(); res.json({ok:true}); });
