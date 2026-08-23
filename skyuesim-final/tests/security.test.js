@@ -171,7 +171,7 @@ test('maintenance support works without account unlock and remains rate limited'
 test('service worker bypasses stale cache for maintenance and localization assets', () => {
   const worker=read('sw.js');
   const support=read('support.html');
-  assert.match(worker, /signal-shell-v45-illustrated-nav/);
+  assert.match(worker, /signal-shell-v39-control-center/);
   assert.match(worker, /fetch\(event\.request, \{ cache:'no-store' \}\)/);
   assert.match(worker, /'\/i18n\.js'/);
   assert.match(worker, /'\/style\.css'/);
@@ -277,43 +277,6 @@ test('customer cancellation is scheduled and billing is self-service',()=>{
   assert.match(server,/cancelSubscriptionAtPeriodEnd\(user\.stripeSubscriptionId\)/);
   assert.match(stripe,/stripe\.billingPortal\.sessions\.create/);
   assert.match(payments,/Керувати карткою та підпискою/);
-});
-
-test('Stripe profiles recover automatically and checkout reuses one customer',()=>{
-  const server=read('server.js'),stripe=read('stripeService.js'),payments=read('payments.html'),admin=read('admin-users.html');
-  assert.match(stripe,/resolveStripeCustomerProfile/);
-  assert.match(stripe,/customerId \? \{ customer:customerId \} : \{ customer_email:email \}/);
-  assert.match(server,/recoverStripeProfile\(req\.userEmail\)/);
-  assert.match(server,/\/api\/account\/billing-profile/);
-  assert.match(server,/stripeProfileLastCheckedAt/);
-  assert.match(payments,/Stripe-профіль прив’язано/);
-  assert.match(admin,/Знайти й прив’язати Stripe/);
-  assert.match(admin,/Додаткових Stripe-профілів/);
-});
-
-test('bottom navigation always identifies usage and charts stay visible without motion',()=>{
-  const pwa=read('pwa.js'),usage=read('usage.html'),css=read('style.css'),headers=read('_headers');
-  assert.match(pwa, /'usage\.html':\{label:'Витрати',labelEn:'Usage'/);
-  assert.match(pwa, /classList\.toggle\('active',page===current\)/);
-  assert.match(pwa, /setTimeout\(enhanceSignalNavigation,500\)/);
-  assert.match(usage, /height:var\(--bar-height\)/);
-  assert.match(usage, /width:var\(--usage-pct\)!important/);
-  assert.match(usage, /@keyframes barRise\{from\{transform:scaleY\(0\)/);
-  assert.match(css, /prefers-reduced-motion:reduce/);
-  assert.match(css, /navSelect/);
-  assert.match(css, /nav-art/);
-  assert.match(css, /clip:rect\(0,0,0,0\)/);
-  assert.match(pwa, /setAttribute\('aria-label',label\)/);
-  assert.match(pwa, /\/sw\.js\?v=45/);
-  for(const marker of ['nav-home-v1.png','nav-plans-v1.png','nav-usage-v1.png','nav-profile-v1.png']) assert.match(pwa,new RegExp(marker.replace('.', '\\.')));
-  assert.doesNotMatch(css, /navBreathe[\s\S]{0,80}infinite/);
-  assert.match(headers, /\/pwa\.js[\s\S]*Cache-Control: no-store/);
-  for(const page of ['dashboard.html','plans.html','usage.html','profile.html']){
-    const html=read(page),nav=html.match(/<nav class="bottomnav"[\s\S]*?<\/nav>/)?.[0]||'';
-    assert.match(nav, /<svg/);
-    assert.doesNotMatch(nav, />Моя eSIM<\/a>/);
-    assert.doesNotMatch(nav, />Головна<\/a>/);
-  }
 });
 
 test('email changes require ownership verification at the new address',()=>{

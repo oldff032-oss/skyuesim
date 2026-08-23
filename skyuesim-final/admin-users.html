@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Користувачі — Signal Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="admin-shell">
+    <aside class="admin-sidebar">
+      <div class="brand"><div class="mark" style="width:32px;height:32px;font-size:15px;">🛡️</div><span style="font-size:15px;">Signal Admin</span></div>
+      <nav class="admin-nav">
+        <a href="admin-plan-changes.html">🔄 Зміни тарифів</a>
+        <a href="admin-dashboard.html">📊 Dashboard</a>
+        <a href="admin-tickets.html">🎫 Підтримка</a>
+        <a href="admin-users.html" class="active">👥 Користувачі</a>
+        <a href="admin-team.html" id="teamNavLink">🔑 Команда</a>
+        <a href="admin-audit.html" id="auditNavLink">🛡️ Журнал дій</a>
+        <a href="#" onclick="logout()">⏏ Вийти</a>
+      </nav>
+    </aside>
+
+    <main class="admin-main">
+      <h1 style="font-size:22px;">Користувачі</h1>
+      <p class="lead">Усі зареєстровані акаунти</p>
+      <div class="filter-bar"><input type="text" id="search" placeholder="Пошук за email..." style="min-width:260px;"></div>
+      <div class="filter-bar" style="margin-top:10px;">
+        <select id="userStatusFilter"><option value="">Усі статуси</option><option value="active">Активні</option><option value="blocked">Заблоковані</option><option value="payment_ok_esim_failed">Помилка eSIM</option><option value="pending_payment">Очікують оплату</option></select>
+        <select id="userPlanFilter"><option value="">Усі тарифи</option><option value="basic">Basic</option><option value="standard">Standard</option><option value="unlimited">Unlimited</option></select>
+        <select id="userUsageFilter"><option value="">Будь-який трафік</option><option value="80">80%+ трафіку</option><option value="no_esim">Без eSIM</option></select>
+        <button class="btn ghost" style="width:auto;padding:9px 12px;font-size:12px;" onclick="exportCsv()">CSV</button>
+      </div>
+      <div id="loading" class="shimmer" style="height:200px; margin-top:16px;"></div>
+
+      <table class="admin-table" id="table" style="display:none;">
+        <thead>
+          <tr><th>Email</th><th>Зареєстрований</th><th>Тариф</th><th>Статус</th><th>Використано</th><th>Дія</th></tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+      </table>
+      <div id="userDetailsModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:50;padding:20px;overflow:auto;">
+        <div class="card" style="max-width:680px;margin:5vh auto;position:relative;">
+          <button class="icon-btn" type="button" onclick="closeUserDetails()" style="position:absolute;right:12px;top:12px;">×</button>
+          <h2 style="font-size:18px;margin-right:36px;">Дані користувача</h2>
+          <div id="userDetailsIdentity" style="display:flex;align-items:center;gap:13px;margin-top:16px;padding:13px;border:1px solid var(--border);border-radius:15px;background:rgba(255,255,255,.025)"><div id="userDetailsAvatar" style="width:58px;height:58px;flex:none;border-radius:17px;background:linear-gradient(135deg,var(--blue),var(--violet));display:grid;place-items:center;background-size:cover;background-position:center;font-weight:800;font-size:20px"></div><div><b id="userDetailsName"></b><div id="userDetailsEmail" class="muted" style="font-size:12px;margin-top:3px"></div></div></div>
+          <pre id="userDetailsContent" style="margin-top:16px;white-space:pre-wrap;word-break:break-word;font-family:'Space Mono',monospace;font-size:12px;color:var(--text-muted);"></pre>
+          <div id="userDetailsActions" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:16px;"></div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script src="config.js"></script>
+  <script src="admin-common.js"></script>
+  <script>
+    requireAdminAuth();
+
+    let allUsers = [];
+    let currentDetailsEmail = null;
+    const escapeHtml = (value) => String(value || '').replace(/[&<>'"]/g, (char) => ({
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      "'": '&#39;',
+      '"': '&quot;'
+    }[char]));
+
+    async function load() {
+      try {
+        const res = await adminFetch('/api/admin/users');
+        if (!res.ok) throw new Error('Не вдалося отримати список користувачів');
+
+        allUsers = await res.json();
+        document.getElementById('table').style.display = 'table';
+        applyFilters();
+      } catch (error) {
+        alert(error.message || 'Помилка завантаження');
+      } finally {
+        document.getElementById('loading').style.display = 'none';
+      }
+    }
+
+    function render(users) {
+      document.getElementById('tbody').innerHTML = users.map((user) => {
+        const subscription = user.subscription || {};
+        const encodedEmail = encodeURIComponent(user.email);
+
+        const recoveryButton = `<button class="btn ${subscription.status === 'payment_ok_esim_failed' ? 'primary' : 'ghost'}"
+               style="padding:7px 10px;font-size:12px;"
+               onclick="recoverEsim('${encodedEmail}', '${subscription.plan || 'basic'}')">
+               Відновити eSIM
+             </button>`;
+
+        const blockButton = `<button class="btn ghost"
+          style="padding:7px 10px;font-size:12px;${subscription.status === 'blocked' ? 'color:var(--cyan);' : 'color:var(--danger);'}"
+          onclick="setUserBlocked('${encodedEmail}', ${subscription.status === 'blocked'})">
+          ${subscription.status === 'blocked' ? 'Розблокувати' : 'Заблокувати'}
+        </button>`;
+
+        const detailsButton = `<button class="btn ghost" style="padding:7px 10px;font-size:12px;" onclick="showUserDetails('${encodedEmail}')">Деталі</button> <a class="btn ghost" style="padding:7px 10px;font-size:12px;" href="admin-user-timeline.html?email=${encodedEmail}">Хронологія</a>`;
+
+        const usage = subscription.esim
+          ? `${subscription.esim.usedGb ?? 0} / ${subscription.esim.dataLimitGb ?? '∞'} ГБ`
+          : '—';
+
+        return `<tr>
+          <td>${escapeHtml(user.email)}</td>
+          <td>${user.createdAt ? new Date(user.createdAt).toLocaleDateString('uk-UA') : '—'}</td>
+          <td>${escapeHtml(subscription.plan || '—')}</td>
+          <td>${escapeHtml(subscription.status || 'Немає підписки')}${subscription.referredBy ? '<br><span class="muted" style="font-size:11px;">🎁 Запрошення</span>' : ''}</td>
+          <td>${usage}</td>
+          <td style="display:flex;gap:6px;flex-wrap:wrap;">${detailsButton}${recoveryButton}${blockButton}</td>
+        </tr>`;
+      }).join('') || '<tr><td colspan="6" class="muted">Немає користувачів</td></tr>';
+    }
+
+    async function recoverEsim(encodedEmail, defaultPlan = 'basic') {
+      const email = decodeURIComponent(encodedEmail);
+      const iccid = prompt(
+        `Введіть ICCID уже виданої або встановленої eSIM для ${email}. Оплата Stripe не повторюється.`
+      );
+
+      if (!iccid) return;
+
+      const plan = prompt('Оберіть тариф: basic, standard або unlimited.', defaultPlan);
+      if (!plan) return;
+
+      try {
+        const res = await adminFetch(`/api/admin/users/${encodedEmail}/recover-esim`, {
+          method: 'POST',
+          body: JSON.stringify({
+            iccid: iccid.replace(/\s/g, ''),
+            plan: plan.trim().toLowerCase()
+          })
+        });
+
+        const data = await res.json();
+
+        if (!res.ok) {
+          throw new Error(data.error || 'Не вдалося відновити eSIM');
+        }
+
+        alert('eSIM успішно відновлено. Оплата Stripe не повторювалася.');
+        await load();
+      } catch (error) {
+        alert(error.message || 'Помилка відновлення eSIM');
+      }
+    }
+
+    async function setUserBlocked(encodedEmail, isBlocked) {
+      const email = decodeURIComponent(encodedEmail);
+      const action = isBlocked ? 'розблокувати' : 'заблокувати';
+      if (!confirm(`${action.charAt(0).toUpperCase() + action.slice(1)} ${email}?`)) return;
+
+      try {
+        const res = await adminFetch(`/api/admin/users/${encodedEmail}/block`, {
+          method: 'PATCH',
+          body: JSON.stringify({ blocked: !isBlocked })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Не вдалося змінити статус користувача');
+        await load();
+      } catch (error) {
+        alert(error.message || 'Помилка зміни статусу користувача');
+      }
+    }
+
+    async function showUserDetails(encodedEmail) {
+      try {
+        currentDetailsEmail = decodeURIComponent(encodedEmail);
+        const res = await adminFetch(`/api/admin/users/${encodedEmail}`);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Не вдалося отримати дані користувача');
+        const subscription = data.subscription || {};
+        const esim = subscription.esim || {};
+        const purchases = Array.isArray(subscription.purchases) ? subscription.purchases : [];
+        const avatar=document.getElementById('userDetailsAvatar');
+        const displayName=data.account?.displayName||subscription.displayName||data.email;
+        avatar.style.backgroundImage=data.account?.avatarDataUrl?`url("${data.account.avatarDataUrl}")`:'';
+        avatar.textContent=data.account?.avatarDataUrl?'':displayName[0].toUpperCase();
+        document.getElementById('userDetailsName').textContent=displayName;
+        document.getElementById('userDetailsEmail').textContent=data.email;
+        const lines = [
+          `Email: ${data.email}`,
+          `Зареєстрований: ${data.account?.createdAt ? new Date(data.account.createdAt).toLocaleString('uk-UA') : '—'}`,
+          `Останній вхід: ${data.account?.lastLoginAt ? new Date(data.account.lastLoginAt).toLocaleString('uk-UA') : '—'}`,
+          `Тариф: ${subscription.plan || '—'}`,
+          `Статус: ${subscription.status || '—'}`,
+          `Запросив: ${subscription.referredBy || '—'}`,
+          `Винагорода: ${subscription.referralRewardStatus || '—'}`,
+          `Код бонусу: ${subscription.referralRewardPackageCode || '—'}`,
+          `Оновлено: ${subscription.updatedAt ? new Date(subscription.updatedAt).toLocaleString('uk-UA') : '—'}`,
+          `Push-пристроїв: ${data.security?.pushDevices ?? 0}`,
+          `Останнє автопоновлення: ${subscription.lastRenewalAt ? new Date(subscription.lastRenewalAt).toLocaleString('uk-UA') : '—'}`,
+          `Помилка автопоновлення: ${subscription.renewalError || '—'}`,
+          '',
+          'ІСТОРІЯ ПОКУПОК',
+          ...(purchases.length ? purchases.flatMap((purchase, index) => [
+            `${index + 1}. ${purchase.packageName || purchase.plan || 'Пакет'}${purchase.location ? ` · ${purchase.location}` : ''}`,
+            `   Обсяг/строк: ${purchase.dataLimitGb ?? 'безліміт'} ГБ · ${purchase.durationDays ?? '—'} днів`,
+            `   Оплата: ${purchase.amountCents == null ? '—' : (purchase.amountCents / 100).toFixed(2)} ${(purchase.currency || '').toUpperCase()} · ${purchase.paymentStatus || '—'}`,
+            `   Видача eSIM: ${purchase.fulfillmentStatus || '—'}${purchase.fulfillmentError ? ` · ${purchase.fulfillmentError}` : ''}`,
+            `   packageCode: ${purchase.packageCode || 'тарифний код із Render'} · Stripe Session: ${purchase.stripeSessionId || purchase.id}`,
+          ]) : ['Покупок ще не записано (старі оплати можна перевірити через Stripe/повернення).']),
+          '',
+          'eSIM',
+          `ICCID: ${esim.iccid || '—'}`,
+          `Номер замовлення: ${esim.orderNo || '—'}`,
+          `eSIM UID: ${esim.esimTranNo || '—'}`,
+          `Статус eSIM: ${esim.status || '—'}`,
+          `Використано: ${esim.usedGb ?? '—'} ГБ`,
+          `Залишилось: ${esim.remainingGb ?? '—'} ГБ`,
+          `Ліміт: ${esim.dataLimitGb ?? '—'} ГБ`,
+          `Активація: ${esim.activateTime || '—'}`,
+          `Завершення: ${esim.expiredTime || '—'}`,
+          `APN: ${esim.apn || '—'}`,
+          `Код активації: ${esim.activationCode || '—'}`,
+        ];
+        document.getElementById('userDetailsContent').textContent = lines.join('\n');
+        document.getElementById('userDetailsActions').innerHTML = `
+          <button class="btn ghost" style="width:auto;padding:9px 12px;font-size:12px;" onclick="adminUserAction('${encodedEmail}','resync-esim')">Оновити трафік</button>
+          <button class="btn ghost" style="width:auto;padding:9px 12px;font-size:12px;" onclick="adminUserAction('${encodedEmail}','resend-esim-instructions')">Інструкція eSIM</button>
+          <button class="btn primary" style="width:auto;padding:9px 12px;font-size:12px;" onclick="recoverEsim('${encodedEmail}','${subscription.plan || 'basic'}')">Відновити eSIM</button>
+          <button class="btn ghost" style="width:auto;padding:9px 12px;font-size:12px;" onclick="createCustomPackageCheckout('${encodedEmail}')">Продати пакет eSIM</button>
+          ${subscription.referredBy ? `<button class="btn ghost" style="width:auto;padding:9px 12px;font-size:12px;" onclick="prepareReferralReward('${encodedEmail}')">Підготувати 1 ГБ</button>` : ''}
+          ${subscription.referredBy ? `<button class="btn primary" style="width:auto;padding:9px 12px;font-size:12px;" onclick="creditReferralReward('${encodedEmail}')">Нарахувати 1 ГБ рефералу</button>` : ''}
+          <button class="btn ghost" style="width:auto;padding:9px 12px;font-size:12px;color:var(--danger);" onclick="adminUserAction('${encodedEmail}','revoke-sessions')">Завершити входи</button>
+          <button class="btn ghost" style="width:auto;padding:9px 12px;font-size:12px;" onclick="notifyUser('${encodedEmail}','push')">Push</button>
+          <button class="btn ghost" style="width:auto;padding:9px 12px;font-size:12px;" onclick="notifyUser('${encodedEmail}','email')">Email</button>
+          ${subscription.status === 'renewal_failed' ? `<button class="btn primary" style="width:auto;padding:9px 12px;font-size:12px;" onclick="adminUserAction('${encodedEmail}','retry-renewal')">Повторити автопоновлення</button>` : ''}
+          <button class="btn ghost" style="width:auto;padding:9px 12px;font-size:12px;" onclick="adminUserAction('${encodedEmail}','sync-stripe-status')">Синхронізувати Stripe</button>
+          <button class="btn ghost" style="width:auto;padding:9px 12px;font-size:12px;" onclick="syncPurchasesAndOpen('${encodedEmail}')">Завантажити покупки зі Stripe</button>
+          ${purchases.filter(item => item.fulfillmentStatus === 'failed').map(item => `<button class="btn primary" style="width:auto;padding:9px 12px;font-size:12px;" onclick="retryPurchaseProvision('${encodedEmail}','${encodeURIComponent(item.id)}')">Повторити видачу: ${String(item.packageName || item.plan || 'пакет').replace(/[&<>"']/g, '')}</button>`).join('')}
+          ${localStorage.getItem('signal_admin_role') === 'super_admin' ? `<button class="btn ghost" style="width:auto;padding:9px 12px;font-size:12px;color:#f6b84a;" onclick="refundUserPayment('${encodedEmail}')">Повернути кошти</button>` : ''}
+          ${localStorage.getItem('signal_admin_role') === 'super_admin' ? `<button class="btn ghost" style="width:auto;padding:9px 12px;font-size:12px;" onclick="location.href='admin-diagnostics.html?email=${encodedEmail}'">Логи користувача</button>` : ''}
+          ${localStorage.getItem('signal_admin_role') === 'super_admin' ? `<button class="btn" style="width:auto;padding:9px 12px;font-size:12px;background:var(--danger);border-color:var(--danger);" onclick="permanentlyDeleteUser()">Повністю видалити акаунт</button>` : ''}`;
+        document.getElementById('userDetailsModal').style.display = 'block';
+      } catch (error) {
+        alert(error.message || 'Помилка завантаження даних користувача');
+      }
+    }
+
+    function closeUserDetails() {
+      document.getElementById('userDetailsModal').style.display = 'none';
+    }
+
+    async function createCustomPackageCheckout(encodedEmail) {
+      const email = decodeURIComponent(encodedEmail);
+      const packageCode = prompt('Package code з eSIM Access, наприклад CKH139:');
+      if (!packageCode) return;
+      const packageName = prompt('Назва, яку побачить користувач у Stripe:', packageCode);
+      if (!packageName) return;
+      const price = prompt('Ціна для користувача в USD, наприклад 4.99:');
+      if (price === null) return;
+      const amountCents = Math.round(Number(String(price).replace(',', '.')) * 100);
+      if (!Number.isInteger(amountCents) || amountCents < 50) return alert('Вкажіть коректну ціну, мінімум $0.50.');
+      const dataLimit = prompt('Обсяг пакета в ГБ (необов’язково):', '');
+      const durationDays = prompt('Строк дії пакета в днях (наприклад 7 або 30):', '');
+      if (durationDays === null) return;
+      const location = prompt('Країна або регіон пакета (наприклад Czech Republic):', '');
+      if (location === null) return;
+      try {
+        const response = await adminFetch(`/api/admin/users/${encodedEmail}/custom-package-checkout`, {
+          method: 'POST',
+          body: JSON.stringify({ packageCode: packageCode.trim(), packageName: packageName.trim(), amountCents, currency: 'usd', dataLimitGb: dataLimit === '' ? null : Number(dataLimit), durationDays: durationDays === '' ? null : Number(durationDays), location: location.trim() })
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Не вдалося створити оплату');
+        await navigator.clipboard?.writeText(data.url);
+        prompt('Stripe-посилання створено й скопійовано. Надішли його користувачу:', data.url);
+      } catch (error) { alert(error.message); }
+    }
+
+    async function retryPurchaseProvision(encodedEmail, encodedPurchaseId) {
+      const email = decodeURIComponent(encodedEmail);
+      if (!confirm(`Повторити видачу саме цієї оплаченої eSIM для ${email}? Нова оплата не створюється, але вартість пакета може бути списана з балансу eSIM Access.`)) return;
+      try {
+        const response = await adminFetch(`/api/admin/users/${encodedEmail}/purchases/${encodedPurchaseId}/retry-provision`, { method:'POST' });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Не вдалося видати eSIM');
+        alert(`eSIM видано. Замовлення: ${data.esim?.orderNo || 'створено'}`);
+        await showUserDetails(encodedEmail); await load();
+      } catch (error) { alert(error.message); }
+    }
+
+    async function syncPurchasesAndOpen(encodedEmail) {
+      try {
+        const response = await adminFetch(`/api/admin/users/${encodedEmail}/sync-purchases`, { method:'POST' });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Не вдалося завантажити покупки');
+        window.location.href = `admin-purchases.html?email=${encodedEmail}`;
+      } catch (error) { alert(error.message); }
+    }
+
+    async function prepareReferralReward(encodedEmail) {
+      const selected = await selectCompatibleReferralTopup(encodedEmail);
+      if (!selected) return;
+      try {
+        const response = await adminFetch(`/api/admin/referrals/${encodedEmail}/prepare-reward`, { method: 'POST', body: JSON.stringify({ packageCode: selected.packageCode }) });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Не вдалося підготувати винагороду');
+        alert('Готово. Користувач отримав статус: винагорода очікується 12–24 години.');
+        await showUserDetails(encodedEmail); await load();
+      } catch (error) { alert(error.message); }
+    }
+
+    async function creditReferralReward(encodedEmail) {
+      const selected = await selectCompatibleReferralTopup(encodedEmail);
+      if (!selected) return;
+      const priceText = selected.price == null ? 'ціна не вказана провайдером' : `${selected.price.toFixed(2)} ${selected.currencyCode}`;
+      if (!confirm(`Підтвердити реальне поповнення ${selected.beneficiary} пакетом ${selected.name} (${selected.volumeGb} ГБ, ${priceText})? Кошти будуть списані з балансу eSIM Access.`)) return;
+      try {
+        const response = await adminFetch(`/api/admin/referrals/${encodedEmail}/credit-reward`, { method: 'POST', body: JSON.stringify({ packageCode: selected.packageCode }) });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Не вдалося нарахувати винагороду');
+        alert(`Готово. 1 ГБ нараховано користувачу ${data.beneficiary}.`);
+        await showUserDetails(encodedEmail); await load();
+      } catch (error) { alert(error.message); }
+    }
+
+    async function selectCompatibleReferralTopup(encodedEmail) {
+      try {
+        const response = await adminFetch(`/api/admin/referrals/${encodedEmail}/compatible-topups`);
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Не вдалося знайти сумісні пакети');
+        const options = data.packages.map((item, index) => {
+          const price = item.price == null ? 'ціна —' : `${item.price.toFixed(2)} ${item.currencyCode}`;
+          const validity = item.duration ? `${item.duration} ${item.durationUnit || 'дн.'}` : 'строк —';
+          return `${index + 1}. ${item.name} · ${item.volumeGb} ГБ · ${validity} · ${price} · ${item.packageCode}`;
+        }).join('\n');
+        const choice = prompt(`Отримувач бонусу: ${data.beneficiary}\nICCID закінчується на ${data.iccidLast4}\n\nВибери номер сумісного пакета 1 ГБ:\n\n${options}`, '1');
+        if (choice === null) return null;
+        const selected = data.packages[Number(choice) - 1];
+        if (!selected) { alert('Невірний номер пакета.'); return null; }
+        return { ...selected, beneficiary: data.beneficiary };
+      } catch (error) {
+        alert(error.message || 'Помилка пошуку top-up пакетів');
+        return null;
+      }
+    }
+
+    async function adminUserAction(encodedEmail, action) {
+      const email = decodeURIComponent(encodedEmail);
+      if(action === 'revoke-sessions' && !confirm(`Завершити всі активні входи ${email}?`)) return;
+      try {
+        const res = await adminFetch(`/api/admin/users/${encodedEmail}/${action}`, { method: 'POST' });
+        const data = await res.json();
+        if(!res.ok) throw new Error(data.error || 'Дію не виконано');
+        alert(action === 'revoke-sessions' ? `Завершено входів: ${data.revoked}` : 'Готово');
+        await showUserDetails(encodedEmail); await load();
+      } catch(error) { alert(error.message); }
+    }
+
+    async function notifyUser(encodedEmail, channel) {
+      const email = decodeURIComponent(encodedEmail);
+      const title = prompt('Заголовок повідомлення:', 'Сигнал');
+      if(title === null) return;
+      const message = prompt(`Текст для ${email}:`);
+      if(!message) return;
+      try {
+        const res = await adminFetch(`/api/admin/users/${encodedEmail}/notify`, { method:'POST', body:JSON.stringify({ channel, title, message }) });
+        const data = await res.json(); if(!res.ok) throw new Error(data.error || 'Не вдалося надіслати');
+        alert(channel === 'push' && !data.delivered ? 'Push-пристрій не підключено.' : 'Повідомлення надіслано.');
+      } catch(error) { alert(error.message); }
+    }
+
+    async function refundUserPayment(encodedEmail) {
+      const email = decodeURIComponent(encodedEmail);
+      try {
+        const response = await adminFetch(`/api/admin/users/${encodedEmail}/refundable-payments`);
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Не вдалося отримати платежі Stripe');
+        if (!data.payments?.length) return alert('Немає платежів, з яких ще можна повернути кошти.');
+        const options = data.payments.map((payment, index) => `${index + 1}. ${new Date(payment.createdAt).toLocaleString('uk-UA')} · доступно ${(payment.refundableAmount / 100).toFixed(2)} ${payment.currency.toUpperCase()} · ${payment.id}`).join('\n');
+        const choice = prompt(`Виберіть номер платежу користувача ${email}:\n\n${options}`, '1');
+        if (choice === null) return;
+        const payment = data.payments[Number(choice) - 1];
+        if (!payment) return alert('Невірний номер платежу.');
+        const amountText = prompt(`Сума повернення в ${payment.currency.toUpperCase()}. Максимум ${(payment.refundableAmount / 100).toFixed(2)}:`, (payment.refundableAmount / 100).toFixed(2));
+        if (amountText === null) return;
+        const amount = Math.round(Number(String(amountText).replace(',', '.')) * 100);
+        if (!Number.isInteger(amount) || amount < 1 || amount > payment.refundableAmount) return alert('Некоректна сума повернення.');
+        const reasonChoice = prompt('Причина: 1 — прохання клієнта, 2 — подвійний платіж, 3 — шахрайство', '1');
+        if (reasonChoice === null) return;
+        const reason = ({ '1':'requested_by_customer', '2':'duplicate', '3':'fraudulent' })[reasonChoice];
+        if (!reason) return alert('Некоректна причина.');
+        const confirmationEmail = prompt(`УВАГА: Stripe поверне ${(amount / 100).toFixed(2)} ${payment.currency.toUpperCase()} на початковий спосіб оплати, а всі активні підписки цього email будуть скасовані НЕГАЙНО. Цю дію не можна скасувати.\n\nВведіть точний email ${email} для підтвердження:`);
+        if (confirmationEmail === null) return;
+        if (confirmationEmail.trim().toLowerCase() !== email.toLowerCase()) return alert('Email не збігається. Повернення скасовано.');
+        if (!confirm('Останнє підтвердження: повернути кошти та негайно скасувати всі Stripe-підписки користувача?')) return;
+        const requestId = (crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`).replace(/[^A-Za-z0-9-]/g, '');
+        const refundResponse = await adminFetch(`/api/admin/users/${encodedEmail}/refund`, { method:'POST', body:JSON.stringify({ chargeId:payment.id, amount, reason, confirmationEmail, requestId }) });
+        const refundData = await refundResponse.json();
+        if (!refundResponse.ok) throw new Error(refundData.error || 'Stripe не виконав повернення');
+        const subscriptionResult = refundData.subscription?.canceled
+          ? `Підписку скасовано негайно. Закрито підписок: ${refundData.subscription.canceledCount}.`
+          : `УВАГА: кошти повернено, але не всі підписки вдалося скасувати. Перевір Stripe Dashboard вручну. Помилка: ${(refundData.subscription?.errors || []).map(item => item.error).join('; ')}`;
+        alert(`Повернення створено.\nStripe ID: ${refundData.refund.id}\nСума: ${(refundData.refund.amount / 100).toFixed(2)} ${refundData.refund.currency.toUpperCase()}\nСтатус: ${refundData.refund.status}\n\n${subscriptionResult}`);
+        await showUserDetails(encodedEmail); await load();
+      } catch (error) { alert(error.message); }
+    }
+
+    async function permanentlyDeleteUser() {
+      const email = currentDetailsEmail;
+      if (!email) return;
+      const encodedEmail = encodeURIComponent(email);
+      const warning = `Це назавжди видалить акаунт ${email}, пароль, PIN, усі сесії, eSIM-прив’язку, push-пристрої, тікети й нотатки. Активна Stripe-підписка буде скасована. Після цього цей email можна буде зареєструвати знову.\n\nВведи точний email для підтвердження:`;
+      const confirmationEmail = prompt(warning);
+      if (confirmationEmail === null) return;
+      if (confirmationEmail.trim().toLowerCase() !== email.toLowerCase()) return alert('Email не збігається. Видалення скасовано.');
+      if (!confirm(`ОСТАННЄ ПІДТВЕРДЖЕННЯ\n\nПовністю видалити ${email}? Відновити локальні дані буде неможливо.`)) return;
+
+      try {
+        const response = await adminFetch(`/api/admin/users/${encodedEmail}`, {
+          method: 'DELETE',
+          body: JSON.stringify({ confirmationEmail: confirmationEmail.trim().toLowerCase() })
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Не вдалося видалити акаунт');
+        closeUserDetails();
+        alert(`Акаунт ${email} повністю видалено. Цей email можна зареєструвати знову.${data.providerEsimNote ? `\n\n${data.providerEsimNote}` : ''}`);
+        await load();
+      } catch (error) {
+        alert(error.message || 'Помилка повного видалення');
+      }
+    }
+
+    function applyFilters(){
+      const query = document.getElementById('search').value.toLowerCase();
+      const status = document.getElementById('userStatusFilter').value;
+      const plan = document.getElementById('userPlanFilter').value;
+      const usage = document.getElementById('userUsageFilter').value;
+      render(allUsers.filter((user) => {
+        const subscription = user.subscription || {}; const esim = subscription.esim || {};
+        const percent = esim.dataLimitGb ? (Number(esim.usedGb || 0) / Number(esim.dataLimitGb)) * 100 : 0;
+        return user.email.toLowerCase().includes(query) && (!status || subscription.status === status) && (!plan || subscription.plan === plan) && (!usage || (usage === 'no_esim' ? !subscription.esim : percent >= Number(usage)));
+      }));
+    }
+
+    function exportCsv(){
+      const rows = [['Email','Тариф','Статус','Використано ГБ','Ліміт ГБ'], ...allUsers.map(user => [user.email, user.subscription?.plan || '', user.subscription?.status || '', user.subscription?.esim?.usedGb ?? '', user.subscription?.esim?.dataLimitGb ?? ''])];
+      const blob = new Blob([rows.map(row => row.map(value => `"${String(value).replace(/"/g,'""')}"`).join(',')).join('\n')], {type:'text/csv;charset=utf-8'});
+      const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = 'signal-users.csv'; link.click(); URL.revokeObjectURL(url);
+    }
+
+    document.getElementById('search').addEventListener('input', applyFilters);
+    ['userStatusFilter','userPlanFilter','userUsageFilter'].forEach((id) => document.getElementById(id).addEventListener('change', applyFilters));
+
+    load().then(() => {
+      const requestedEmail = new URLSearchParams(location.search).get('email');
+      if (requestedEmail) showUserDetails(encodeURIComponent(requestedEmail));
+    });
+  </script>
+</body>
+</html>

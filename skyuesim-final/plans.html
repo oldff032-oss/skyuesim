@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Тарифи — Сигнал</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=Space+Mono&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<script src="pwa.js"></script>
+<link rel="manifest" href="/manifest.json">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="theme-color" content="#05060d">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Сигнал">
+</head>
+<body class="has-bottomnav">
+  <div class="wrap">
+    <div class="brand"><div class="mark">📶</div><span>Сигнал</span></div>
+    <h1 style="margin-top:20px;">Обери тариф</h1>
+    <p class="lead">Підписка щомісячна, діє у 30+ країнах Європи. Скасувати можна будь-коли в профілі.</p>
+
+    <a href="travel-plans.html" class="glass" style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:15px;margin-top:18px;text-decoration:none;color:inherit;border-color:rgba(52,228,184,.35);width:100%;max-width:100%;min-width:0;box-sizing:border-box;overflow:hidden">
+      <div style="min-width:0"><div style="font-weight:700;overflow-wrap:anywhere">🌍 Більше пакетів для подорожей</div><div class="muted" style="font-size:12px;margin-top:3px;overflow-wrap:anywhere">Країни, регіони, 1–50+ ГБ та різні терміни</div></div><span style="color:var(--success);font-size:20px;flex:0 0 auto">→</span>
+    </a>
+
+    <div class="stagger">
+    <div class="tier glass selected" data-plan="basic" onclick="selectTier(this)">
+      <div class="tier-top">
+        <div><div class="tier-name">Базовий</div><div class="tier-data">10 ГБ / місяць</div></div>
+        <div class="tier-price"><b>$9.99</b><span>/міс</span></div>
+      </div>
+    </div>
+
+    <div class="tier glass" data-plan="standard" onclick="selectTier(this)">
+      <div class="tier-tag">Популярний</div>
+      <div class="tier-top">
+        <div><div class="tier-name">Стандарт</div><div class="tier-data">20 ГБ / місяць</div></div>
+        <div class="tier-price"><b>$19.99</b><span>/міс</span></div>
+      </div>
+    </div>
+
+    <div class="tier glass" data-plan="unlimited" onclick="selectTier(this)">
+      <div class="tier-top">
+        <div><div class="tier-name">Безліміт</div><div class="tier-data">Необмежено</div></div>
+        <div class="tier-price"><b>$34.99</b><span>/міс</span></div>
+      </div>
+    </div>
+    </div>
+
+    <div class="err-text" id="err" style="display:none;"></div>
+
+    <button class="btn" id="payBtn" style="margin-top:22px;" onclick="startCheckout()">Оформити підписку</button>
+    <p class="muted" style="margin-top:14px; text-align:center;">Натискаючи «Оформити підписку», перейдеш на захищену сторінку оплати Stripe.</p>
+  </div>
+
+  <nav class="bottomnav">
+    <a href="dashboard.html"><span class="ic">🏠</span>Головна</a>
+    <a href="plans.html" class="active"><span class="ic">📶</span>Тариф</a>
+    <a href="usage.html"><span class="ic">📊</span>Витрати</a>
+    <a href="profile.html"><span class="ic">👤</span>Профіль</a>
+  </nav>
+
+  <script src="config.js"></script>
+  <script>
+    const email = localStorage.getItem('signal_email');
+    const sessionToken = localStorage.getItem('signal_session_token');
+    if(!email||!sessionToken){ window.location.href = 'login.html'; }
+
+    let selectedPlan = 'basic';
+    function selectTier(el){
+      document.querySelectorAll('.tier').forEach(t=>t.classList.remove('selected'));
+      el.classList.add('selected');
+      selectedPlan = el.dataset.plan;
+      if(typeof signalReportDiagnostic==='function')signalReportDiagnostic('user_action','info','Monthly plan selected',{action:'monthly_plan_selected',plan:selectedPlan});
+    }
+
+    async function startCheckout(){
+      const err = document.getElementById('err');
+      const btn = document.getElementById('payBtn');
+      err.style.display = 'none';
+      if(typeof signalReportDiagnostic==='function')signalReportDiagnostic('user_action','info','Monthly checkout clicked',{action:'monthly_checkout_clicked',plan:selectedPlan});
+
+      btn.classList.add('loading');
+      btn.textContent = 'Зачекай...';
+
+      try{
+        const res = await fetch(`${API_URL}/api/create-subscription`, {
+          method:'POST',
+          headers:{'Content-Type':'application/json','x-session-token':sessionToken},
+          body: JSON.stringify({ plan: selectedPlan })
+        });
+        const data = await res.json();
+        if(!res.ok) throw new Error(data.error || 'Помилка сервера');
+
+        window.location.href = data.url;
+      }catch(e){
+        err.textContent = 'Не вдалося створити оплату: ' + e.message;
+        err.style.display = 'flex';
+        btn.classList.remove('loading');
+        btn.textContent = 'Оформити підписку';
+      }
+    }
+  </script>
+</body>
+</html>

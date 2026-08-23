@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Акаунт створено — Сигнал</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<link rel="manifest" href="/manifest.json">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="theme-color" content="#05060d">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Сигнал">
+<script src="pwa.js"></script>
+</head>
+<body>
+  <div class="wrap" style="justify-content:center; align-items:center; text-align:center;">
+    <div class="ring-wrap">
+      <svg><defs><linearGradient id="ringGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#22D3EE"/><stop offset="100%" stop-color="#34E4B8"/></linearGradient></defs>
+        <circle class="ring-track" cx="85" cy="85" r="78"></circle>
+        <circle class="ring-fill" cx="85" cy="85" r="78" stroke-dasharray="490" stroke-dashoffset="0"></circle>
+      </svg>
+      <div class="ring-center pulse check-draw">✅</div>
+    </div>
+
+    <h1 style="margin-top:24px; font-size:24px;">Account <em>ready</em></h1>
+    <p class="lead" style="max-width:280px; margin:10px auto 18px;">Твій акаунт створено. Тепер оформи підписку і отримай доступ до інтернету по всій Європі.</p>
+    <div id="referralNotice" class="glass" style="display:none;max-width:320px;padding:14px;margin-bottom:18px;font-size:13px;line-height:1.5;"></div>
+
+    <div style="width:100%; max-width:320px;">
+      <a class="btn" href="device-check.html">Продовжити</a>
+    </div>
+  </div>
+  <script src="config.js"></script>
+  <script>
+    (async()=>{ try { const response=await fetch(`${API_URL}/api/account/referral-status`,{headers:{'x-session-token':localStorage.getItem('signal_session_token')}}); const data=await response.json(); if(data.referredBy){const notice=document.getElementById('referralNotice');notice.style.display='block';notice.innerHTML='🎁 <b>Код запрошення прийнято</b><br>Винагорода буде нарахована протягом 12–24 годин.';} }catch(e){} })();
+  </script>
+</body>
+</html>
+

@@ -3,16 +3,18 @@
 // Кешує тільки статичну "оболонку" — самі дані (підписка, тікети) завжди
 // тягнуться наживо з бекенду, ніколи не кешуються.
 
-const CACHE_NAME = 'signal-shell-v45-illustrated-nav';
+const CACHE_NAME = 'signal-shell-v39-control-center';
 const SHELL_FILES = [
+  '/index.html',
+  '/style.css',
+  '/config.js',
   '/icon-192.png',
   '/icon-512.png',
   '/signal-premium-logo.png',
-  '/nav-home-v1.png',
-  '/nav-plans-v1.png',
-  '/nav-usage-v1.png',
-  '/nav-profile-v1.png',
   '/manifest.json',
+  '/pwa.js',
+  '/i18n.js',
+  '/coverage.js',
 ];
 
 self.addEventListener('install', (event) => {
@@ -24,8 +26,9 @@ self.addEventListener('install', (event) => {
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches.keys().then((keys) => Promise.all(keys.map((key) => caches.delete(key))))
-      .then(() => caches.open(CACHE_NAME)).then((cache) => cache.addAll(SHELL_FILES))
+    caches.keys().then((keys) =>
+      Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))
+    )
   );
   self.clients.claim();
 });
@@ -38,12 +41,7 @@ self.addEventListener('fetch', (event) => {
   // HTML and critical scripts are network-first so a newly deployed auth,
   // push or payment fix is not hidden behind an old PWA cache.
   const url = new URL(event.request.url);
-  const neverCache = ['/pwa.js','/config.js','/sw.js','/i18n.js','/style.css'].includes(url.pathname);
-  if (neverCache) {
-    event.respondWith(fetch(event.request, { cache:'no-store' }));
-    return;
-  }
-  const critical = event.request.mode === 'navigate';
+  const critical = event.request.mode === 'navigate' || ['/pwa.js','/config.js','/sw.js','/i18n.js','/style.css'].includes(url.pathname);
   if (critical) {
     event.respondWith(fetch(event.request, { cache:'no-store' }).then(response => {
       const copy = response.clone();

@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Нові дані входу — Сигнал</title>
+<link rel="stylesheet" href="style.css">
+<script src="pwa.js"></script>
+</head>
+<body>
+  <main class="wrap">
+    <div class="brand"><div class="mark">🔐</div><span>Сигнал</span></div>
+    <div id="loading" class="shimmer" style="height:260px;margin-top:22px;"></div>
+    <form id="form" class="glass glass-card" style="display:none;margin-top:22px;">
+      <h1>Нові дані входу</h1>
+      <p class="lead">Посилання одноразове. Після збереження старі сесії буде завершено.</p>
+      <div class="field-group"><label class="field-label" for="email">Новий email</label><input id="email" type="email" required autocomplete="email"></div>
+      <div class="field-group"><label class="field-label" for="password">Новий пароль</label><input id="password" type="password" minlength="8" required autocomplete="new-password"></div>
+      <div class="field-group"><label class="field-label" for="pin">Новий PIN</label><input id="pin" type="password" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required autocomplete="off" placeholder="6 цифр"></div>
+      <div id="message" class="err-text" style="display:none;"></div>
+      <button id="submit" class="btn" type="submit">Зберегти та увійти</button>
+    </form>
+    <div id="invalid" class="glass glass-card" style="display:none;margin-top:22px;text-align:center;"><h1>Посилання недійсне</h1><p class="lead" id="invalidText">Попроси підтримку створити нове.</p><a class="btn ghost" href="access-recovery.html" style="margin-top:16px;">Новий запит</a></div>
+  </main>
+  <script src="config.js"></script>
+  <script>
+    const token = new URLSearchParams(location.search).get('token') || '';
+    (async()=>{
+      try{
+        const response = await fetch(`${API_URL}/api/auth/admin-recovery/${encodeURIComponent(token)}`);
+        const data = await response.json();
+        if(!response.ok) throw new Error(data.error);
+        document.getElementById('form').style.display = 'block';
+      }catch(error){ document.getElementById('invalidText').textContent = error.message || 'Попроси підтримку створити нове посилання.'; document.getElementById('invalid').style.display = 'block'; }
+      document.getElementById('loading').style.display = 'none';
+    })();
+    document.getElementById('form').addEventListener('submit', async event => {
+      event.preventDefault();
+      const button = document.getElementById('submit'); const message = document.getElementById('message');
+      const pin = document.getElementById('pin').value;
+      if(!/^\d{6}$/.test(pin)){ message.textContent='PIN має містити рівно 6 цифр'; message.style.display='flex'; return; }
+      button.disabled = true; message.style.display = 'none';
+      try{
+        const response = await fetch(`${API_URL}/api/auth/admin-recovery/${encodeURIComponent(token)}`, {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({email:document.getElementById('email').value.trim(),password:document.getElementById('password').value,pin})
+        });
+        const data = await response.json(); if(!response.ok) throw new Error(data.error || 'Не вдалося відновити доступ');
+        localStorage.setItem('signal_session_token', data.sessionToken); localStorage.setItem('signal_email', data.email);
+        sessionStorage.setItem(`signal_app_unlocked:${data.sessionToken}`, '1');
+        location.href='dashboard.html';
+      }catch(error){ message.textContent=error.message; message.style.display='flex'; button.disabled=false; }
+    });
+  </script>
+</body>
+</html>

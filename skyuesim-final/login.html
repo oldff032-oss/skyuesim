@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Увійти — Сигнал</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<link rel="manifest" href="/manifest.json">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="theme-color" content="#05060d">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Сигнал">
+<script src="pwa.js"></script>
+</head>
+<body>
+  <div class="wrap">
+    <div class="brand"><div class="mark">📶</div><span>Сигнал</span></div>
+
+    <h1 style="margin-top:20px;">Welcome back</h1>
+    <p class="lead">Увійди у свій акаунт</p>
+    <div id="resetBanner" style="display:none; margin-top:14px; padding:12px 16px; background:rgba(52,228,184,0.1); border:1px solid rgba(52,228,184,0.3); border-radius:12px; color:var(--success); font-size:13px;">✅ Пароль оновлено. Увійди з новим паролем.</div>
+
+    <div class="field-group">
+      <label class="field-label">Email</label>
+      <input type="email" id="email" placeholder="you@example.com" autocomplete="email" />
+    </div>
+    <div class="field-group">
+      <label class="field-label">Password</label>
+      <div class="input-icon-wrap">
+        <input type="password" id="password" placeholder="••••••••" autocomplete="current-password" />
+        <button class="icon-btn" onclick="togglePw()" type="button">👁️</button>
+      </div>
+      <p class="muted" style="margin-top:8px; text-align:right;"><a href="forgot-password.html" style="color:var(--text-muted); text-decoration:none;">Забув(ла) пароль?</a></p>
+      <p class="muted" style="margin-top:10px; text-align:right;"><a href="access-recovery.html" style="color:var(--cyan); text-decoration:none;">Немає доступу до email?</a></p>
+    </div>
+    <div class="err-text" id="err" style="display:none;"></div>
+
+    <button class="btn" id="loginBtn" style="margin-top:12px;" onclick="doLogin()">Log In</button>
+    <p class="muted" style="text-align:center; margin-top:16px;">Ще немає акаунта? <a href="register-email.html" style="color:var(--cyan); text-decoration:none;">Створити</a></p>
+  </div>
+
+  <script src="config.js"></script>
+  <script>
+    if(new URLSearchParams(window.location.search).get('reset') === 'success'){
+      document.getElementById('resetBanner').style.display = 'block';
+    }
+
+    function togglePw(){
+      const inp = document.getElementById('password');
+      inp.type = inp.type === 'password' ? 'text' : 'password';
+    }
+
+    async function doLogin(){
+      const email = document.getElementById('email').value.trim();
+      const password = document.getElementById('password').value;
+      const err = document.getElementById('err');
+      const btn = document.getElementById('loginBtn');
+      err.style.display = 'none';
+
+      if(!email || !password){
+        err.textContent = 'Заповни обидва поля';
+        err.style.display = 'flex';
+        return;
+      }
+
+      btn.classList.add('loading');
+      btn.textContent = 'Входимо...';
+
+      try{
+        const res = await fetch(`${API_URL}/api/auth/login`, {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ email, password })
+        });
+        const data = await res.json();
+        if(!res.ok) throw new Error(data.error || 'Помилка входу');
+
+        localStorage.setItem('signal_session_token', data.sessionToken);
+        localStorage.setItem('signal_email', data.email);
+        localStorage.setItem('signal_language', data.language || 'uk');
+        for (const key of Object.keys(sessionStorage)) if (key.startsWith('signal_app_unlocked:')) sessionStorage.removeItem(key);
+        window.location.href = 'dashboard.html';
+      }catch(e){
+        err.textContent = e.message + '. Перевір мережу і спробуй ще раз.';
+        err.style.display = 'flex';
+        btn.classList.remove('loading');
+        btn.textContent = 'Log In';
+      }
+    }
+
+    document.getElementById('password').addEventListener('keydown', e => { if(e.key === 'Enter') doLogin(); });
+  </script>
+</body>
+</html>

@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Центр безпеки — Сигнал</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<script src="pwa.js"></script>
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#05060d">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+</head>
+<body class="has-bottomnav">
+  <div class="wrap">
+    <div class="brand"><div class="mark">🛡️</div><span>Сигнал</span></div>
+    <h1 style="margin-top:20px;">Центр <em>безпеки</em></h1>
+    <p class="lead">Перевіряй, де твій акаунт зараз відкритий.</p>
+
+    <div class="glass glass-card" style="margin-top:22px;">
+      <p style="font-family:'Space Grotesk',sans-serif;font-weight:700;">Твої входи</p>
+      <p class="muted" style="margin-top:6px;">Поточний пристрій позначено окремо. Незнайомий вхід — привід одразу завершити інші сесії.</p>
+      <div id="sessions" style="margin-top:14px;"><div class="shimmer" style="height:72px;"></div></div>
+    </div>
+
+    <button id="revokeBtn" class="btn danger" style="margin-top:16px;" onclick="revokeOthers()">Вийти з інших пристроїв</button>
+    <button id="faceIdBtn" class="btn" style="margin-top:12px;">Увімкнути Face ID</button>
+    <p id="message" class="muted" style="text-align:center;margin-top:12px;"></p>
+
+    <a class="btn ghost" href="forgot-password.html" style="margin-top:18px;">Змінити пароль</a>
+  </div>
+
+  <nav class="bottomnav">
+    <a href="dashboard.html"><span class="ic">🏠</span>Головна</a>
+    <a href="plans.html"><span class="ic">📶</span>Тариф</a>
+    <a href="usage.html"><span class="ic">📊</span>Витрати</a>
+    <a href="profile.html" class="active"><span class="ic">👤</span>Профіль</a>
+  </nav>
+
+  <script src="config.js"></script>
+  <script>
+    const token = localStorage.getItem('signal_session_token');
+    if (!token) window.location.href = 'login.html';
+    const headers = { 'x-session-token': token };
+    const date = (value) => new Date(value).toLocaleString('uk-UA', { dateStyle:'medium', timeStyle:'short' });
+
+    async function loadSessions(){
+      const res = await fetch(`${API_URL}/api/account/sessions`, { headers });
+      const data = await res.json();
+      if(!res.ok){ window.location.href = 'login.html'; return; }
+      document.getElementById('sessions').innerHTML = data.sessions.map(session => `
+        <div style="display:flex;gap:12px;align-items:flex-start;padding:12px 0;border-top:1px solid var(--glass-border);">
+          <span style="font-size:19px;">${session.current ? '📱' : '🖥️'}</span>
+          <div style="min-width:0;flex:1;"><div style="font-size:13px;font-weight:600;">${escapeHtml(session.deviceName)} ${session.current ? '<span style="color:var(--success);font-size:11px;">• цей пристрій</span>' : ''}</div><div class="muted" style="margin-top:3px;font-size:11px;">Вхід: ${date(session.createdAt)}</div></div>
+        </div>`).join('');
+    }
+    function escapeHtml(value){ return String(value || '').replace(/[&<>'"]/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[char])); }
+    async function revokeOthers(){
+      const button = document.getElementById('revokeBtn');
+      button.disabled = true; button.textContent = 'Завершуємо входи…';
+      try{
+        const res = await fetch(`${API_URL}/api/account/sessions/revoke-others`, { method:'POST', headers });
+        const data = await res.json();
+        if(!res.ok) throw new Error(data.error || 'Не вдалося завершити сесії');
+        document.getElementById('message').textContent = data.revoked ? `Завершено входів: ${data.revoked}.` : 'Інших активних входів немає.';
+        await loadSessions();
+      }catch(error){ document.getElementById('message').textContent = error.message; }
+      finally { button.disabled = false; button.textContent = 'Вийти з інших пристроїв'; }
+    }
+    loadSessions();
+  </script>
+  <script type="module">
+    const button=document.getElementById('faceIdBtn');
+    import('https://cdn.jsdelivr.net/npm/@simplewebauthn/browser@13.3.0/+esm').then(({startRegistration})=>{
+      button.onclick=async()=>{const token=localStorage.getItem('signal_session_token');try{button.disabled=true;button.textContent='Підтвердь Face ID…';let r=await fetch(`${API_URL}/api/account/passkeys/register/options`,{method:'POST',headers:{'x-session-token':token}});let options=await r.json();if(!r.ok)throw new Error(options.error);const response=await startRegistration({optionsJSON:options});r=await fetch(`${API_URL}/api/account/passkeys/register/verify`,{method:'POST',headers:{'Content-Type':'application/json','x-session-token':token},body:JSON.stringify(response)});const data=await r.json();if(!r.ok)throw new Error(data.error);button.textContent='Face ID увімкнено';alert('Face ID успішно увімкнено');}catch(e){alert(`Face ID не увімкнено: ${e.message}`)}finally{button.disabled=false}};
+    }).catch(()=>{button.onclick=()=>alert('Не вдалося завантажити модуль Face ID. Перевір інтернет і онови сторінку.');});
+  </script>
+</body>
+</html>
+

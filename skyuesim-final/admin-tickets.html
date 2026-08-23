@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Support — E7 Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<style>
+  .ticket-stat{ display:flex; align-items:center; gap:12px; padding:14px 18px; cursor:pointer; }
+  .ticket-stat .ic-box{ width:38px; height:38px; border-radius:11px; display:flex; align-items:center; justify-content:center; font-size:17px; flex-shrink:0; }
+  .ticket-stat .num{ font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:19px; }
+  .ticket-stat .lbl{ font-size:11px; color:var(--text-muted); }
+  .ticket-stat.active{ border-color:var(--blue); }
+
+  .avatar{ width:32px; height:32px; border-radius:50%; background:linear-gradient(135deg,var(--blue),var(--violet)); display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; flex-shrink:0; }
+  .user-cell{ display:flex; align-items:center; gap:10px; }
+  .user-cell .name{ font-size:13px; }
+  .user-cell .email{ font-size:11px; color:var(--text-muted); }
+
+  .prio-dot{ display:inline-flex; align-items:center; gap:6px; font-size:12.5px; }
+  .prio-dot::before{ content:""; width:7px; height:7px; border-radius:50%; background:currentColor; }
+  .prio-dot.normal{ color:var(--text-muted); }
+  .prio-dot.priority{ color:var(--blue); }
+  .prio-dot.high{ color:#f5a623; }
+  .prio-dot.critical{ color:var(--danger); }
+
+  .status-badge{ font-size:10.5px; font-weight:700; padding:5px 11px; border-radius:8px; text-transform:none; }
+  .status-badge.open{ background:rgba(255,94,94,0.15); color:var(--danger); }
+  .status-badge.in_progress{ background:rgba(59,130,246,0.15); color:var(--blue); }
+  .status-badge.waiting_customer{ background:rgba(245,166,35,0.15); color:#f5a623; }
+  .status-badge.resolved, .status-badge.closed{ background:rgba(52,228,184,0.15); color:var(--success); }
+</style>
+</head>
+<body>
+  <div class="admin-shell">
+    <aside class="admin-sidebar">
+      <div class="brand"><div class="mark" style="width:32px;height:32px;font-size:15px;">🛠️</div><span style="font-size:15px;">E7 Admin</span></div>
+      <nav class="admin-nav">
+        <a href="admin-dashboard.html">📊 Dashboard</a>
+        <a href="admin-tickets.html" class="active">🎫 Support</a>
+        <a href="admin-users.html">👥 Users</a>
+        <a href="admin-team.html" id="teamNavLink">🔑 Команда</a>
+        <a href="admin-audit.html" id="auditNavLink">🛡️ Audit Log</a>
+        <a href="#" onclick="logout()">⎋ Вийти</a>
+      </nav>
+    </aside>
+    <main class="admin-main">
+      <h1 style="font-size:22px;">Тікети</h1>
+
+      <div class="stat-grid" id="statCards" style="grid-template-columns:repeat(5,1fr);"></div>
+
+      <div class="filter-bar">
+        <input type="text" id="search" placeholder="Пошук тікета..." style="min-width:220px;" />
+        <select id="statusFilter">
+          <option value="">Усі статуси</option>
+          <option value="open">Відкритий</option>
+          <option value="in_progress">В роботі</option>
+          <option value="waiting_customer">Очікує клієнта</option>
+          <option value="resolved">Вирішено</option>
+          <option value="closed">Закрито</option>
+        </select>
+        <select id="priorityFilter">
+          <option value="">Усі пріоритети</option>
+          <option value="normal">Normal</option>
+          <option value="priority">Priority</option>
+          <option value="high">High</option>
+          <option value="critical">Critical</option>
+        </select>
+      </div>
+
+      <div id="loading" class="shimmer" style="height:200px; margin-top:16px;"></div>
+      <table class="admin-table" id="table" style="display:none;">
+        <thead><tr><th>ID</th><th>Користувач</th><th>Тема</th><th>Категорія</th><th>Відповідальний</th><th>Пріоритет</th><th>Статус</th><th>Оновлено</th></tr></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </main>
+  </div>
+
+  <script src="config.js"></script>
+  <script src="admin-common.js"></script>
+  <script>
+    requireAdminAuth();
+    const statusLabels = { open:'Відкритий', in_progress:'В роботі', waiting_customer:'Очікує клієнта', resolved:'Вирішено', closed:'Закрито' };
+
+    async function loadStats(){
+      const res = await adminFetch('/api/admin/tickets');
+      const all = await res.json();
+      const counts = {
+        total: all.length,
+        open: all.filter(t=>t.status==='open').length,
+        in_progress: all.filter(t=>t.status==='in_progress').length,
+        waiting_customer: all.filter(t=>t.status==='waiting_customer').length,
+        closed_today: all.filter(t=>t.status==='closed' && new Date(t.updatedAt).toDateString()===new Date().toDateString()).length,
+      };
+      document.getElementById('statCards').innerHTML = `
+        <div class="glass ticket-stat" onclick="setFilter('')"><div class="ic-box" style="background:rgba(59,130,246,0.15);">🎫</div><div><div class="num">${counts.total}</div><div class="lbl">Всі тікети</div></div></div>
+        <div class="glass ticket-stat" onclick="setFilter('open')"><div class="ic-box" style="background:rgba(255,94,94,0.15);">🔴</div><div><div class="num">${counts.open}</div><div class="lbl">Відкриті</div></div></div>
+        <div class="glass ticket-stat" onclick="setFilter('in_progress')"><div class="ic-box" style="background:rgba(139,92,246,0.15);">⏳</div><div><div class="num">${counts.in_progress}</div><div class="lbl">В роботі</div></div></div>
+        <div class="glass ticket-stat" onclick="setFilter('waiting_customer')"><div class="ic-box" style="background:rgba(245,166,35,0.15);">⏸️</div><div><div class="num">${counts.waiting_customer}</div><div class="lbl">Очікують клієнта</div></div></div>
+        <div class="glass ticket-stat" onclick="setFilter('closed')"><div class="ic-box" style="background:rgba(52,228,184,0.15);">✅</div><div><div class="num">${counts.closed_today}</div><div class="lbl">Закриті сьогодні</div></div></div>`;
+    }
+    function setFilter(status){ document.getElementById('statusFilter').value = status; load(); }
+
+    async function load(){
+      const search = document.getElementById('search').value;
+      const status = document.getElementById('statusFilter').value;
+      const priority = document.getElementById('priorityFilter').value;
+      const params = new URLSearchParams({ ...(search&&{search}), ...(status&&{status}), ...(priority&&{priority}) });
+
+      try{
+        const res = await adminFetch(`/api/admin/tickets?${params}`);
+        const tickets = await res.json();
+        document.getElementById('loading').style.display = 'none';
+        document.getElementById('table').style.display = 'table';
+        document.getElementById('tbody').innerHTML = tickets.map(t => `
+          <tr onclick="window.location.href='admin-ticket.html?id=${t.id}'">
+            <td>#${t.id}</td>
+            <td><div class="user-cell"><div class="avatar">${t.email[0].toUpperCase()}</div><div><div class="name">${t.email.split('@')[0]}</div><div class="email">${t.email}</div></div></div></td>
+            <td>${t.subject}</td>
+            <td>${t.category === 'access_recovery' ? '🔐 Відновлення доступу' : t.category}</td>
+            <td>${t.assignedTo || '<span class="muted">Не призначено</span>'}</td>
+            <td><span class="prio-dot ${t.priority}">${t.priority}</span></td>
+            <td><span class="status-badge ${t.status}">${statusLabels[t.status]||t.status}</span></td>
+            <td class="muted">${new Date(t.updatedAt).toLocaleString('uk-UA')}</td>
+          </tr>`).join('') || '<tr><td colspan="8" class="muted">Нічого не знайдено</td></tr>';
+      }catch(e){}
+    }
+
+    document.getElementById('search').addEventListener('input', load);
+    document.getElementById('statusFilter').addEventListener('change', load);
+    document.getElementById('priorityFilter').addEventListener('change', load);
+    loadStats();
+    load();
+  </script>
+</body>
+</html>

@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Перевірка пристрою — Сигнал</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=Space+Mono&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<link rel="manifest" href="/manifest.json">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="theme-color" content="#05060d">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Сигнал">
+<script src="pwa.js"></script>
+</head>
+<body>
+  <div class="wrap">
+    <div class="brand"><div class="mark">📶</div><span>Сигнал</span></div>
+    <h1>Перевірка пристрою</h1>
+    <p class="lead">Не всі телефони підтримують eSIM. Перевіримо твій, перш ніж переходити до оплати.</p>
+
+    <div class="check-ring" id="ring"><div class="icon" id="ringIcon">⏳</div></div>
+    <div class="check-result" id="resultText">Перевіряємо...</div>
+    <div class="check-device" id="deviceText"></div>
+
+    <a class="btn" id="continueBtn" href="plans.html" style="display:none;">Продовжити</a>
+    <a class="btn ghost" id="anywayBtn" href="plans.html" style="display:none;">Все одно продовжити</a>
+  </div>
+
+  <script>
+    // Реальна (проста) перевірка за User-Agent. Не 100% точна (браузер не
+    // завжди видає точну модель), але покриває більшість поширених випадків:
+    // iPhone XS і новіші підтримують eSIM, більшість Android з 2019+ теж.
+    function checkEsimSupport(ua) {
+      // iPhone: моделі XR/XS (2018) і новіші підтримують eSIM.
+      // Старі iPhone (X, 8 і раніше) — ні.
+      const iphoneMatch = ua.match(/iPhone OS (\d+)_/);
+      if (/iPhone/.test(ua)) {
+        // Не можемо надійно визначити модель iPhone з UA, лише версію iOS.
+        // eSIM з'явився в iOS 12.1+ (для iPhone XS/XR), тож орієнтуємось на це.
+        if (iphoneMatch && parseInt(iphoneMatch[1]) >= 12) {
+          return { supported: true, confidence: 'medium', label: 'iPhone (iOS ' + iphoneMatch[1] + '+)' };
+        }
+        return { supported: false, confidence: 'low', label: 'iPhone (стара версія iOS)' };
+      }
+      if (/iPad/.test(ua)) {
+        return { supported: true, confidence: 'medium', label: 'iPad' };
+      }
+      if (/Android/.test(ua)) {
+        const androidMatch = ua.match(/Android (\d+)/);
+        // Більшість флагманів Android з 2019+ (Android 9+) мають eSIM,
+        // але це залежить від конкретної моделі, не тільки версії ОС.
+        if (androidMatch && parseInt(androidMatch[1]) >= 9) {
+          return { supported: true, confidence: 'low', label: 'Android ' + androidMatch[1] };
+        }
+        return { supported: false, confidence: 'low', label: 'Android (стара версія)' };
+      }
+      return { supported: null, confidence: 'none', label: 'Невідомий пристрій' };
+    }
+
+    setTimeout(() => {
+      const result = checkEsimSupport(navigator.userAgent);
+      const ring = document.getElementById('ring');
+      const icon = document.getElementById('ringIcon');
+      const text = document.getElementById('resultText');
+      const device = document.getElementById('deviceText');
+
+      device.textContent = result.label;
+
+      if (result.supported === true) {
+        ring.classList.add('ok');
+        icon.textContent = '✅';
+        text.textContent = 'Схоже, пристрій підтримує eSIM';
+        text.classList.add('ok');
+        document.getElementById('continueBtn').style.display = 'block';
+        if (result.confidence === 'low') {
+          const note = document.createElement('p');
+          note.className = 'muted';
+          note.style.marginTop = '10px';
+          note.textContent = 'Не можемо перевірити зі 100% точністю через браузер — якщо не впевнений(а), звір модель у Налаштування → Про пристрій.';
+          document.querySelector('.wrap').insertBefore(note, document.getElementById('continueBtn'));
+        }
+      } else if (result.supported === false) {
+        ring.classList.add('bad');
+        icon.textContent = '⚠️';
+        text.textContent = 'Цей пристрій, ймовірно, не підтримує eSIM';
+        text.classList.add('bad');
+        document.getElementById('anywayBtn').style.display = 'block';
+      } else {
+        icon.textContent = '❔';
+        text.textContent = 'Не вдалося визначити пристрій';
+        document.getElementById('anywayBtn').style.display = 'block';
+      }
+    }, 900);
+  </script>
+</body>
+</html>
+

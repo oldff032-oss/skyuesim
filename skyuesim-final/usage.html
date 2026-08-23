@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Витрати — Сигнал</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=Space+Mono&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<script src="pwa.js"></script>
+<link rel="manifest" href="/manifest.json">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="theme-color" content="#05060d">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Сигнал">
+</head>
+<body class="has-bottomnav">
+  <div class="wrap">
+    <div class="brand"><div class="mark">📶</div><span>Сигнал</span></div>
+    <h1 style="margin-top:20px;">Витрати трафіку</h1>
+    <p class="lead">Скільки даних ти використав(ла) цього циклу</p>
+
+    <div id="loading" class="shimmer" style="height:160px; margin-top:20px;"></div>
+    <div id="content" style="display:none;"></div>
+  </div>
+
+  <nav class="bottomnav">
+    <a href="dashboard.html"><span class="ic">🏠</span>Головна</a>
+    <a href="plans.html"><span class="ic">📶</span>Тариф</a>
+    <a href="usage.html" class="active"><span class="ic">📊</span>Витрати</a>
+    <a href="profile.html"><span class="ic">👤</span>Профіль</a>
+  </nav>
+
+  <script src="config.js"></script>
+  <script>
+    const email = localStorage.getItem('signal_email');
+    if(!email){ window.location.href = 'login.html'; }
+    const appLanguage = localStorage.getItem('signal_language') === 'en' ? 'en' : 'uk';
+    const appLocale = appLanguage === 'en' ? 'en-US' : 'uk-UA';
+    const dataUnits = appLanguage === 'en' ? {b:'B',kb:'KB',mb:'MB',gb:'GB'} : {b:'Б',kb:'КБ',mb:'МБ',gb:'ГБ'};
+
+    function providerDate(value){
+      if(value == null || value === '') return null;
+      const numeric = Number(value);
+      const date = Number.isFinite(numeric) && String(value).trim() !== ''
+        ? new Date(numeric < 1e11 ? numeric * 1000 : numeric)
+        : new Date(value);
+      return Number.isNaN(date.getTime()) ? null : date;
+    }
+
+    function formatGb(value){
+      const number = Number(value);
+      return Number.isFinite(number) ? `${number.toLocaleString(appLocale, { minimumFractionDigits:2, maximumFractionDigits:4 })} ${dataUnits.gb}` : '—';
+    }
+    function formatBytes(value){const bytes=Number(value);if(!Number.isFinite(bytes)||bytes<0)return '—';if(bytes<1024)return `${Math.round(bytes).toLocaleString(appLocale)} ${dataUnits.b}`;if(bytes<1024**2)return `${(bytes/1024).toLocaleString(appLocale,{maximumFractionDigits:2})} ${dataUnits.kb}`;if(bytes<1024**3)return `${(bytes/1024**2).toLocaleString(appLocale,{minimumFractionDigits:2,maximumFractionDigits:2})} ${dataUnits.mb}`;return `${(bytes/1024**3).toLocaleString(appLocale,{minimumFractionDigits:2,maximumFractionDigits:4})} ${dataUnits.gb}`;}
+
+    async function load(){
+      const loading = document.getElementById('loading');
+      const content = document.getElementById('content');
+      try{
+        const sessionToken=localStorage.getItem('signal_session_token');
+        const res = await fetch(`${API_URL}/api/status`,{headers:{'x-session-token':sessionToken}});
+        const data = await res.json();
+        loading.style.display = 'none';
+        content.style.display = 'block';
+
+        if(data.status !== 'active' || !data.esim){
+          content.innerHTML = `<div class="card"><p class="muted">Немає активної підписки. <a href="plans.html" style="color:var(--cyan);">Обрати тариф</a></p></div>`;
+          return;
+        }
+
+        let limitGb = data.esim.dataLimitGb;
+        let usedGb = data.esim.usedGb || 0;
+        let apn = data.esim.apn;
+        let expiredTime = data.esim.expiredTime;
+        let activateTime = data.esim.activateTime;
+        let remainingGb = data.esim.remainingGb ?? (limitGb == null ? null : Math.max(0, limitGb - usedGb));
+        let lastUpdateTime = data.esim.lastUpdateTime;
+        let usedBytes = data.esim.usedBytes ?? Math.round(Number(usedGb||0)*(1024**3));
+        let totalBytes = data.esim.totalBytes ?? (limitGb==null?null:Math.round(Number(limitGb)*(1024**3)));
+        let remainingBytes = data.esim.remainingBytes ?? (totalBytes==null?null:Math.max(0,totalBytes-usedBytes));
+
+        // Тягнемо СВІЖІ дані використання з eSIM Access (не з кешу)
+        try{
+          const usageRes = await fetch(`${API_URL}/api/usage`,{headers:{'x-session-token':sessionToken}});
+          const usageData = await usageRes.json();
+          if(usageRes.ok){
+            usedGb = usageData.usedGb;
+            limitGb = usageData.totalGb ?? limitGb;
+            remainingGb = usageData.remainingGb;
+            apn = usageData.apn || apn;
+            expiredTime = usageData.expiredTime || expiredTime;
+            activateTime = usageData.activateTime || activateTime;
+            lastUpdateTime = usageData.lastUpdateTime || lastUpdateTime;
+            usedBytes = usageData.usedBytes;
+            totalBytes = usageData.totalBytes;
+            remainingBytes = usageData.remainingBytes;
+          }
+        }catch(e){ /* якщо не вдалось оновити — показуємо останнє відоме значення */ }
+
+        const pct = totalBytes ? Math.min(100, Math.round((usedBytes / totalBytes) * 100)) : 0;
+        const isLow = totalBytes && pct >= 80;
+        let trafficAlertHtml = '';
+        if(limitGb){
+          try{
+            const sessionToken = localStorage.getItem('signal_session_token');
+            const preferencesRes = await fetch(`${API_URL}/api/account/preferences`, { headers: { 'x-session-token': sessionToken } });
+            const preferences = await preferencesRes.json();
+            const reached = (preferences.trafficAlertThresholds || []).filter(threshold => pct >= threshold).pop();
+            if(reached){
+              trafficAlertHtml = `<div class="card" style="border-color:var(--danger);"><p style="color:var(--danger);font-size:13px;display:flex;align-items:center;gap:8px;">⚠️ Використано ${pct}% трафіку. Досягнуто поріг попередження ${reached}%.</p><a href="traffic-alerts.html" class="muted" style="display:block;margin-top:8px;color:var(--cyan);font-size:12px;">Змінити сповіщення</a></div>`;
+            }
+          }catch(e){ /* settings are optional; usage must remain available */ }
+        }
+
+        // Дні до закінчення eSIM
+        let daysLeftHtml = '';
+        const expiresAt = providerDate(expiredTime);
+        if(expiresAt){
+          const daysLeft = Math.ceil((expiresAt - new Date()) / 86400000);
+          daysLeftHtml = daysLeft >= 0
+            ? `<div class="card"><div style="display:flex; justify-content:space-between; align-items:center;"><span class="muted">Днів до закінчення eSIM</span><b style="font-family:'Space Mono',monospace;">${daysLeft}</b></div></div>`
+            : `<div class="card"><span class="status-pill off"><span class="dot"></span>Термін дії eSIM завершився</span></div>`;
+        }
+
+        // Прогноз закінчення трафіку за поточним темпом
+        let forecastHtml = '';
+        if(limitGb && usedGb > 0 && activateTime){
+          const daysSinceActivation = Math.max(1, (Date.now() - new Date(activateTime).getTime()) / 86400000);
+          const dailyAvg = usedGb / daysSinceActivation;
+          if(dailyAvg > 0){
+            const remainingGb = Math.max(0, limitGb - usedGb);
+            const daysUntilOut = remainingGb / dailyAvg;
+            const projectedDate = new Date(Date.now() + daysUntilOut * 86400000);
+            const dateStr = projectedDate.toLocaleDateString(appLocale, { day:'numeric', month:'long' });
+            forecastHtml = `<div class="card"><p class="muted">При такому темпі використання (~${dailyAvg.toFixed(2)} ГБ/день) трафіку вистачить приблизно до <b style="color:var(--text);">${dateStr}</b>.</p></div>`;
+          }
+        } else if(limitGb) {
+          forecastHtml = `<div class="card"><p class="muted">Прогноз з'явиться, коли назбирається трохи даних про використання.</p></div>`;
+        }
+
+        let historyHtml = '';
+        try{
+          const historyRes = await fetch(`${API_URL}/api/account/usage-history`, { headers: { 'x-session-token': localStorage.getItem('signal_session_token') } });
+          const historyData = await historyRes.json();
+          const history = (historyData.history || []).slice(-14);
+          if(history.length){
+            const max = Math.max(...history.map(item => Number(item.usedGb) || 0), 0.01);
+            historyHtml = `<div class="card"><div class="usage-top"><span>Історія використання</span><b>${history.length} дн.</b></div><div style="height:86px;display:flex;align-items:flex-end;gap:5px;margin-top:14px;">${history.map(item => `<div title="${item.day}: ${item.usedGb} ГБ" style="flex:1;min-width:7px;height:${Math.max(7,Math.round((Number(item.usedGb)||0)/max*100))}%;border-radius:5px 5px 2px 2px;background:linear-gradient(180deg,var(--cyan),var(--blue));"></div>`).join('')}</div><p class="muted" style="font-size:11px;margin-top:9px;">Точки зберігаються після оновлення даних у застосунку.</p></div>`;
+          }
+        }catch(e){}
+
+        content.innerHTML = `
+          ${trafficAlertHtml || (isLow ? `<div class="card" style="border-color:var(--danger);"><p style="color:var(--danger); font-size:13px; display:flex; align-items:center; gap:8px;">⚠️ Використано понад 80% трафіку тарифу</p></div>` : '')}
+
+          <div class="card">
+            <div class="usage-top"><span>Використано</span><b>${formatBytes(usedBytes)}${totalBytes!=null?` / ${formatBytes(totalBytes)}`:' · безліміт'}</b></div>
+            ${limitGb ? `<div class="usage-track"><div class="usage-fill" style="width:${pct}%; ${isLow ? 'background:linear-gradient(90deg,#f5a623,var(--danger));' : ''}"></div></div>` : ''}
+            ${remainingBytes != null ? `<p class="muted" style="margin-top:12px;">Залишилось: <b style="color:var(--text);">${formatBytes(remainingBytes)}</b></p>` : ''}
+            <p class="muted" style="margin-top:8px;font-size:11px;word-break:break-word;">Точне значення провайдера: ${Number(usedBytes||0).toLocaleString('uk-UA')} байт використано${totalBytes!=null?` із ${Number(totalBytes).toLocaleString('uk-UA')} байт`:''}.</p>
+            ${apn ? `<p class="muted" style="margin-top:14px;">📡 Мережа: <span style="color:var(--text);">${apn}</span></p>` : ''}
+            <p class="muted" style="margin-top:8px;font-size:11px;">${lastUpdateTime ? `Дані оновлено: ${providerDate(lastUpdateTime)?.toLocaleString('uk-UA') || '—'}` : 'Дані оновлюються провайдером протягом кількох годин.'}</p>
+            <button class="btn ghost" style="margin-top:12px;padding:9px 12px;font-size:12px" onclick="load()">Оновити дані оператора</button>
+          </div>
+
+          ${daysLeftHtml}
+          ${historyHtml}
+          <div id="billingCard" class="card"><p class="muted">Завантажуємо дату списання...</p></div>
+          ${forecastHtml}`;
+
+        // Дата наступного списання — окремий запит до Stripe
+        try{
+          const billingRes = await fetch(`${API_URL}/api/billing`,{headers:{'x-session-token':sessionToken}});
+          const billingData = await billingRes.json();
+          const billingCard = document.getElementById('billingCard');
+          if(billingRes.ok && billingData.nextBillingDate){
+            const d = new Date(billingData.nextBillingDate).toLocaleDateString(appLocale, { day:'numeric', month:'long', year:'numeric' });
+            billingCard.innerHTML = `<div style="display:flex; justify-content:space-between; align-items:center;"><span class="muted">Наступне списання</span><b>${d}</b></div>`;
+          } else {
+            billingCard.remove();
+          }
+        }catch(e){ document.getElementById('billingCard')?.remove(); }
+      }catch(e){
+        loading.style.display = 'none';
+        content.style.display = 'block';
+        content.innerHTML = `<div class="card"><p class="err-text">Не вдалося завантажити дані</p></div>`;
+      }
+    }
+    load();
+  </script>
+</body>
+</html>

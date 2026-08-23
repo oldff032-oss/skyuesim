@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Сповіщення — Сигнал</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<script src="pwa.js"></script>
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#05060d">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<style>.choice{display:flex;align-items:center;justify-content:space-between;padding:16px 0;border-top:1px solid var(--glass-border);font-size:14px}.choice input{accent-color:var(--blue);width:20px;height:20px}</style>
+</head>
+<body class="has-bottomnav">
+  <div class="wrap">
+    <div class="brand"><div class="mark">🔔</div><span>Сигнал</span></div>
+    <h1 style="margin-top:20px;">Сповіщення про <em>трафік</em></h1>
+    <p class="lead">Обери, коли застосунок має попередити, що пакет даних закінчується.</p>
+
+    <div class="glass glass-card" style="margin-top:22px;">
+      <p style="font-family:'Space Grotesk',sans-serif;font-weight:700;">Надсилати попередження</p>
+      <label class="choice"><span>Використано 50%</span><input type="checkbox" value="50"></label>
+      <label class="choice"><span>Використано 80%</span><input type="checkbox" value="80"></label>
+      <label class="choice"><span>Використано 95%</span><input type="checkbox" value="95"></label>
+    </div>
+    <div class="glass glass-card" style="margin-top:14px;">
+      <p style="font-family:'Space Grotesk',sans-serif;font-weight:700;">Push-сповіщення</p>
+      <p class="muted" style="margin-top:7px;line-height:1.5;">Отримуй попередження, навіть коли застосунок закритий.</p>
+      <button class="btn ghost" id="pushBtn" style="margin-top:14px;" onclick="enablePush()">Увімкнути push-сповіщення</button>
+      <button class="btn ghost" id="testPushBtn" style="display:none;margin-top:9px;" onclick="testPush()">Надіслати тестове сповіщення</button>
+    </div>
+    <p class="muted" style="margin-top:12px;line-height:1.55;">Коли push увімкнено, попередження надходять навіть із закритого застосунку. На iPhone встанов додаток на початковий екран перед увімкненням.</p>
+    <button class="btn" id="saveBtn" style="margin-top:22px;" onclick="save()">Зберегти</button>
+    <p id="message" class="muted" style="text-align:center;margin-top:12px;"></p>
+  </div>
+
+  <nav class="bottomnav">
+    <a href="dashboard.html"><span class="ic">🏠</span>Головна</a><a href="plans.html"><span class="ic">📶</span>Тариф</a><a href="usage.html"><span class="ic">📊</span>Витрати</a><a href="profile.html" class="active"><span class="ic">👤</span>Профіль</a>
+  </nav>
+  <script src="config.js"></script>
+  <script>
+    const token = localStorage.getItem('signal_session_token');
+    if(!token) window.location.href = 'login.html';
+    const headers = {'Content-Type':'application/json','x-session-token':token};
+    function base64ToUint8Array(value){
+      const padding = '='.repeat((4 - value.length % 4) % 4);
+      const base64 = (value + padding).replace(/-/g, '+').replace(/_/g, '/');
+      return Uint8Array.from(atob(base64), char => char.charCodeAt(0));
+    }
+    async function load(){
+      const res = await fetch(`${API_URL}/api/account/preferences`, { headers });
+      const data = await res.json();
+      if(!res.ok){ window.location.href = 'login.html'; return; }
+      document.querySelectorAll('input[type=checkbox]').forEach(input => input.checked = data.trafficAlertThresholds.includes(Number(input.value)));
+      if('serviceWorker' in navigator && 'PushManager' in window){
+        const registration = await navigator.serviceWorker.ready;
+        const subscription = await registration.pushManager.getSubscription();
+        if(subscription){
+          const statusRes = await fetch(`${API_URL}/api/push/status?endpoint=${encodeURIComponent(subscription.endpoint)}`, {headers});
+          const status = await statusRes.json();
+          if(statusRes.ok && status.configured && status.registered){
+            document.getElementById('pushBtn').textContent = 'Push-сповіщення увімкнено';
+            document.getElementById('testPushBtn').style.display = 'block';
+          } else {
+            document.getElementById('pushBtn').textContent = 'Перепідключити push-сповіщення';
+            document.getElementById('message').textContent = status.configured ? 'Підписку браузера потрібно синхронізувати із сервером.' : 'Push не налаштовано на сервері: перевір VAPID ключі.';
+          }
+        }
+      }
+    }
+    async function save(){
+      const values = [...document.querySelectorAll('input:checked')].map(input => Number(input.value));
+      const button = document.getElementById('saveBtn'); button.disabled = true; button.textContent = 'Зберігаємо…';
+      try{
+        const res = await fetch(`${API_URL}/api/account/preferences`, {method:'PUT',headers,body:JSON.stringify({trafficAlertThresholds:values})});
+        const data = await res.json(); if(!res.ok) throw new Error(data.error || 'Помилка збереження');
+        document.getElementById('message').textContent = 'Налаштування збережено.';
+      }catch(error){ document.getElementById('message').textContent = error.message; }
+      finally { button.disabled = false; button.textContent = 'Зберегти'; }
+    }
+    async function enablePush(){
+      const message = document.getElementById('message');
+      if(!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)){
+        message.textContent = 'Цей браузер не підтримує push-сповіщення.'; return;
+      }
+      const button = document.getElementById('pushBtn'); button.disabled = true;
+      try{
+        const permission = await Notification.requestPermission();
+        if(permission !== 'granted') throw new Error('Дозвіл на сповіщення не надано');
+        const keyRes = await fetch(`${API_URL}/api/push/public-key`, {headers});
+        const keyData = await keyRes.json(); if(!keyRes.ok) throw new Error(keyData.error || 'Push ще не налаштовано');
+        const registration = await navigator.serviceWorker.ready;
+        await registration.update();
+        const oldSubscription = await registration.pushManager.getSubscription();
+        if(oldSubscription){
+          await fetch(`${API_URL}/api/push/unsubscribe`, {method:'POST',headers,body:JSON.stringify({endpoint:oldSubscription.endpoint})}).catch(()=>{});
+          await oldSubscription.unsubscribe();
+        }
+        const subscription = await registration.pushManager.subscribe({userVisibleOnly:true, applicationServerKey:base64ToUint8Array(keyData.publicKey)});
+        const saveRes = await fetch(`${API_URL}/api/push/subscribe`, {method:'POST',headers,body:JSON.stringify({subscription:subscription.toJSON()})});
+        const saveData = await saveRes.json(); if(!saveRes.ok) throw new Error(saveData.error || 'Не вдалося зберегти підписку');
+        button.textContent = 'Push-сповіщення увімкнено'; document.getElementById('testPushBtn').style.display = 'block'; message.textContent = 'Готово. Натисни кнопку нижче для перевірки.';
+      }catch(error){ message.textContent = error.message; }
+      finally { button.disabled = false; }
+    }
+    async function testPush(){
+      const message = document.getElementById('message');
+      try{
+        const res = await fetch(`${API_URL}/api/push/test`, {method:'POST',headers});
+        const data = await res.json(); if(!res.ok) throw new Error(data.error || 'Не вдалося надіслати тест');
+        message.textContent = data.delivered ? 'Тест надіслано.' : 'Підписку не знайдено. Увімкни push ще раз.';
+      }catch(error){ message.textContent = error.message; }
+    }
+    load();
+  </script>
+</body>
+</html>

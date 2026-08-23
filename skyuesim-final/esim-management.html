@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Керування eSIM — Сигнал</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<script src="pwa.js"></script>
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#05060d">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+</head>
+<body class="has-bottomnav">
+  <div class="wrap">
+    <div class="brand"><div class="mark">📱</div><span>Сигнал</span></div>
+    <h1 style="margin-top:20px;">Керування <em>eSIM</em></h1>
+    <p class="lead">Повторне встановлення не створює нове замовлення і не списує кошти.</p>
+    <div id="content" style="margin-top:22px;"><div class="shimmer" style="height:260px;"></div></div>
+  </div>
+  <nav class="bottomnav">
+    <a href="dashboard.html"><span class="ic">🏠</span>Головна</a><a href="plans.html"><span class="ic">📶</span>Тариф</a><a href="usage.html"><span class="ic">📊</span>Витрати</a><a href="profile.html" class="active"><span class="ic">👤</span>Профіль</a>
+  </nav>
+  <script src="config.js"></script>
+  <script>
+    const token = localStorage.getItem('signal_session_token');
+    if(!token) window.location.href = 'login.html';
+    const isAppleMobile = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+    let esim = null;
+    const escapeHtml = value => String(value || '—').replace(/[&<>'"]/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[char]));
+    function copyCode(){
+      navigator.clipboard?.writeText(esim.activationCode).then(() => alert('Код eSIM скопійовано.')).catch(() => prompt('Скопіюй код eSIM:', esim.activationCode));
+    }
+    async function load(){
+      const content = document.getElementById('content');
+      try{
+        const res = await fetch(`${API_URL}/api/account/esim`, {headers:{'x-session-token':token}});
+        const data = await res.json();
+        if(res.status === 401){ window.location.href = 'login.html'; return; }
+        if(!res.ok) throw new Error(data.error || 'Не вдалося отримати дані eSIM');
+        esim = data.esim;
+        const installUrl = esim.activationCode ? `https://esimsetup.apple.com/esim_qrcode_provisioning?carddata=${encodeURIComponent(esim.activationCode)}` : '';
+        const installAction = !esim.activationCode ? '' : isAppleMobile
+          ? `<a class="btn" href="${installUrl}" style="margin-top:16px;">Відкрити встановлення eSIM</a>`
+          : `<button class="btn" onclick="copyCode()" style="margin-top:16px;">Скопіювати код eSIM</button>`;
+        content.innerHTML = `
+          <div class="glass glass-card"><div style="display:flex;justify-content:space-between;gap:10px;align-items:center;"><div><div style="font-family:'Space Grotesk',sans-serif;font-weight:700;">Твоя eSIM</div><div class="muted" style="margin-top:4px;">ICCID: ${escapeHtml(esim.iccid)}</div></div><span class="status-pill on"><span class="dot"></span>Активна</span></div>
+          ${esim.qrCodeUrl ? `<img src="${escapeHtml(esim.qrCodeUrl)}" alt="QR-код eSIM" style="width:170px;height:170px;object-fit:contain;background:#fff;border-radius:14px;padding:9px;margin:20px auto 0;display:block;">` : '<p class="muted" style="margin-top:18px;">QR-код тимчасово недоступний — використай код активації нижче.</p>'}
+          ${installAction}
+          ${esim.activationCode ? `<p class="muted" style="margin-top:18px;">Код активації для ручного встановлення:</p><code class="qr" style="display:block;margin-top:9px;word-break:break-all;">${escapeHtml(esim.activationCode)}</code>` : ''}
+          ${esim.apn ? `<p class="muted" style="margin-top:16px;">APN: <b style="color:var(--text);">${escapeHtml(esim.apn)}</b></p>` : ''}
+          <button class="btn ghost" onclick="recoverProfile()" style="margin-top:14px">Синхронізувати з оператором</button>
+          </div>
+          <div class="glass glass-card" style="margin-top:14px;"><p style="font-family:'Space Grotesk',sans-serif;font-weight:700;">Як встановити</p><ol class="muted" style="margin:12px 0 0 20px;font-size:13px;line-height:1.7;"><li>Відкрий налаштування мобільного зв’язку.</li><li>Обери «Додати eSIM».</li><li>Відскануй QR-код або введи код вручну.</li><li>Після встановлення обери цю eSIM для мобільних даних.</li></ol></div>`;
+      }catch(error){ content.innerHTML = `<div class="glass glass-card"><p class="err-text">${escapeHtml(error.message)}</p><a href="support.html" class="btn ghost" style="margin-top:14px;">Написати в підтримку</a></div>`; }
+    }
+    async function recoverProfile(){if(!confirm('Синхронізувати вже видану eSIM? Нове замовлення не створюється.'))return;const response=await fetch(`${API_URL}/api/account/esim/recover`,{method:'POST',headers:{'Content-Type':'application/json','x-session-token':token},body:'{}'}),data=await response.json();if(!response.ok)return alert(data.error||'Не вдалося синхронізувати');alert('eSIM синхронізовано');load();}
+    load();
+  </script>
+</body>
+</html>
+

@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Команда — E7 Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<style>
+  select, input[type="email"], input[type="password"]{
+    background:rgba(255,255,255,0.04); border:1.5px solid var(--border); border-radius:10px;
+    padding:10px 12px; color:var(--text); font-size:13px;
+  }
+  .role-badge{ font-size:10.5px; font-weight:700; padding:4px 10px; border-radius:7px; text-transform:uppercase; }
+  .role-badge.super_admin{ background:rgba(255,94,94,0.15); color:var(--danger); }
+  .role-badge.admin{ background:rgba(59,130,246,0.15); color:var(--blue); }
+  .role-badge.support{ background:rgba(52,228,184,0.15); color:var(--success); }
+  .role-badge.viewer{ background:rgba(136,145,168,0.15); color:var(--text-muted); }
+</style>
+</head>
+<body>
+  <div class="admin-shell">
+    <aside class="admin-sidebar">
+      <div class="brand"><div class="mark" style="width:32px;height:32px;font-size:15px;">🛠️</div><span style="font-size:15px;">E7 Admin</span></div>
+      <nav class="admin-nav">
+        <a href="admin-dashboard.html">📊 Dashboard</a>
+        <a href="admin-tickets.html">🎫 Support</a>
+        <a href="admin-users.html">👥 Users</a>
+        <a href="admin-team.html" class="active">🔑 Команда</a>
+        <a href="admin-audit.html" id="auditNavLink">🛡️ Audit Log</a>
+        <a href="#" onclick="logout()">⎋ Вийти</a>
+      </nav>
+    </aside>
+    <main class="admin-main">
+      <h1 style="font-size:22px;">Команда адмінів</h1>
+      <p class="lead">Ролі: Super Admin (повний доступ) · Admin (Users/Payments/eSIM/Support/Reports) · Support (тільки Support + дані користувача) · Viewer (лише перегляд)</p>
+
+      <div class="glass glass-card" style="margin-top:20px;">
+        <div style="font-weight:700; font-size:14px; margin-bottom:12px;">Додати адміна</div>
+        <div style="display:flex; gap:10px; flex-wrap:wrap;">
+          <input type="email" id="newEmail" placeholder="email@example.com" style="flex:1; min-width:180px;" />
+          <input type="password" id="newPassword" placeholder="Пароль (мін. 8 символів)" style="flex:1; min-width:180px;" />
+          <select id="newRole">
+            <option value="admin">Admin</option>
+            <option value="support">Support</option>
+            <option value="viewer">Viewer</option>
+            <option value="super_admin">Super Admin</option>
+          </select>
+          <button class="btn" style="width:auto; padding:10px 20px;" onclick="addAdmin()">Додати</button>
+        </div>
+        <div class="err-text" id="err" style="display:none;"></div>
+      </div>
+
+      <div id="loading" class="shimmer" style="height:150px; margin-top:16px;"></div>
+      <table class="admin-table" id="table" style="display:none;">
+        <thead><tr><th>Email</th><th>Роль</th><th>Статус</th><th>2FA</th><th>Останній вхід</th><th>Дії</th></tr></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </main>
+  </div>
+
+  <script src="config.js"></script>
+  <script src="admin-common.js"></script>
+  <script>
+    requireAdminAuth();
+    const currentAdminEmail = localStorage.getItem('signal_admin_email');
+    const escapeHtml = (value) => String(value || '').replace(/[&<>'"]/g, (char) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' }[char]));
+    if(localStorage.getItem('signal_admin_role') !== 'super_admin'){
+      document.querySelector('.admin-main').innerHTML = '<div class="card"><p class="err-text">Цей розділ доступний лише Super Admin.</p></div>';
+    } else {
+      load();
+    }
+
+    async function load(){
+      try{
+        const res = await adminFetch('/api/admin/team');
+        const admins = await res.json();
+        document.getElementById('loading').style.display = 'none';
+        document.getElementById('table').style.display = 'table';
+        document.getElementById('tbody').innerHTML = admins.map(a => {
+          const protectedAdmin = a.role === 'super_admin' || a.email === currentAdminEmail;
+          const status = a.blocked ? '<span class="status-pill off"><span class="dot"></span>Заблокований</span>' : '<span class="status-pill on"><span class="dot"></span>Активний</span>';
+          const actions = protectedAdmin ? '<span class="muted">—</span>' : `
+            <button class="btn ghost" style="padding:7px 10px;font-size:12px;" onclick="setAdminBlocked('${encodeURIComponent(a.email)}', ${a.blocked})">${a.blocked ? 'Розблокувати' : 'Заблокувати'}</button>
+            <button class="btn ghost" style="padding:7px 10px;font-size:12px" onclick='editPermissions(${JSON.stringify(a.email)},${JSON.stringify(a.permissions||[])})'>Права</button>${a.twoFactorEnabled?`<button class="btn ghost" style="padding:7px 10px;font-size:12px" onclick="resetTwoFactor('${encodeURIComponent(a.email)}')">Скинути 2FA</button>`:''}<button class="btn ghost" style="padding:7px 10px;font-size:12px;color:var(--danger);" onclick="deleteAdmin('${encodeURIComponent(a.email)}')">Видалити</button>`;
+          return `<tr>
+            <td>${escapeHtml(a.email)}</td>
+            <td><span class="role-badge ${a.role}">${escapeHtml(a.role)}</span></td>
+            <td>${status}</td>
+            <td>${a.twoFactorEnabled?'<span class="status-pill on"><span class="dot"></span>Увімкнено</span>':'<span class="status-pill off"><span class="dot"></span>Вимкнено</span>'}</td>
+            <td class="muted">${a.lastLoginAt ? new Date(a.lastLoginAt).toLocaleString('uk-UA') : 'Ще не входив'}</td>
+            <td style="display:flex;gap:6px;flex-wrap:wrap;">${actions}</td>
+          </tr>`;
+        }).join('') || '<tr><td colspan="6" class="muted">Немає адміністраторів</td></tr>';
+      }catch(e){ document.getElementById('loading').style.display = 'none'; }
+    }
+
+    async function addAdmin(){
+      const email = document.getElementById('newEmail').value.trim();
+      const password = document.getElementById('newPassword').value;
+      const role = document.getElementById('newRole').value;
+      const err = document.getElementById('err');
+      err.style.display = 'none';
+
+      try{
+        const res = await adminFetch('/api/admin/team', { method:'POST', body: JSON.stringify({ email, password, role }) });
+        const data = await res.json();
+        if(!res.ok) throw new Error(data.error);
+        document.getElementById('newEmail').value = '';
+        document.getElementById('newPassword').value = '';
+        load();
+      }catch(e){
+        err.textContent = e.message;
+        err.style.display = 'flex';
+      }
+    }
+
+    async function setAdminBlocked(encodedEmail, isBlocked){
+      const email = decodeURIComponent(encodedEmail);
+      const action = isBlocked ? 'розблокувати' : 'заблокувати';
+      if(!confirm(`${action.charAt(0).toUpperCase() + action.slice(1)} адміністратора ${email}?`)) return;
+      try{
+        const res = await adminFetch(`/api/admin/team/${encodedEmail}/block`, { method:'PATCH', body: JSON.stringify({ blocked: !isBlocked }) });
+        const data = await res.json();
+        if(!res.ok) throw new Error(data.error || 'Не вдалося змінити статус адміністратора');
+        load();
+      }catch(e){ alert(e.message || 'Помилка зміни статусу адміністратора'); }
+    }
+
+    async function resetTwoFactor(encodedEmail){
+      const email=decodeURIComponent(encodedEmail);
+      if(!confirm(`Скинути 2FA для ${email}? Усі його активні входи буде завершено.`))return;
+      try{const res=await adminFetch(`/api/admin/team/${encodedEmail}/reset-2fa`,{method:'POST'}),data=await res.json();if(!res.ok)throw new Error(data.error||'Не вдалося скинути 2FA');alert('2FA скинуто. Працівник має увійти паролем і ввімкнути захист знову.');load()}catch(e){alert(e.message)}
+    }
+    async function editPermissions(email,current){
+      const all=['users.read','support.reply','refunds.manage','esim.retry','activation_code.read','broadcasts.manage','users.delete','backups.manage','security.manage','operations.manage','settings.manage'];
+      const value=prompt('Вкажіть дозволи через кому:\n'+all.join('\n'),current.join(', '));if(value===null)return;
+      const permissions=value.split(',').map(x=>x.trim()).filter(x=>all.includes(x));
+      try{const res=await adminFetch(`/api/admin/team/${encodeURIComponent(email)}/permissions`,{method:'PATCH',body:JSON.stringify({permissions})}),data=await res.json();if(!res.ok)throw new Error(data.error);alert('Права оновлено');load()}catch(e){alert(e.message)}
+    }
+
+    async function deleteAdmin(encodedEmail){
+      const email = decodeURIComponent(encodedEmail);
+      if(!confirm(`Видалити адміністратора ${email}? Доступ буде втрачено назавжди.`)) return;
+      try{
+        const res = await adminFetch(`/api/admin/team/${encodedEmail}`, { method:'DELETE' });
+        const data = await res.json();
+        if(!res.ok) throw new Error(data.error || 'Не вдалося видалити адміністратора');
+        load();
+      }catch(e){ alert(e.message || 'Помилка видалення адміністратора'); }
+    }
+  </script>
+</body>
+</html>

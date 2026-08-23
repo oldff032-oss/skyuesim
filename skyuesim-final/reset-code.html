@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Код підтвердження — Сигнал</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<link rel="manifest" href="/manifest.json">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="theme-color" content="#05060d">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Сигнал">
+<script src="pwa.js"></script>
+</head>
+<body>
+  <div class="wrap">
+    <div class="brand"><div class="mark">📶</div><span>Сигнал</span></div>
+    <h1 style="margin-top:20px;">Введи код</h1>
+    <p class="lead">Ми надіслали код на <b id="emailShown" style="color:var(--text);"></b></p>
+
+    <div class="otp-row" id="otpRow">
+      <input class="otp-cell" maxlength="1" inputmode="numeric" />
+      <input class="otp-cell" maxlength="1" inputmode="numeric" />
+      <input class="otp-cell" maxlength="1" inputmode="numeric" />
+      <input class="otp-cell" maxlength="1" inputmode="numeric" />
+      <input class="otp-cell" maxlength="1" inputmode="numeric" />
+      <input class="otp-cell" maxlength="1" inputmode="numeric" />
+    </div>
+    <div class="err-text" id="err" style="display:none; justify-content:center;"></div>
+
+    <p class="muted" style="text-align:center; margin-top:22px;" id="resendWrap">
+      Не прийшов код? <a href="#" id="resendLink" style="color:var(--cyan); text-decoration:none;">Надіслати ще раз</a>
+      <span id="resendTimer" style="display:none;"></span>
+    </p>
+  </div>
+
+  <script src="config.js"></script>
+  <script>
+    const email = localStorage.getItem('signal_reset_email');
+    if(!email){ window.location.href = 'forgot-password.html'; }
+    document.getElementById('emailShown').textContent = email;
+
+    const cells = Array.from(document.querySelectorAll('.otp-cell'));
+
+    cells.forEach((cell, i) => {
+      cell.addEventListener('input', () => {
+        cell.value = cell.value.replace(/[^0-9]/g, '');
+        if(cell.value){
+          cell.classList.add('filled');
+          if(i < cells.length - 1) cells[i+1].focus();
+          else checkComplete();
+        }
+      });
+      cell.addEventListener('keydown', (e) => {
+        if(e.key === 'Backspace' && !cell.value && i > 0) cells[i-1].focus();
+      });
+      cell.addEventListener('paste', (e) => {
+        e.preventDefault();
+        const paste = (e.clipboardData || window.clipboardData).getData('text').replace(/[^0-9]/g, '');
+        paste.split('').forEach((digit, idx) => { if(cells[idx]){ cells[idx].value = digit; cells[idx].classList.add('filled'); } });
+        const next = Math.min(paste.length, cells.length - 1);
+        cells[next].focus();
+        if(paste.length >= cells.length) checkComplete();
+      });
+    });
+    cells[0].focus();
+
+    async function checkComplete(){
+      const code = cells.map(c => c.value).join('');
+      if(code.length < cells.length) return;
+
+      const err = document.getElementById('err');
+      err.style.display = 'none';
+
+      try{
+        const res = await fetch(`${API_URL}/api/auth/verify-reset-code`, {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ email, code })
+        });
+        const data = await res.json();
+        if(!res.ok) throw new Error(data.error || 'Невірний код');
+
+        cells.forEach(c => c.classList.add('success'));
+        localStorage.setItem('signal_reset_token', data.resetToken);
+        setTimeout(() => { window.location.href = 'new-password.html'; }, 500);
+      }catch(e){
+        cells.forEach(c => { c.classList.add('error'); });
+        err.textContent = e.message;
+        err.style.display = 'flex';
+        setTimeout(() => {
+          cells.forEach(c => { c.value=''; c.classList.remove('error','filled'); });
+          cells[0].focus();
+        }, 500);
+      }
+    }
+
+    let cooldown = 0;
+    function startCooldown(sec){
+      cooldown = sec;
+      document.getElementById('resendLink').style.display = 'none';
+      const timerEl = document.getElementById('resendTimer');
+      timerEl.style.display = 'inline';
+      const iv = setInterval(() => {
+        cooldown--;
+        timerEl.textContent = `(${cooldown}с)`;
+        if(cooldown <= 0){
+          clearInterval(iv);
+          document.getElementById('resendLink').style.display = 'inline';
+          timerEl.style.display = 'none';
+        }
+      }, 1000);
+    }
+    startCooldown(60);
+
+    document.getElementById('resendLink').addEventListener('click', async (e) => {
+      e.preventDefault();
+      if(cooldown > 0) return;
+      try{
+        await fetch(`${API_URL}/api/auth/forgot-password`, {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ email })
+        });
+        startCooldown(60);
+      }catch(err){}
+    });
+  </script>
+</body>
+</html>
+

@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Тікет — E7 Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<style>
+  .split{ display:flex; gap:24px; margin-top:20px; align-items:flex-start; }
+  .split .main{ flex:1; min-width:0; }
+  .split .side{ width:300px; flex-shrink:0; }
+  .ticket-header{ display:flex; justify-content:space-between; align-items:center; }
+  .status-badge{ font-size:11px; font-weight:700; padding:5px 12px; border-radius:8px; }
+  .status-badge.open{ background:rgba(255,94,94,0.15); color:var(--danger); }
+  .status-badge.in_progress{ background:rgba(59,130,246,0.15); color:var(--blue); }
+  .status-badge.waiting_customer{ background:rgba(245,166,35,0.15); color:#f5a623; }
+  .status-badge.resolved, .status-badge.closed{ background:rgba(52,228,184,0.15); color:var(--success); }
+  .msg-row{ display:flex; gap:10px; margin-top:16px; align-items:flex-start; }
+  .msg-row.admin{ flex-direction:row-reverse; }
+  .avatar{ width:32px; height:32px; border-radius:50%; background:linear-gradient(135deg,var(--blue),var(--violet)); display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; flex-shrink:0; }
+  .msg-bubble{ max-width:75%; }
+  .msg{ padding:12px 15px; border-radius:16px; font-size:13.5px; line-height:1.5; }
+  .msg.user{ background:var(--glass); border:1px solid var(--glass-border); border-bottom-left-radius:4px; }
+  .msg.admin{ background:linear-gradient(135deg,var(--blue),var(--violet)); border-bottom-right-radius:4px; }
+  .msg.note{ background:rgba(245,166,35,0.1); border:1px dashed rgba(245,166,35,0.4); }
+  .msg.note::before{ content:"🔒 Внутрішня нотатка"; display:block; font-size:10px; font-weight:700; color:#f5a623; margin-bottom:6px; text-transform:uppercase; letter-spacing:.04em; }
+  .reply-tabs{ display:flex; gap:4px; background:var(--surface); border-radius:12px; padding:4px; margin-top:18px; width:fit-content; }
+  .reply-tab{ padding:8px 16px; border-radius:9px; font-size:12.5px; font-weight:600; cursor:pointer; color:var(--text-muted); }
+  .reply-tab.active{ background:var(--glass); color:var(--text); }
+  .msg-time{ font-size:10px; color:var(--text-muted); margin-top:4px; }
+  .msg-row.admin .msg-time{ text-align:right; }
+  textarea{ width:100%; background: rgba(255,255,255,0.04); border:1.5px solid var(--border); border-radius:14px; padding:14px; color:var(--text); font-family:'Inter',sans-serif; font-size:14px; min-height:80px; resize:vertical; }
+  textarea:focus{ outline:none; border-color:var(--blue); }
+  select{ width:100%; background:rgba(255,255,255,0.04); border:1.5px solid var(--border); border-radius:10px; padding:9px 12px; color:var(--text); font-size:13px; margin-top:6px; }
+  .side-row{ margin-top:14px; }
+  .side-row .k{ font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:.04em; }
+  .side-row .v{ font-size:13.5px; margin-top:3px; }
+</style>
+</head>
+<body>
+  <div class="admin-shell">
+    <aside class="admin-sidebar">
+      <div class="brand"><div class="mark" style="width:32px;height:32px;font-size:15px;">🛠️</div><span style="font-size:15px;">E7 Admin</span></div>
+      <nav class="admin-nav">
+        <a href="admin-dashboard.html">📊 Dashboard</a>
+        <a href="admin-tickets.html" class="active">🎫 Support</a>
+        <a href="admin-users.html">👥 Users</a>
+        <a href="admin-team.html" id="teamNavLink">🔑 Команда</a>
+        <a href="admin-audit.html" id="auditNavLink">🛡️ Audit Log</a>
+        <a href="#" onclick="logout()">⎋ Вийти</a>
+      </nav>
+    </aside>
+    <main class="admin-main">
+      <a href="admin-tickets.html" style="color:var(--text-muted); text-decoration:none; font-size:13px;">← Усі тікети</a>
+      <div id="loading" class="shimmer" style="height:200px; margin-top:16px;"></div>
+      <div id="content" style="display:none;"></div>
+    </main>
+  </div>
+
+  <script src="config.js"></script>
+  <script src="admin-common.js"></script>
+  <script>
+    requireAdminAuth();
+    const ticketId = new URLSearchParams(window.location.search).get('id');
+    const statusLabels = { open:'Відкритий', in_progress:'В роботі', waiting_customer:'Очікує клієнта', resolved:'Вирішено', closed:'Закрито' };
+    let currentTab = 'reply';
+    let currentRecoveryRequest = null;
+    let currentRecoveryVerification = null;
+    const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[char]));
+
+    function renderAttachment(a){
+      if(!a) return '';
+      if(a.type && a.type.startsWith('image/')){
+        return `<img src="${a.dataUrl}" alt="${escapeHtml(a.name || 'attachment')}" style="max-width:100%; border-radius:10px; margin-top:8px; display:block;" />`;
+      }
+      return `<a href="${a.dataUrl}" download="${escapeHtml(a.name || 'attachment')}" style="display:block; margin-top:8px; color:inherit; text-decoration:underline; font-size:12px;">📎 ${escapeHtml(a.name || 'attachment')}</a>`;
+    }
+
+    function fileToAttachment(file){
+      return new Promise((resolve, reject) => {
+        if(!file) return resolve(null);
+        if(file.size > 550 * 1024){ reject(new Error('Файл завеликий (максимум 550 КБ)')); return; }
+        const reader = new FileReader();
+        reader.onload = () => resolve({ name: file.name, type: file.type, dataUrl: reader.result });
+        reader.onerror = () => reject(new Error('Не вдалося прочитати файл'));
+        reader.readAsDataURL(file);
+      });
+    }
+
+    function switchTab(tab){
+      currentTab = tab;
+      document.getElementById('tabReply').classList.toggle('active', tab==='reply');
+      document.getElementById('tabNote').classList.toggle('active', tab==='note');
+      document.getElementById('replyText').placeholder = tab==='reply'
+        ? "Напиши відповідь клієнту (реально надішлеться на email)..."
+        : "Внутрішня нотатка для команди (клієнт її НЕ побачить і email не піде)...";
+      document.getElementById('replyBtn').textContent = tab==='reply' ? 'Відправити відповідь' : 'Зберегти нотатку';
+      document.getElementById('replyAttachment').style.display = tab==='reply' ? 'block' : 'none';
+    }
+
+    async function load(){
+      try{
+        const res = await adminFetch(`/api/admin/tickets/${ticketId}`);
+        const { ticket, userSubscription, recoveryVerification } = await res.json();
+        currentRecoveryRequest = ticket.recoveryRequest || null;
+        currentRecoveryVerification = recoveryVerification || null;
+        document.getElementById('loading').style.display = 'none';
+        const content = document.getElementById('content');
+        content.style.display = 'block';
+        const initial = ticket.email[0].toUpperCase();
+
+        content.innerHTML = `
+          <div class="ticket-header">
+            <div>
+              <h1 style="font-size:20px;">Тікет #${escapeHtml(ticket.id)}</h1>
+              <p class="muted" style="margin-top:4px;">Створено ${new Date(ticket.createdAt).toLocaleString('uk-UA')}</p>
+            </div>
+            <span class="status-badge ${ticket.status}">${statusLabels[ticket.status]||ticket.status}</span>
+          </div>
+
+          <div class="split">
+            <div class="main">
+              <div class="glass glass-card">
+                <div style="font-weight:700; font-size:14px;">${escapeHtml(ticket.subject)}</div>
+                <p class="muted" style="margin-top:4px;">${escapeHtml(ticket.category)}</p>
+                <div>
+                  ${ticket.messages.map(m => `
+                    <div class="msg-row ${m.from === 'note' ? 'admin' : m.from}">
+                      <div class="avatar">${m.from === 'user' ? initial : '🛠️'}</div>
+                      <div class="msg-bubble">
+                        <div class="msg ${escapeHtml(m.from)}">${escapeHtml(m.text).replace(/\n/g,'<br>')}${renderAttachment(m.attachment)}</div>
+                        <div class="msg-time">${m.from === 'admin' ? 'Ви' : m.from === 'note' ? 'Нотатка' : ticket.email} · ${new Date(m.createdAt).toLocaleString('uk-UA')}</div>
+                      </div>
+                    </div>`).join('')}
+                </div>
+
+                ${localStorage.getItem('signal_admin_role') !== 'viewer' ? `
+                <div class="reply-tabs">
+                  <div class="reply-tab active" id="tabReply" onclick="switchTab('reply')">Відповідь</div>
+                  <div class="reply-tab" id="tabNote" onclick="switchTab('note')">Внутрішня нотатка</div>
+                </div>
+                <div style="margin-top:10px;">
+                  <textarea id="replyText" placeholder="Напиши відповідь клієнту (реально надішлеться на email)..."></textarea>
+                  <input type="file" id="replyAttachment" accept="image/*,.pdf" style="width:100%; margin-top:8px; background:rgba(255,255,255,0.04); border:1.5px solid var(--border); border-radius:10px; padding:9px 12px; color:var(--text-muted); font-size:12px;" />
+                  <button class="btn" id="replyBtn" style="margin-top:10px; width:auto; padding:12px 24px;" onclick="sendReply()">Відправити відповідь</button>
+                </div>
+                ` : `<p class="muted" style="margin-top:16px;">👁️ Режим перегляду — відповіді недоступні для ролі Viewer</p>`}
+              </div>
+            </div>
+            <div class="side">
+              <div class="glass glass-card">
+                <div class="side-row" style="margin-top:0;"><div class="k">Статус</div>
+                  <select id="statusSelect" onchange="updateTicket()" ${localStorage.getItem('signal_admin_role')==='viewer'?'disabled':''}>
+                    ${['open','in_progress','waiting_customer','resolved','closed'].map(s => `<option value="${s}" ${s===ticket.status?'selected':''}>${statusLabels[s]}</option>`).join('')}
+                  </select>
+                </div>
+                <div class="side-row"><div class="k">Пріоритет</div>
+                  <select id="prioritySelect" onchange="updateTicket()" ${localStorage.getItem('signal_admin_role')==='viewer'?'disabled':''}>
+                    ${['normal','priority','high','critical'].map(p => `<option value="${p}" ${p===ticket.priority?'selected':''}>${p}</option>`).join('')}
+                  </select>
+                </div>
+                <div class="side-row"><div class="k">Відповідальний</div><div class="v">${escapeHtml(ticket.assignedTo || 'Не призначено')}</div></div>
+                ${(ticket.assignmentHistory || []).length ? `<div class="side-row"><div class="k">Історія передачі</div><div class="v">${ticket.assignmentHistory.slice().reverse().map(item => `${new Date(item.createdAt).toLocaleString('uk-UA')}<br>${escapeHtml(item.from || 'без виконавця')} → ${escapeHtml(item.to || 'не призначено')}<br><span class="muted">Super Admin: ${escapeHtml(item.by)}</span>`).join('<hr style="border:0;border-top:1px solid var(--border);margin:7px 0">')}</div></div>` : ''}
+              </div>
+
+              <div class="glass glass-card" style="margin-top:14px;">
+                <div style="display:flex; align-items:center; gap:10px;">
+                  <div class="avatar" style="width:40px; height:40px; font-size:15px;">${initial}</div>
+                  <div><div style="font-weight:700; font-size:13.5px;">${escapeHtml(ticket.email.split('@')[0])}</div><div class="muted" style="font-size:11.5px;">${escapeHtml(ticket.email)}</div></div>
+                </div>
+                ${userSubscription ? `
+                  <div class="side-row"><div class="k">Тариф</div><div class="v">${userSubscription.plan || '—'}</div></div>
+                  <div class="side-row"><div class="k">Статус підписки</div><div class="v">${userSubscription.status || '—'}</div></div>
+                  ${userSubscription.esim ? `
+                    <div class="side-row"><div class="k">ICCID</div><div class="v" style="font-family:'Space Mono',monospace; font-size:11px;">${userSubscription.esim.iccid || '—'}</div></div>
+                    <div class="side-row"><div class="k">Використано / Ліміт</div><div class="v">${userSubscription.esim.usedGb ?? 0} / ${userSubscription.esim.dataLimitGb ?? '∞'} ГБ</div></div>
+                  ` : ''}
+                ` : `<p class="muted" style="margin-top:14px;">Немає активної підписки</p>`}
+              </div>
+              ${ticket.category === 'access_recovery' ? `
+              <div class="glass glass-card" style="margin-top:14px;border-color:rgba(245,166,35,.45);">
+                <div style="font-weight:700;">🔐 Відновлення доступу</div>
+                <div class="side-row"><div class="k">Ім’я</div><div class="v">${escapeHtml(ticket.recoveryRequest?.name || '—')}</div></div>
+                <div class="side-row"><div class="k">Можливий email</div><div class="v">${escapeHtml(ticket.recoveryRequest?.possibleEmail || '—')}</div></div>
+                <div class="side-row"><div class="k">Email для отримання</div><div class="v">${escapeHtml(ticket.recoveryRequest?.contactEmail || '—')}</div></div>
+                <div class="side-row"><div class="k">ICCID / UID</div><div class="v" style="word-break:break-all;">${escapeHtml(ticket.recoveryRequest?.esimId || '—')}</div></div>
+                <div class="side-row"><div class="k">Зі слів користувача про покупку</div><div class="v">${escapeHtml(ticket.recoveryRequest?.purchaseHint || '—')}</div></div>
+                ${recoveryVerification ? `
+                  <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border);font-weight:700;">Дані знайденого акаунта</div>
+                  <div class="side-row"><div class="k">Акаунт знайдено</div><div class="v">${recoveryVerification.accountFound ? '✅ Так' : '❌ Ні'}</div></div>
+                  <div class="side-row"><div class="k">Ім’я в акаунті</div><div class="v">${escapeHtml(recoveryVerification.displayName || '—')}</div></div>
+                  <div class="side-row"><div class="k">Реєстрація</div><div class="v">${recoveryVerification.registeredAt ? new Date(recoveryVerification.registeredAt).toLocaleString('uk-UA') : '—'}</div></div>
+                  <div class="side-row"><div class="k">Тариф / статус</div><div class="v">${escapeHtml(recoveryVerification.plan || '—')} / ${escapeHtml(recoveryVerification.status || '—')}</div></div>
+                  <div class="side-row"><div class="k">eSIM</div><div class="v">${recoveryVerification.hasEsim ? `Є, ICCID закінчується на ${escapeHtml(recoveryVerification.iccidLast4 || '—')}` : 'Немає'}</div></div>
+                  ${(recoveryVerification.payment?.cards || []).map(card => `<div class="side-row"><div class="k">Картка Stripe</div><div class="v">${escapeHtml(card.brand || 'card')} •••• ${escapeHtml(card.last4 || '—')}${card.billingName ? ` · ${escapeHtml(card.billingName)}` : ''}</div></div>`).join('')}
+                  ${(recoveryVerification.payment?.recentPayments || []).map(payment => `<div class="side-row"><div class="k">Оплата</div><div class="v">${new Date(payment.date).toLocaleDateString('uk-UA')} · ${Number(payment.amount).toFixed(2)} ${escapeHtml(String(payment.currency || '').toUpperCase())} · ${escapeHtml(payment.status)}</div></div>`).join('')}
+                  ${recoveryVerification.paymentError ? `<p class="err-text" style="display:flex;margin-top:10px;">${escapeHtml(recoveryVerification.paymentError)}</p>` : ''}
+                ` : ''}
+                <p class="muted" style="font-size:12px;line-height:1.5;margin-top:12px;">Ім’я та email самі по собі не є доказом. Звір щонайменше дві незалежні ознаки: платіж, останні 4 цифри картки, дату покупки, тариф або ICCID.</p>
+                ${localStorage.getItem('signal_admin_role') === 'super_admin' ? `<label style="display:flex;gap:9px;align-items:flex-start;margin-top:12px;font-size:12px;line-height:1.4;"><input id="recoveryVerified" type="checkbox" style="width:auto;margin-top:2px;"><span>Я вручну перевірив(ла) щонайменше дві незалежні ознаки та підтверджую власника.</span></label>` : ''}
+                ${localStorage.getItem('signal_admin_role') === 'super_admin' ? `<button class="btn primary" style="margin-top:12px;" onclick="createRecoveryLink()">Створити й надіслати безпечне посилання</button>` : '<p class="muted" style="margin-top:12px;">Посилання може створити лише Super Admin.</p>'}
+              </div>` : ''}
+            </div>
+          </div>`;
+        loadAssignees(ticket);
+      }catch(e){
+        document.getElementById('loading').style.display = 'none';
+      }
+    }
+
+    async function updateTicket(){
+      const status = document.getElementById('statusSelect').value;
+      const priority = document.getElementById('prioritySelect').value;
+      const assignedTo = document.getElementById('assignedToSelect')?.value;
+      if(status === 'closed' && !confirm('Закрити й повністю видалити це звернення? Воно зникне і з адмінки, і з застосунку користувача.')) { load(); return; }
+      const response = await adminFetch(`/api/admin/tickets/${ticketId}`, { method:'PATCH', body: JSON.stringify({ status, priority, assignedTo }) });
+      const data = await response.json().catch(() => ({}));
+      if(!response.ok) { alert(data.error || 'Не вдалося оновити звернення'); return; }
+      if(data.notificationDelivery) alert(`Звернення передано. Email: ${data.notificationDelivery.email?'надіслано':'не доставлено'}; push: ${data.notificationDelivery.push?'доставлено на '+data.notificationDelivery.push+' пристр.':'немає активного пристрою'}.`);
+      if(status === 'closed') { window.location.href = 'admin-tickets.html'; return; }
+      load();
+    }
+
+    async function createRecoveryLink(){
+      if(!currentRecoveryVerification?.accountFound) return alert('Акаунт за старим email не знайдено. Посилання створювати не можна.');
+      if(!document.getElementById('recoveryVerified')?.checked) return alert('Спочатку підтвердь перевірку щонайменше двох незалежних ознак.');
+      const suggestedEmail = currentRecoveryRequest?.possibleEmail || '';
+      const suggestedDeliveryEmail = currentRecoveryRequest?.contactEmail || '';
+      const accountEmail = prompt('Після перевірки власника введи точний email акаунта, який потрібно відновити:', suggestedEmail || '');
+      if(!accountEmail) return;
+      const deliveryEmail = prompt('На який доступний email надіслати безпечне посилання?', suggestedDeliveryEmail || '');
+      if(!deliveryEmail) return;
+      if(!confirm(`Створити посилання для акаунта ${accountEmail} і надіслати його на ${deliveryEmail}?`)) return;
+      try{
+        const response = await adminFetch(`/api/admin/tickets/${ticketId}/create-recovery-link`, {
+          method:'POST',
+          body:JSON.stringify({ accountEmail: accountEmail.trim().toLowerCase(), deliveryEmail: deliveryEmail.trim().toLowerCase(), verificationConfirmed:true })
+        });
+        const data = await response.json();
+        if(!response.ok) throw new Error(data.error || 'Не вдалося створити посилання');
+        alert(`Безпечне посилання надіслано на ${data.sentTo}. Воно діє 1 годину.`);
+        await load();
+      }catch(error){ alert(error.message); }
+    }
+
+    async function loadAssignees(ticket){
+      if(localStorage.getItem('signal_admin_role') !== 'super_admin') return;
+      try{
+        const res = await adminFetch('/api/admin/assignees'); const admins = await res.json();
+        if(!res.ok) return;
+        const sideCard = document.querySelector('.side > .glass');
+        if(!sideCard) return;
+        sideCard.insertAdjacentHTML('beforeend', `<div class="side-row"><div class="k">Виконавець</div><select id="assignedToSelect" onchange="updateTicket()"><option value="">Не призначено</option>${admins.map(admin => `<option value="${admin.email}" ${admin.email===ticket.assignedTo?'selected':''}>${admin.email} · ${admin.role}</option>`).join('')}</select></div>`);
+      }catch(e){}
+    }
+
+    async function sendReply(){
+      const text = document.getElementById('replyText').value.trim();
+      if(!text) return;
+      const btn = document.getElementById('replyBtn');
+      btn.classList.add('loading');
+      try{
+        if(currentTab === 'reply'){
+          const attachment = await fileToAttachment(document.getElementById('replyAttachment').files[0]);
+          await adminFetch(`/api/admin/tickets/${ticketId}/reply`, { method:'POST', body: JSON.stringify({ message: text, attachment }) });
+        } else {
+          await adminFetch(`/api/admin/tickets/${ticketId}/note`, { method:'POST', body: JSON.stringify({ text }) });
+        }
+        document.getElementById('replyText').value = '';
+        document.getElementById('replyAttachment').value = '';
+        load();
+      }catch(e){}
+      btn.classList.remove('loading');
+    }
+
+    load();
+  </script>
+</body>
+</html>

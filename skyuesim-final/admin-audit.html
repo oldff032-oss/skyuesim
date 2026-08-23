@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Audit Log — E7 Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=Space+Mono&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<style>
+  .action-tag{ font-size:11px; font-family:'Space Mono',monospace; background:var(--glass); padding:3px 8px; border-radius:6px; }
+</style>
+</head>
+<body>
+  <div class="admin-shell">
+    <aside class="admin-sidebar">
+      <div class="brand"><div class="mark" style="width:32px;height:32px;font-size:15px;">🛠️</div><span style="font-size:15px;">E7 Admin</span></div>
+      <nav class="admin-nav">
+        <a href="admin-dashboard.html">📊 Dashboard</a>
+        <a href="admin-tickets.html">🎫 Support</a>
+        <a href="admin-users.html">👥 Users</a>
+        <a href="admin-team.html" id="teamNavLink">🔑 Команда</a>
+        <a href="admin-audit.html" class="active" id="auditNavLink">🛡️ Audit Log</a>
+        <a href="#" onclick="logout()">⎋ Вийти</a>
+      </nav>
+    </aside>
+    <main class="admin-main">
+      <h1 style="font-size:22px;">Audit Log</h1>
+      <p class="lead">Журнал дій усієї команди — хто, що і коли змінив</p>
+
+      <div id="loading" class="shimmer" style="height:200px; margin-top:16px;"></div>
+      <table class="admin-table" id="table" style="display:none;">
+        <thead><tr><th>Час</th><th>Адмін</th><th>Дія</th><th>Ціль</th><th>Деталі</th></tr></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </main>
+  </div>
+
+  <script src="config.js"></script>
+  <script src="admin-common.js"></script>
+  <script>
+    requireAdminAuth();
+    if(localStorage.getItem('signal_admin_role') !== 'super_admin'){
+      document.querySelector('.admin-main').innerHTML = '<div class="card"><p class="err-text">Цей розділ доступний лише Super Admin.</p></div>';
+    } else {
+      load();
+    }
+
+    const actionLabels = {
+      admin_login: 'Вхід в адмінку',
+      admin_created: 'Створено адміна',
+      ticket_updated: 'Змінено тікет',
+      ticket_reply_sent: 'Відповідь надіслано',
+      ticket_note_added: 'Додано нотатку',
+    };
+
+    async function load(){
+      try{
+        const res = await adminFetch('/api/admin/audit-log');
+        const entries = await res.json();
+        document.getElementById('loading').style.display = 'none';
+        document.getElementById('table').style.display = 'table';
+        document.getElementById('tbody').innerHTML = entries.map(e => `
+          <tr>
+            <td class="muted">${new Date(e.timestamp).toLocaleString('uk-UA')}</td>
+            <td>${e.adminEmail}</td>
+            <td><span class="action-tag">${actionLabels[e.action] || e.action}</span></td>
+            <td>${e.target || '—'}</td>
+            <td class="muted">${e.details ? JSON.stringify(e.details) : ''}</td>
+          </tr>`).join('') || '<tr><td colspan="5" class="muted">Записів ще немає</td></tr>';
+      }catch(e){ document.getElementById('loading').style.display = 'none'; }
+    }
+  </script>
+</body>
+</html>
+
