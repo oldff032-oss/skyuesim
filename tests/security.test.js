@@ -171,7 +171,7 @@ test('maintenance support works without account unlock and remains rate limited'
 test('service worker bypasses stale cache for maintenance and localization assets', () => {
   const worker=read('sw.js');
   const support=read('support.html');
-  assert.match(worker, /signal-shell-v40-motion-nav/);
+  assert.match(worker, /signal-shell-v42-icon-dock/);
   assert.match(worker, /fetch\(event\.request, \{ cache:'no-store' \}\)/);
   assert.match(worker, /'\/i18n\.js'/);
   assert.match(worker, /'\/style\.css'/);
@@ -289,6 +289,21 @@ test('Stripe profiles recover automatically and checkout reuses one customer',()
   assert.match(payments,/Stripe-профіль прив’язано/);
   assert.match(admin,/Знайти й прив’язати Stripe/);
   assert.match(admin,/Додаткових Stripe-профілів/);
+});
+
+test('bottom navigation always identifies usage and charts stay visible without motion',()=>{
+  const pwa=read('pwa.js'),usage=read('usage.html'),css=read('style.css');
+  assert.match(pwa, /'usage\.html':\{label:'Витрати',labelEn:'Usage'/);
+  assert.match(pwa, /classList\.toggle\('active',page===current\)/);
+  assert.match(pwa, /setTimeout\(enhanceSignalNavigation,500\)/);
+  assert.match(usage, /height:var\(--bar-height\)/);
+  assert.match(usage, /width:var\(--usage-pct\)!important/);
+  assert.match(usage, /@keyframes barRise\{from\{transform:scaleY\(0\)/);
+  assert.match(css, /prefers-reduced-motion:reduce/);
+  assert.match(css, /navBreathe/);
+  assert.match(css, /navDraw/);
+  assert.match(css, /clip:rect\(0,0,0,0\)/);
+  assert.match(pwa, /setAttribute\('aria-label',label\)/);
 });
 
 test('email changes require ownership verification at the new address',()=>{
