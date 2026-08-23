@@ -166,6 +166,10 @@ test('maintenance support works without account unlock and remains rate limited'
   assert.match(pwa, /setInterval\(checkAppAnnouncements, 5000\)/);
   assert.match(pwa, /serviceStatus\.status==='maintenance'/);
   assert.match(read('admin-operations.html'), /Технічний режим збережено й підтверджено сервером/);
+  assert.match(read('admin-operations.html'), /Повідомлення збережено й підтверджено сервером/);
+  assert.match(pwa, /signal-announcement-card/);
+  assert.match(read('style.css'), /\.maintenance-message[\s\S]*overflow-y:auto/);
+  assert.match(read('style.css'), /\.maintenance-actions[\s\S]*flex:none/);
   assert.doesNotMatch(pwa, /\(support\|new-ticket\|ticket\|maintenance-support\)/);
   assert.match(page, /\/api\/maintenance-support/);
   assert.match(page, /signal-premium-logo\.png/);
@@ -175,7 +179,7 @@ test('maintenance support works without account unlock and remains rate limited'
 test('service worker bypasses stale cache for maintenance and localization assets', () => {
   const worker=read('sw.js');
   const support=read('support.html');
-  assert.match(worker, /signal-shell-v52-durable-maintenance/);
+  assert.match(worker, /signal-shell-v53-notice-layout/);
   assert.match(worker, /fetch\(event\.request, \{ cache:'no-store' \}\)/);
   assert.match(worker, /'\/i18n\.js'/);
   assert.match(worker, /'\/style\.css'/);
@@ -308,7 +312,7 @@ test('bottom navigation always identifies usage and charts stay visible without 
   assert.match(css, /nav-art/);
   assert.match(css, /clip:rect\(0,0,0,0\)/);
   assert.match(pwa, /setAttribute\('aria-label',label\)/);
-  assert.match(pwa, /\/sw\.js\?v=52/);
+  assert.match(pwa, /\/sw\.js\?v=53/);
   for(const marker of ['nav-home-v2.png','nav-plans-v2.png','nav-usage-v2.png','nav-profile-v2.png']) assert.match(pwa,new RegExp(marker.replace('.', '\\.')));
   assert.doesNotMatch(css, /navBreathe[\s\S]{0,80}infinite/);
   assert.match(headers, /\/pwa\.js[\s\S]*Cache-Control: no-store/);

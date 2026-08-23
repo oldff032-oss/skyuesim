@@ -1,7 +1,7 @@
 // Register from every entry page so a fresh "Add to Home Screen" install has
 // a service worker even when it starts directly on dashboard.html.
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('/sw.js?v=52', { updateViaCache: 'none' }).then(registration => registration.update()).catch(() => {});
+  navigator.serviceWorker.register('/sw.js?v=53', { updateViaCache: 'none' }).then(registration => registration.update()).catch(() => {});
   navigator.serviceWorker.addEventListener('controllerchange',()=>{
     if(sessionStorage.getItem('signal_sw_reloaded_v32')==='1')return;
     sessionStorage.setItem('signal_sw_reloaded_v32','1');
@@ -46,7 +46,7 @@ if (window.location.pathname.endsWith('/app-tools.html')) {
 // auth headers, PINs, tokens, QR data or full URLs/query strings.
 const signalOriginalFetch = window.fetch.bind(window);
 let signalDiagnosticCount = 0;
-const SIGNAL_FRONTEND_VERSION='1.2.2',SIGNAL_SW_VERSION='v52',SIGNAL_CACHE_VERSION='signal-shell-v52-durable-maintenance';
+const SIGNAL_FRONTEND_VERSION='1.3.0',SIGNAL_SW_VERSION='v53',SIGNAL_CACHE_VERSION='signal-shell-v53-notice-layout';
 window.addEventListener('load',async()=>{
   if(typeof API_URL==='undefined')return;
   const token=localStorage.getItem('signal_session_token');
@@ -137,7 +137,7 @@ async function checkAppAnnouncements() {
     if (maintenance || !token) return;
     const notice = announcements.find(item => item.type !== 'maintenance' && localStorage.getItem(`signal_announcement_seen:${item.id}`) !== '1');
     if (notice && !document.getElementById('signal-announcement-modal')) {
-      document.body.insertAdjacentHTML('beforeend', `<div id="signal-announcement-modal" style="position:fixed;inset:0;z-index:2147483646;background:rgba(2,5,15,.82);backdrop-filter:blur(10px);display:grid;place-items:center;padding:20px;color:#f5f7ff;font-family:Inter,-apple-system,sans-serif"><section style="width:min(100%,470px);background:#10162a;border:1px solid rgba(100,130,255,.45);border-radius:20px;padding:24px;box-shadow:0 24px 80px rgba(0,0,0,.55)"><div style="font-size:36px">📢</div><h2 style="font-size:22px;margin:12px 0 0">${signalEscapeHtml(notice.title)}</h2><p style="color:#bdc6da;line-height:1.6;margin-top:10px">${signalEscapeHtml(notice.message).replace(/\n/g,'<br>')}</p><button id="signal-announcement-close" type="button" style="width:100%;margin-top:20px;padding:12px;border:0;border-radius:11px;background:#5578ff;color:white;font-weight:700">Зрозуміло</button></section></div>`);
+      document.body.insertAdjacentHTML('beforeend', `<div id="signal-announcement-modal" class="signal-announcement-modal" role="dialog" aria-modal="true" aria-label="Повідомлення Signal"><i class="notice-orb one" aria-hidden="true"></i><i class="notice-orb two" aria-hidden="true"></i><section class="signal-announcement-card"><span class="notice-logo"><img src="signal-premium-logo.png" alt="Signal"><i></i></span><div class="notice-badge"><i></i> Повідомлення Signal</div><h2>${signalEscapeHtml(notice.title||'Важливе повідомлення')}</h2><div class="notice-message">${signalEscapeHtml(notice.message).replace(/\n/g,'<br>')}</div><button id="signal-announcement-close" type="button">Зрозуміло</button></section></div>`);
       document.getElementById('signal-announcement-close').onclick = () => {
         localStorage.setItem(`signal_announcement_seen:${notice.id}`, '1');
         document.getElementById('signal-announcement-modal')?.remove();
