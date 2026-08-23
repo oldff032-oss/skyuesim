@@ -10,6 +10,9 @@ if ('serviceWorker' in navigator) {
 }
 const applyTheme = () => document.documentElement.classList.toggle('light-theme', localStorage.getItem('signal_theme') === 'light');
 applyTheme();
+const signalNavIcons={'dashboard.html':'<path d="M3 11.5 12 4l9 7.5"/><path d="M5.5 10.5V20h13v-9.5"/><path d="M9.5 20v-6h5v6"/>','plans.html':'<path d="M4 7.5h16M6 4h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z"/><path d="M8 12h8M8 16h5"/>','usage.html':'<rect x="6" y="3" width="12" height="18" rx="3"/><path d="M9 7h6M10 17h4"/>','profile.html':'<circle cx="12" cy="8" r="4"/><path d="M4.5 21a7.5 7.5 0 0 1 15 0"/>'};
+function enhanceSignalNavigation(){document.querySelectorAll('.bottomnav a').forEach(link=>{const page=(link.getAttribute('href')||'').split(/[?#]/)[0].split('/').pop(),paths=signalNavIcons[page];if(!paths)return;const label=link.textContent.trim();link.innerHTML=`<span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${paths}</svg></span><span>${label}</span>`;});}
+document.readyState==='loading'?document.addEventListener('DOMContentLoaded',enhanceSignalNavigation):enhanceSignalNavigation();
 const maintenanceGateStyle=document.createElement('style');
 maintenanceGateStyle.textContent='html.signal-maintenance-check body{visibility:hidden!important}';
 document.head.appendChild(maintenanceGateStyle);

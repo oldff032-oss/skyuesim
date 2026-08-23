@@ -196,7 +196,9 @@ test('admin navigation exposes every section and scrolls independently', () => {
   const css=read('style.css');
   const common=read('admin-common.js');
   assert.match(css, /\.admin-sidebar[\s\S]*overflow-y:auto/);
-  for(const page of ['admin-dashboard.html','admin-tickets.html','admin-users.html','admin-operations.html','admin-feedback.html','admin-diagnostics.html','admin-error-guide.html']) assert.match(common,new RegExp(page.replace('.','\\.')));
+  for(const page of ['admin-dashboard.html','admin-users.html','admin-purchases.html','admin-tickets.html','admin-control-center.html','admin-team.html','admin-diagnostics.html']) assert.match(common,new RegExp(page.replace('.','\\.')));
+  assert.doesNotMatch(common, /admin-(operations|feedback|error-guide|plan-changes|notifications|versions|guide)\.html/);
+  assert.match(common, /admin-nav-icon/);
   assert.match(common, /nav\.innerHTML=links\.map/);
 });
 

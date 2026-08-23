@@ -196,7 +196,15 @@ input.error{ border-color:var(--danger); animation: shake .3s ease; }
 .bottomnav a .ic{ font-size:20px; transition: transform .15s ease; }
 .bottomnav a.active{ color:var(--cyan); }
 .bottomnav a.active .ic{ transform: translateY(-2px); filter: drop-shadow(0 0 8px var(--blue-glow)); }
+.bottomnav .nav-icon{width:23px;height:23px;display:grid;place-items:center;transition:transform .18s ease,filter .18s ease}
+.bottomnav .nav-icon svg{width:22px;height:22px;display:block}
+.bottomnav a.active .nav-icon{transform:translateY(-2px);filter:drop-shadow(0 0 8px var(--blue-glow))}
 body.has-bottomnav .wrap{ padding-bottom:96px; }
+.admin-nav a,.admin-nav summary{display:flex;align-items:center;gap:10px}
+.admin-nav summary{padding:12px 14px;cursor:pointer;color:var(--text-muted);list-style:none}
+.admin-nav summary::-webkit-details-marker{display:none}
+.admin-nav-icon{width:21px;height:21px;flex:0 0 21px;display:grid;place-items:center;color:currentColor}
+.admin-nav-icon svg{width:20px;height:20px;display:block}
 
 .shimmer{
   background: linear-gradient(90deg, rgba(255,255,255,0.03) 25%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0.03) 75%);
