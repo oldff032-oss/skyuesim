@@ -1,7 +1,7 @@
 // Register from every entry page so a fresh "Add to Home Screen" install has
 // a service worker even when it starts directly on dashboard.html.
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('/sw.js?v=50', { updateViaCache: 'none' }).then(registration => registration.update()).catch(() => {});
+  navigator.serviceWorker.register('/sw.js?v=51', { updateViaCache: 'none' }).then(registration => registration.update()).catch(() => {});
   navigator.serviceWorker.addEventListener('controllerchange',()=>{
     if(sessionStorage.getItem('signal_sw_reloaded_v32')==='1')return;
     sessionStorage.setItem('signal_sw_reloaded_v32','1');
@@ -46,7 +46,7 @@ if (window.location.pathname.endsWith('/app-tools.html')) {
 // auth headers, PINs, tokens, QR data or full URLs/query strings.
 const signalOriginalFetch = window.fetch.bind(window);
 let signalDiagnosticCount = 0;
-const SIGNAL_FRONTEND_VERSION='1.2.0',SIGNAL_SW_VERSION='v50',SIGNAL_CACHE_VERSION='signal-shell-v50-maintenance-center';
+const SIGNAL_FRONTEND_VERSION='1.2.1',SIGNAL_SW_VERSION='v51',SIGNAL_CACHE_VERSION='signal-shell-v51-maintenance-enforced';
 window.addEventListener('load',async()=>{
   if(typeof API_URL==='undefined')return;
   const token=localStorage.getItem('signal_session_token');
@@ -106,13 +106,15 @@ async function checkAppAnnouncements() {
   const email = localStorage.getItem('signal_email');
   const endpoint = token ? '/api/account/announcements' : '/api/announcements';
   try {
+    const statusResponse=await signalOriginalFetch(`${API_URL}/api/service-status?_=${Date.now()}`,{cache:'no-store'});
+    const serviceStatus=statusResponse.ok?await statusResponse.json():{status:'unknown'};
     let response = await fetch(`${API_URL}${endpoint}${!token && email ? `?email=${encodeURIComponent(email)}` : ''}`, {
       headers: token ? { 'x-session-token': token } : {},
       cache: 'no-store',
     });
     if (response.status === 401 && token) response = await fetch(`${API_URL}/api/announcements`, { cache:'no-store' });
-    if (!response.ok){document.documentElement.classList.remove('signal-maintenance-check');return;}
-    const { announcements = [] } = await response.json();
+    const announcements=response.ok?((await response.json()).announcements||[]):[];
+    if(!response.ok&&serviceStatus.status!=='maintenance'){document.documentElement.classList.remove('signal-maintenance-check');return;}
     document.documentElement.classList.remove('signal-maintenance-check');
     const securityIncident = announcements.find(item => item.type === 'security' && item.audience === 'all');
     const existingSecurity = document.getElementById('signal-security-incident-screen');
@@ -122,7 +124,7 @@ async function checkAppAnnouncements() {
       return;
     }
     if (securityIncident) return;
-    const maintenance = announcements.find(item => item.type === 'maintenance' && item.audience === 'all');
+    const maintenance = announcements.find(item => item.type === 'maintenance' && item.audience === 'all')||(serviceStatus.status==='maintenance'?{title:'Тимчасово недоступно',message:serviceStatus.message||'Ми проводимо технічні роботи. Спробуйте відкрити застосунок трохи пізніше.',audience:'all',type:'maintenance'}:null);
     const existingMaintenance = document.getElementById('signal-maintenance-screen');
     if (!maintenance) existingMaintenance?.remove();
     // During maintenance every customer page is blocked. The only exception
@@ -148,7 +150,7 @@ async function checkAppAnnouncements() {
 }
 window.addEventListener('load', () => {
   checkAppAnnouncements();
-  window.setInterval(checkAppAnnouncements, 30000);
+  window.setInterval(checkAppAnnouncements, 5000);
 });
 document.addEventListener('click',event=>{
   const button=event.target.closest?.('#signal-maintenance-screen button');
