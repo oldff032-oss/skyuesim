@@ -189,10 +189,10 @@ input.error{ border-color:var(--danger); animation: shake .3s ease; }
 .bottomnav a.active{color:#78efff;transform:translateY(-2px)}
 .bottomnav a.active::before{opacity:1;transform:scale(1) rotate(0)}
 .bottomnav a.active::after{opacity:.42;transform:rotate(18deg)}
-.bottomnav .nav-icon{width:40px;height:40px;display:grid;place-items:center;transition:transform .38s cubic-bezier(.2,.9,.2,1),filter .28s ease}
-.bottomnav .nav-art{width:35px;height:35px;display:block;object-fit:contain;opacity:.9;filter:saturate(1.02) brightness(.96);transition:opacity .25s ease,filter .25s ease,transform .25s ease}
+.bottomnav .nav-icon{width:36px;height:36px;display:grid;place-items:center;transition:transform .38s cubic-bezier(.2,.9,.2,1),filter .28s ease}
+.bottomnav .nav-art{width:31px;height:31px;display:block;object-fit:contain;opacity:.92;filter:saturate(1.06) brightness(1);transition:opacity .25s ease,filter .25s ease,transform .25s ease}
 .bottomnav a.active .nav-icon{filter:drop-shadow(0 0 7px rgba(51,217,255,.62));animation:navSelect .62s cubic-bezier(.2,1.25,.3,1) both}
-.bottomnav a.active .nav-art{width:38px;height:38px;opacity:1;filter:saturate(1.12) brightness(1.06)}
+.bottomnav a.active .nav-art{width:34px;height:34px;opacity:1;filter:saturate(1.14) brightness(1.08)}
 .bottomnav a:active{transform:translateY(1px) scale(.88)}
 .bottomnav a:active .nav-icon{transform:rotate(-7deg) scale(.82)}
 .bottomnav .nav-label{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important}
