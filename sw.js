@@ -3,7 +3,7 @@
 // Кешує тільки статичну "оболонку" — самі дані (підписка, тікети) завжди
 // тягнуться наживо з бекенду, ніколи не кешуються.
 
-const CACHE_NAME = 'signal-shell-v45-illustrated-nav';
+const CACHE_NAME = 'signal-shell-v46-auth-experience';
 const SHELL_FILES = [
   '/icon-192.png',
   '/icon-512.png',

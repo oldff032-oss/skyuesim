@@ -1,7 +1,7 @@
 // Register from every entry page so a fresh "Add to Home Screen" install has
 // a service worker even when it starts directly on dashboard.html.
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('/sw.js?v=45', { updateViaCache: 'none' }).then(registration => registration.update()).catch(() => {});
+  navigator.serviceWorker.register('/sw.js?v=46', { updateViaCache: 'none' }).then(registration => registration.update()).catch(() => {});
   navigator.serviceWorker.addEventListener('controllerchange',()=>{
     if(sessionStorage.getItem('signal_sw_reloaded_v32')==='1')return;
     sessionStorage.setItem('signal_sw_reloaded_v32','1');
@@ -10,6 +10,13 @@ if ('serviceWorker' in navigator) {
 }
 const applyTheme = () => document.documentElement.classList.toggle('light-theme', localStorage.getItem('signal_theme') === 'light');
 applyTheme();
+const signalAuthPages=new Set(['login.html','register-email.html','verify-code.html','set-password.html','forgot-password.html','reset-code.html','new-password.html','account-created.html']);
+const signalCurrentPage=location.pathname.split('/').pop()||'index.html';
+if(signalAuthPages.has(signalCurrentPage))document.documentElement.classList.add('signal-auth-page');
+function signalMountAuthExperience(){if(!signalAuthPages.has(signalCurrentPage)||!document.body)return;const wrap=document.querySelector('.wrap');if(wrap&&!wrap.querySelector('.auth-atmosphere'))wrap.insertAdjacentHTML('afterbegin','<div class="auth-atmosphere" aria-hidden="true"><i></i><i></i><i></i></div>');if(!document.getElementById('signal-auth-loader'))document.body.insertAdjacentHTML('beforeend','<div id="signal-auth-loader" class="auth-loader" role="status" aria-live="polite" aria-hidden="true"><div class="auth-loader-core"><span class="auth-logo-stage"><img src="signal-premium-logo.png" alt=""><i></i><b></b></span><strong id="signal-auth-loader-title">Захищений вхід</strong><small id="signal-auth-loader-copy">Підключаємо твій акаунт до Signal</small><span class="auth-loader-progress"><i></i></span></div></div>');const splashAllowed=['login.html','register-email.html'].includes(signalCurrentPage),splashKey=`signal_auth_intro:${signalCurrentPage}`;if(splashAllowed&&!sessionStorage.getItem(splashKey)){sessionStorage.setItem(splashKey,'1');signalAuthLoading(true,signalCurrentPage==='login.html'?'Ласкаво просимо':'Створюємо твій Signal');setTimeout(()=>signalAuthLoading(false),1150);}}
+window.signalAuthLoading=function(active,title,copy){const loader=document.getElementById('signal-auth-loader');if(!loader)return;if(title)document.getElementById('signal-auth-loader-title').textContent=title;if(copy)document.getElementById('signal-auth-loader-copy').textContent=copy;loader.classList.toggle('visible',Boolean(active));loader.setAttribute('aria-hidden',active?'false':'true');document.body.classList.toggle('auth-busy',Boolean(active));};
+window.signalAuthSuccess=function(title='Готово!'){const loader=document.getElementById('signal-auth-loader');if(!loader)return;document.getElementById('signal-auth-loader-title').textContent=title;document.getElementById('signal-auth-loader-copy').textContent='Відкриваємо твій особистий простір';loader.classList.add('visible','success');loader.setAttribute('aria-hidden','false');document.body.classList.add('auth-busy');};
+document.readyState==='loading'?document.addEventListener('DOMContentLoaded',signalMountAuthExperience):signalMountAuthExperience();
 const signalNavItems={'dashboard.html':{label:'Головна',labelEn:'Home',image:'nav-home-v1.png'},'plans.html':{label:'Тарифи',labelEn:'Plans',image:'nav-plans-v1.png'},'usage.html':{label:'Витрати',labelEn:'Usage',image:'nav-usage-v1.png'},'profile.html':{label:'Профіль',labelEn:'Profile',image:'nav-profile-v1.png'}};
 function enhanceSignalNavigation(){const current=location.pathname.split('/').pop(),isCore=Boolean(signalNavItems[current]),english=localStorage.getItem('signal_language')==='en';document.querySelectorAll('.bottomnav a').forEach(link=>{const page=(link.getAttribute('href')||'').split(/[?#]/)[0].split('/').pop(),item=signalNavItems[page];if(!item)return;const label=english?item.labelEn:item.label;if(isCore)link.classList.toggle('active',page===current);link.dataset.nav=page.replace('.html','');link.setAttribute('aria-label',label);link.setAttribute('title',label);link.innerHTML=`<span class="nav-icon" aria-hidden="true"><img class="nav-art" src="${item.image}" alt=""></span><span class="nav-label" data-no-auto-translate>${label}</span>`;});const dashboardLogo=document.querySelector('.logo-orbit');if(current==='dashboard.html'&&dashboardLogo)dashboardLogo.innerHTML='<img src="signal-premium-logo.png" alt="Signal">';}
 document.readyState==='loading'?document.addEventListener('DOMContentLoaded',enhanceSignalNavigation):enhanceSignalNavigation();
@@ -39,7 +46,7 @@ if (window.location.pathname.endsWith('/app-tools.html')) {
 // auth headers, PINs, tokens, QR data or full URLs/query strings.
 const signalOriginalFetch = window.fetch.bind(window);
 let signalDiagnosticCount = 0;
-const SIGNAL_FRONTEND_VERSION='1.0.6',SIGNAL_SW_VERSION='v45',SIGNAL_CACHE_VERSION='signal-shell-v45-illustrated-nav';
+const SIGNAL_FRONTEND_VERSION='1.1.0',SIGNAL_SW_VERSION='v46',SIGNAL_CACHE_VERSION='signal-shell-v46-auth-experience';
 window.addEventListener('load',async()=>{
   if(typeof API_URL==='undefined')return;
   const token=localStorage.getItem('signal_session_token');

@@ -20,8 +20,8 @@
   <div class="wrap">
     <div class="brand"><div class="mark">📶</div><span>Сигнал</span></div>
 
-    <h1 style="margin-top:20px;">Welcome back</h1>
-    <p class="lead">Увійди у свій акаунт</p>
+    <h1 style="margin-top:20px;">З поверненням</h1>
+    <p class="lead">Твій мобільний світ уже чекає</p>
     <div id="resetBanner" style="display:none; margin-top:14px; padding:12px 16px; background:rgba(52,228,184,0.1); border:1px solid rgba(52,228,184,0.3); border-radius:12px; color:var(--success); font-size:13px;">✅ Пароль оновлено. Увійди з новим паролем.</div>
 
     <div class="field-group">
@@ -29,7 +29,7 @@
       <input type="email" id="email" placeholder="you@example.com" autocomplete="email" />
     </div>
     <div class="field-group">
-      <label class="field-label">Password</label>
+      <label class="field-label">Пароль</label>
       <div class="input-icon-wrap">
         <input type="password" id="password" placeholder="••••••••" autocomplete="current-password" />
         <button class="icon-btn" onclick="togglePw()" type="button">👁️</button>
@@ -39,7 +39,7 @@
     </div>
     <div class="err-text" id="err" style="display:none;"></div>
 
-    <button class="btn" id="loginBtn" style="margin-top:12px;" onclick="doLogin()">Log In</button>
+    <button class="btn" id="loginBtn" style="margin-top:12px;" onclick="doLogin()">Увійти</button>
     <p class="muted" style="text-align:center; margin-top:16px;">Ще немає акаунта? <a href="register-email.html" style="color:var(--cyan); text-decoration:none;">Створити</a></p>
   </div>
 
@@ -69,6 +69,7 @@
 
       btn.classList.add('loading');
       btn.textContent = 'Входимо...';
+      window.signalAuthLoading?.(true,'Перевіряємо дані','Безпечно підключаємо твій акаунт');
 
       try{
         const res = await fetch(`${API_URL}/api/auth/login`, {
@@ -82,12 +83,14 @@
         localStorage.setItem('signal_email', data.email);
         localStorage.setItem('signal_language', data.language || 'uk');
         for (const key of Object.keys(sessionStorage)) if (key.startsWith('signal_app_unlocked:')) sessionStorage.removeItem(key);
-        window.location.href = 'dashboard.html';
+        window.signalAuthSuccess?.('Вхід успішний!');
+        setTimeout(()=>{ window.location.href = 'dashboard.html'; },700);
       }catch(e){
         err.textContent = e.message + '. Перевір мережу і спробуй ще раз.';
         err.style.display = 'flex';
+        window.signalAuthLoading?.(false);
         btn.classList.remove('loading');
-        btn.textContent = 'Log In';
+        btn.textContent = 'Увійти';
       }
     }
 
