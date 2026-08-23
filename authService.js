@@ -215,6 +215,7 @@ async function updateAccount(email, changes = {}) {
     }
     if (nextEmail !== email && (!nextEmail.includes('@') || nextEmail.length > 254)) throw Object.assign(new Error('Введи коректний email'), { code: 'INVALID_EMAIL' });
     if (nextEmail !== email && (store.users[nextEmail] || getUser(nextEmail))) throw Object.assign(new Error('Цей email уже використовується'), { code: 'EMAIL_TAKEN' });
+    if(nextEmail!==email){const matched=Object.entries(store.emailChangeTokens||{}).find(([,item])=>item.accountEmail===email&&item.newEmail===nextEmail&&Date.now()-item.createdAt<=VERIFY_TOKEN_TTL_MS);if(!matched)throw Object.assign(new Error('Спочатку підтвердьте новий email кодом'),{code:'EMAIL_VERIFICATION_REQUIRED'});delete store.emailChangeTokens[matched[0]];}
     if (newPassword && newPassword.length < 8) throw Object.assign(new Error('Новий пароль має містити щонайменше 8 символів'), { code: 'WEAK_PASSWORD' });
   }
 
@@ -236,6 +237,20 @@ async function updateAccount(email, changes = {}) {
   if (displayName !== undefined || avatarDataUrl !== undefined) saveUser(accountEmail, { ...(displayName !== undefined ? { displayName } : {}), ...(avatarDataUrl !== undefined ? { avatarDataUrl } : {}) });
   writeAll(store);
   return { email: accountEmail, displayName: getUser(accountEmail)?.displayName || '', avatarDataUrl: getUser(accountEmail)?.avatarDataUrl || null };
+}
+
+async function requestEmailChange(accountEmail,newEmail,currentPassword){
+  accountEmail=normalizeEmail(accountEmail);newEmail=normalizeEmail(newEmail);const store=readAll(),user=store.users[accountEmail];
+  if(!user||!await bcrypt.compare(String(currentPassword||''),user.passwordHash))throw Object.assign(new Error('Поточний пароль невірний'),{code:'INVALID_CURRENT_PASSWORD'});
+  if(!newEmail.includes('@')||newEmail.length>254)throw Object.assign(new Error('Введіть коректний новий email'),{code:'INVALID_EMAIL'});
+  if(store.users[newEmail]||getUser(newEmail))throw Object.assign(new Error('Цей email уже використовується'),{code:'EMAIL_TAKEN'});
+  const code=randomCode(),key=`${accountEmail}:${newEmail}`;store.emailChangeCodes||={};store.emailChangeCodes[key]={accountEmail,newEmail,codeHash:verificationCodeHash(newEmail,code),attempts:0,createdAt:Date.now()};writeAll(store);await sendVerificationCode(newEmail,code);return {sent:true};
+}
+function confirmEmailChange(accountEmail,newEmail,code){
+  accountEmail=normalizeEmail(accountEmail);newEmail=normalizeEmail(newEmail);const store=readAll(),key=`${accountEmail}:${newEmail}`,entry=store.emailChangeCodes?.[key];
+  if(!entry||Date.now()-entry.createdAt>CODE_TTL_MS)throw Object.assign(new Error('Код недійсний або прострочений'),{code:'INVALID_CODE'});
+  entry.attempts+=1;if(entry.attempts>MAX_ATTEMPTS||!codeMatches(newEmail,entry,code)){writeAll(store);throw Object.assign(new Error('Невірний код'),{code:'WRONG_CODE'});}
+  const token=randomToken();delete store.emailChangeCodes[key];store.emailChangeTokens||={};store.emailChangeTokens[token]={accountEmail,newEmail,createdAt:Date.now()};writeAll(store);return {emailChangeToken:token};
 }
 
 const ADMIN_RECOVERY_TTL_MS = 60 * 60 * 1000;
@@ -312,7 +327,7 @@ async function completeAdminRecovery(token, newEmail, newPassword, pin) {
   return { ok: true, email, sessionToken, ticketId: entry.ticketId };
 }
 
-module.exports = { requestCode, verifyCode, setPassword, login, getSessionEmail, listSessions, revokeOtherSessions, revokeAllSessions, deleteAccountAuth, updateAccount, requestPasswordReset, verifyResetCode, resetPassword, createAdminRecoveryToken, inspectAdminRecoveryToken, completeAdminRecovery };
+module.exports = { requestCode, verifyCode, setPassword, login, getSessionEmail, listSessions, revokeOtherSessions, revokeAllSessions, deleteAccountAuth, updateAccount, requestEmailChange, confirmEmailChange, requestPasswordReset, verifyResetCode, resetPassword, createAdminRecoveryToken, inspectAdminRecoveryToken, completeAdminRecovery };
 
 // ---------- Забув(ла) пароль: запит коду ----------
 async function requestPasswordReset(email) {

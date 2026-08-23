@@ -1,5 +1,5 @@
 const storage = require('./persistentState');
-const EMPTY = { codes: {}, verifyTokens: {}, users: {}, sessions: {}, resetCodes: {}, resetTokens: {} };
+const EMPTY = { codes: {}, verifyTokens: {}, users: {}, sessions: {}, resetCodes: {}, resetTokens: {}, emailChangeCodes:{}, emailChangeTokens:{} };
 let store = { ...EMPTY };
 
 async function bootstrap() { store = { ...EMPTY, ...(await storage.load('auth.json', EMPTY)) }; }

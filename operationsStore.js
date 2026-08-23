@@ -1,7 +1,7 @@
 const storage = require('./persistentState');
 const defaults = () => ({
   announcements: [], notes: {}, blacklist: { emails: [], iccids: [] }, templates: [],
-  emailBroadcasts: [], securityEvents: [], jobs: [], deliveryEvents: [], resolvedAttention: {},
+  emailBroadcasts: [], securityEvents: [], jobs: [], deliveryEvents: [], resolvedAttention: {}, processedEvents: {},
   featureFlags: {
     registration:true, monthlyPlans:true, travelPackages:true, referrals:true,
     autoRenew:true, push:true, deepl:true, photoUploads:true, cardPayments:true,
@@ -35,4 +35,14 @@ function recordDelivery(event={}){
   store.deliveryEvents.unshift(record);store.deliveryEvents=store.deliveryEvents.slice(0,5000);save();return record;
 }
 function updateDelivery(id,patch={}){const item=store.deliveryEvents.find(event=>event.id===id);if(!item)return null;Object.assign(item,patch,{updatedAt:new Date().toISOString()});save();return item;}
-module.exports={ bootstrap, store:()=>store, save, activeAnnouncements, addJob, updateJob, recordDelivery, updateDelivery };
+function beginEvent(provider,eventId,type){
+  const id=String(eventId||'').trim();if(!id)return {accepted:false,reason:'missing_id'};
+  const key=`${provider}:${id}`,existing=store.processedEvents[key];
+  if(existing&&['processing','completed'].includes(existing.status))return {accepted:false,duplicate:true,event:existing};
+  const event={provider,id,type:String(type||''),status:'processing',startedAt:new Date().toISOString(),attempts:Number(existing?.attempts||0)+1};
+  store.processedEvents[key]=event;
+  const entries=Object.entries(store.processedEvents).sort((a,b)=>new Date(b[1].startedAt)-new Date(a[1].startedAt)).slice(0,10000);
+  store.processedEvents=Object.fromEntries(entries);save();return {accepted:true,key,event};
+}
+function finishEvent(key,status='completed',error=null){const event=store.processedEvents[key];if(!event)return null;Object.assign(event,{status,error:error?String(error).slice(0,500):null,finishedAt:new Date().toISOString()});save();return event;}
+module.exports={ bootstrap, store:()=>store, save, activeAnnouncements, addJob, updateJob, recordDelivery, updateDelivery, beginEvent, finishEvent };

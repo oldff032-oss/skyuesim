@@ -40,6 +40,10 @@ async function cancelSubscription(subscriptionId) {
 async function cancelSubscriptionAtPeriodEnd(subscriptionId) {
   return stripe.subscriptions.update(subscriptionId, { cancel_at_period_end:true });
 }
+async function createBillingPortalSession(customerId){
+  if(!customerId)throw new Error('Stripe customer is required');
+  return stripe.billingPortal.sessions.create({customer:customerId,return_url:`${process.env.FRONTEND_URL}/payments.html`});
+}
 
 async function deleteStripeCustomer(customerId) {
   if (!customerId) return null;
@@ -236,12 +240,16 @@ async function getRecoveryPaymentEvidence(customerId) {
 // запуском із живими грошима поверни стандартну поведінку — просто
 // прибери третій аргумент нижче (або постав null).
 function constructWebhookEvent(rawBody, signature) {
+  const configuredTolerance = Number(process.env.STRIPE_WEBHOOK_TOLERANCE_SECONDS || 300);
+  const tolerance = Number.isFinite(configuredTolerance)
+    ? Math.max(60, Math.min(900, Math.trunc(configuredTolerance)))
+    : 300;
   return stripe.webhooks.constructEvent(
     rawBody,
     signature,
     process.env.STRIPE_WEBHOOK_SECRET,
-    24 * 60 * 60 // 24 години допустимого розходження в часі — ТІЛЬКИ для тестів
+    tolerance
   );
 }
 
-module.exports = { createCheckoutSession, createCustomPackageCheckout, cancelSubscription, cancelSubscriptionAtPeriodEnd, cancelAllSubscriptionsForCustomers, deleteStripeCustomer, constructWebhookEvent, getNextBillingDate, getBillingHistory, getRecoveryPaymentEvidence, findCustomerIdsByEmail, getCustomerEmail, getSubscriptionStateByEmail, listCompletedCheckoutPurchasesByEmail, getCheckoutPurchaseDetails, listRefundablePaymentsByEmail, refundPayment };
+module.exports = { createCheckoutSession, createCustomPackageCheckout, createBillingPortalSession, cancelSubscription, cancelSubscriptionAtPeriodEnd, cancelAllSubscriptionsForCustomers, deleteStripeCustomer, constructWebhookEvent, getNextBillingDate, getBillingHistory, getRecoveryPaymentEvidence, findCustomerIdsByEmail, getCustomerEmail, getSubscriptionStateByEmail, listCompletedCheckoutPurchasesByEmail, getCheckoutPurchaseDetails, listRefundablePaymentsByEmail, refundPayment };

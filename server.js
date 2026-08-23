@@ -9,7 +9,7 @@ const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const { generateRegistrationOptions, verifyRegistrationResponse } = require('@simplewebauthn/server');
 
-const { createCheckoutSession, createCustomPackageCheckout, cancelSubscription, cancelSubscriptionAtPeriodEnd, cancelAllSubscriptionsForCustomers, deleteStripeCustomer, constructWebhookEvent, getNextBillingDate, getBillingHistory, getRecoveryPaymentEvidence, findCustomerIdsByEmail, getCustomerEmail, getSubscriptionStateByEmail, listCompletedCheckoutPurchasesByEmail, getCheckoutPurchaseDetails, listRefundablePaymentsByEmail, refundPayment } = require('./stripeService');
+const { createCheckoutSession, createCustomPackageCheckout, createBillingPortalSession, cancelSubscription, cancelSubscriptionAtPeriodEnd, cancelAllSubscriptionsForCustomers, deleteStripeCustomer, constructWebhookEvent, getNextBillingDate, getBillingHistory, getRecoveryPaymentEvidence, findCustomerIdsByEmail, getCustomerEmail, getSubscriptionStateByEmail, listCompletedCheckoutPurchasesByEmail, getCheckoutPurchaseDetails, listRefundablePaymentsByEmail, refundPayment } = require('./stripeService');
 const crypto = require('crypto');
 const { provisionEsim, checkUsage, recoverEsim, topupEsim, listPackages, findRenewalTopup } = require('./esimService');
 const { bootstrap: bootstrapUsers, getUser, saveUser, deleteUser, getUserByStripeCustomerId, getAllUsers } = require('./db');
@@ -161,6 +161,24 @@ async function executePaidPlanChange({email,purchaseId,packageCode,packageName,d
 async function processDuePlanChanges() {
   const due=Object.values(getAllUsers()).filter(user=>user?.pendingPlanChange?.scheduledFor&&new Date(user.pendingPlanChange.scheduledFor).getTime()<=Date.now());
   for(const user of due){const change=user.pendingPlanChange;await executePaidPlanChange({email:user.email,purchaseId:change.purchaseId,packageCode:change.packageCode,packageName:change.packageName,dataLimitGb:change.dataLimitGb,durationDays:change.durationDays,location:change.location,previousPlan:change.previousPlan,previousSubscriptionId:change.previousSubscriptionId,requestId:change.requestId});}
+}
+
+let operationalJobsRunning=false;
+async function processOperationalJobs(){
+  if(operationalJobsRunning)return;operationalJobsRunning=true;
+  try{
+    const pending=(operationsStore.store().jobs||[]).filter(job=>job.status==='pending'&&job.retryable!==false&&Number(job.attempts||0)<Number(job.maxAttempts||3)&&(!job.nextAttemptAt||new Date(job.nextAttemptAt)<=new Date())).slice(0,10);
+    for(const job of pending){
+      operationsStore.updateJob(job.id,{status:'running',attempts:Number(job.attempts||0)+1,startedAt:new Date().toISOString()});
+      try{
+        if(job.type==='plan_change'){
+          const user=getUser(job.email),purchase=(user?.purchases||[]).find(item=>item.id===job.purchaseId);if(!user||!purchase)throw new Error('Purchase for plan change was not found');
+          const result=await executePaidPlanChange({email:job.email,purchaseId:purchase.id,packageCode:purchase.packageCode,packageName:purchase.packageName,dataLimitGb:purchase.dataLimitGb,durationDays:purchase.durationDays,location:purchase.location,previousPlan:purchase.previousPlan,previousSubscriptionId:purchase.previousSubscriptionId});if(!result.ok)throw result.error||new Error('Plan change failed');
+        }else throw Object.assign(new Error(`Unsupported job type: ${job.type}`),{nonRetryable:true});
+        operationsStore.updateJob(job.id,{status:'succeeded',completedAt:new Date().toISOString(),error:null});
+      }catch(error){const attempts=Number(job.attempts||0)+1,retryable=!error.nonRetryable&&attempts<Number(job.maxAttempts||3);operationsStore.updateJob(job.id,{status:retryable?'pending':'failed',retryable,error:error.message,nextAttemptAt:retryable?new Date(Date.now()+Math.min(30*60*1000,2**attempts*60000)).toISOString():null,completedAt:retryable?null:new Date().toISOString()});}
+    }
+  }finally{operationalJobsRunning=false;}
 }
 
 async function deliverPurchaseReceipt(email, purchaseId, defaults = {}, suppliedReceiptUrl = null) {
@@ -362,7 +380,7 @@ app.put('/api/account/profile', requireUserSession, async (req, res) => {
 
 app.get('/api/account/preferences', requireUserSession, (req, res) => {
   const preferences = getUser(req.userEmail)?.preferences || {};
-  res.json({ trafficAlertThresholds: preferences.trafficAlertThresholds || [50, 80, 95], language: getUser(req.userEmail)?.language || 'uk' });
+  res.json({ trafficAlertThresholds: preferences.trafficAlertThresholds || [50, 80, 95], marketingEmails:preferences.marketingEmails===true, language: getUser(req.userEmail)?.language || 'uk' });
 });
 
 app.post('/api/account/diagnostics', requireUserSession, (req, res) => {
@@ -391,14 +409,16 @@ app.get('/api/announcements', async (req, res) => res.json({ announcements: awai
 app.put('/api/account/preferences', requireUserSession, (req, res) => {
   const raw = req.body?.trafficAlertThresholds;
   const language = req.body?.language;
+  const marketingEmails=req.body?.marketingEmails;
   if (raw !== undefined && (!Array.isArray(raw) || raw.some((value) => !Number.isInteger(value) || value < 1 || value > 100))) {
     return res.status(400).json({ error: 'Вкажи коректні пороги від 1 до 100' });
   }
   if (language !== undefined && !['uk','en'].includes(language)) return res.status(400).json({ error: 'Некоректна мова' });
   const trafficAlertThresholds = raw === undefined ? null : [...new Set(raw)].sort((a, b) => a - b);
   const user = getUser(req.userEmail);
-  saveUser(req.userEmail, { ...(language ? { language } : {}), preferences: { ...(user?.preferences || {}), ...(trafficAlertThresholds ? { trafficAlertThresholds } : {}) } });
-  res.json({ ok: true, trafficAlertThresholds: trafficAlertThresholds || user?.preferences?.trafficAlertThresholds || [50,80,95], language: language || user?.language || 'uk' });
+  if(marketingEmails!==undefined&&typeof marketingEmails!=='boolean')return res.status(400).json({error:'Некоректне налаштування email'});
+  saveUser(req.userEmail, { ...(language ? { language } : {}), preferences: { ...(user?.preferences || {}), ...(trafficAlertThresholds ? { trafficAlertThresholds } : {}),...(marketingEmails!==undefined?{marketingEmails}:{}) } });
+  res.json({ ok: true, trafficAlertThresholds: trafficAlertThresholds || user?.preferences?.trafficAlertThresholds || [50,80,95],marketingEmails:marketingEmails??user?.preferences?.marketingEmails===true, language: language || user?.language || 'uk' });
 });
 
 app.post('/api/translations/batch', requireUserSession, rateLimit('ui_translation',60*1000,20,req=>req.userEmail), async (req,res) => {
@@ -661,12 +681,15 @@ app.post('/api/auth/reset-password', rateLimit('reset_password',15*60*1000,10,re
 // =========================================================
 
 app.post('/api/inbound-email', async (req, res) => {
+  let inboundId='';
   try {
     verifyInboundSignature(req.body, req.headers);
     const event = JSON.parse(req.body);
+    inboundId=String(req.headers['svix-id']||event.data?.email_id||'');
+    if(!await storage.claimExternalEvent('resend',inboundId,event.type))return res.json({received:true,duplicate:true});
 
     if (event.type !== 'email.received') {
-      return res.json({ received: true, skipped: true });
+      await storage.finishExternalEvent('resend',inboundId,'ignored');return res.json({ received: true, skipped: true });
     }
 
     // Вебхук дає тільки метадані — забираємо повний текст листа окремо
@@ -676,15 +699,18 @@ app.post('/api/inbound-email', async (req, res) => {
     const match = (email.subject || '').match(/#(\d+)/);
     if (!match) {
       console.log('[inbound-email] Не вдалося знайти Ticket ID в темі:', email.subject);
-      return res.json({ received: true, matched: false });
+      await storage.finishExternalEvent('resend',inboundId,'ignored','ticket_id_missing');return res.json({ received: true, matched: false });
     }
 
     const ticketId = match[1];
     const ticket = ticketStore.getTicket(ticketId);
     if (!ticket) {
       console.log(`[inbound-email] Тікет #${ticketId} не знайдено`);
-      return res.json({ received: true, matched: false });
+      await storage.finishExternalEvent('resend',inboundId,'ignored','ticket_not_found');return res.json({ received: true, matched: false });
     }
+
+    const sender=String(Array.isArray(email.from)?email.from[0]:email.from||'').toLowerCase();
+    if(!sender.includes(String(ticket.email||'').toLowerCase())){await storage.finishExternalEvent('resend',inboundId,'rejected','sender_mismatch');return res.status(403).json({error:'Відправник не збігається з власником звернення'});}
 
     // Простий текст без HTML-розмітки, якщо є тільки html-версія
     const text = email.text || (email.html || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
@@ -692,7 +718,7 @@ app.post('/api/inbound-email', async (req, res) => {
     ticketStore.addMessage(ticketId, { from: 'user', text });
     console.log(`[inbound-email] Додано відповідь у тікет #${ticketId} від ${email.from}`);
 
-    res.json({ received: true, ticketId });
+    await storage.finishExternalEvent('resend',inboundId,'completed');res.json({ received: true, ticketId });
   } catch (err) {
     console.error('Помилка обробки вхідного листа:', err.message);
     res.status(400).json({ error: err.message });
@@ -1258,13 +1284,14 @@ app.post('/api/admin/email-broadcasts/:audience',adminAuth.requireAdmin,adminAut
   } else {
     const users=Object.entries(getAllUsers()).map(([email,user])=>({...user,email:user.email||email}));
     filter=['all','active','single'].includes(req.body?.filter)?req.body.filter:'all';
-    if(filter==='active') recipients=uniqueEmails(users.filter(user=>user.status==='active').map(user=>user.email));
+    const optedIn=users.filter(user=>user.preferences?.marketingEmails===true);
+    if(filter==='active') recipients=uniqueEmails(optedIn.filter(user=>user.status==='active').map(user=>user.email));
     else if(filter==='single'){
       const requested=String(req.body?.email||'').trim().toLowerCase();
-      const found=users.find(user=>String(user.email||'').toLowerCase()===requested);
+      const found=optedIn.find(user=>String(user.email||'').toLowerCase()===requested);
       if(!found) return res.status(404).json({error:'Користувача з таким email не знайдено'});
       recipients=[found.email];
-    } else recipients=uniqueEmails(users.map(user=>user.email));
+    } else recipients=uniqueEmails(optedIn.map(user=>user.email));
   }
   if(!recipients.length) return res.status(400).json({error:'У вибраній аудиторії немає отримувачів'});
 
@@ -1970,8 +1997,17 @@ app.post('/api/webhook', async (req, res) => {
     return res.status(400).send(`Webhook Error: ${err.message}`);
   }
 
+  const claimed=await storage.claimExternalEvent('stripe',event.id,event.type);
+  if(!claimed)return res.json({received:true,duplicate:true});
+
+  try {
+
   if (event.type === 'checkout.session.completed') {
     const session = event.data.object;
+    if(session.payment_status!=='paid'){
+      await storage.finishExternalEvent('stripe',event.id,'ignored',`payment_status:${session.payment_status||'unknown'}`);
+      return res.json({received:true,fulfilled:false,paymentStatus:session.payment_status||null});
+    }
     const email = session.metadata.email;
     const plan = session.metadata.plan;
     const packageCode = session.metadata.packageCode || '';
@@ -2015,6 +2051,7 @@ app.post('/api/webhook', async (req, res) => {
       upsertPurchase(email,session.id,{fulfillmentStatus:'scheduled',planChangeStatus:cancellationError?'scheduled_with_warning':'scheduled',fulfillmentError:cancellationError},purchaseDefaults);
       recordDiagnostic(req,{email,source:'stripe',type:'plan_change',action:'plan_change_scheduled',outcome:cancellationError?'failed':'pending',severity:cancellationError?'error':'info',message:cancellationError?'Plan change paid, but old subscription could not be scheduled for cancellation':'Paid plan change scheduled for current plan end',errorCode:cancellationError?'SUBSCRIPTION_END_SCHEDULE_FAILED':null,purchaseId:session.id,context:{scheduledFor,previousPlan,packageCode,cancellationScheduled}});
       await deliverPurchaseReceipt(email,session.id,purchaseDefaults);
+      await storage.finishExternalEvent('stripe',event.id,'completed');
       return res.json({received:true,planChange:'scheduled'});
     }
 
@@ -2022,6 +2059,7 @@ app.post('/api/webhook', async (req, res) => {
       upsertPurchase(email,session.id,{fulfillmentStatus:'provisioning',planChangeStatus:'provisioning',fulfillmentError:null},purchaseDefaults);
       await executePaidPlanChange({email,purchaseId:session.id,packageCode,packageName:session.metadata.packageName||plan,dataLimitGb,durationDays,location:session.metadata.location||null,previousPlan,previousSubscriptionId,requestId:req.requestId});
       await deliverPurchaseReceipt(email,session.id,purchaseDefaults);
+      await storage.finishExternalEvent('stripe',event.id,'completed');
       return res.json({received:true,planChange:'immediate'});
     }
 
@@ -2071,8 +2109,8 @@ app.post('/api/webhook', async (req, res) => {
       } catch (error) { console.error('[subscription deleted lookup]', error.message); }
     }
     if (user) {
-      if(user.pendingPlanChange){recordDiagnostic(req,{email:user.email,source:'stripe',type:'plan_change',action:'previous_subscription_period_ended',outcome:'pending',severity:'info',message:'Previous subscription ended; scheduled plan change will now be processed',purchaseId:user.pendingPlanChange.purchaseId,context:{subscriptionId:sub.id}});processDuePlanChanges().catch(error=>console.error('[plan change webhook]',error.message));return res.json({received:true,planChangeQueued:true});}
-      if(user.plan==='custom'&&user.esim?.orderNo&&user.lastPlanChangeAt){recordDiagnostic(req,{email:user.email,source:'stripe',type:'plan_change',action:'previous_subscription_deleted_webhook',outcome:'success',severity:'info',message:'Previous subscription deletion confirmed; new one-time eSIM remains active',context:{subscriptionId:sub.id}});return res.json({received:true,previousSubscriptionClosed:true});}
+      if(user.pendingPlanChange){recordDiagnostic(req,{email:user.email,source:'stripe',type:'plan_change',action:'previous_subscription_period_ended',outcome:'pending',severity:'info',message:'Previous subscription ended; scheduled plan change will now be processed',purchaseId:user.pendingPlanChange.purchaseId,context:{subscriptionId:sub.id}});processDuePlanChanges().catch(error=>console.error('[plan change webhook]',error.message));await storage.finishExternalEvent('stripe',event.id,'completed');return res.json({received:true,planChangeQueued:true});}
+      if(user.plan==='custom'&&user.esim?.orderNo&&user.lastPlanChangeAt){recordDiagnostic(req,{email:user.email,source:'stripe',type:'plan_change',action:'previous_subscription_deleted_webhook',outcome:'success',severity:'info',message:'Previous subscription deletion confirmed; new one-time eSIM remains active',context:{subscriptionId:sub.id}});await storage.finishExternalEvent('stripe',event.id,'completed');return res.json({received:true,previousSubscriptionClosed:true});}
       const state = await getSubscriptionStateByEmail(user.email, user.stripeCustomerId || null).catch(() => null);
       if (!state || !state.active.length) saveUser(user.email, { status:'canceled', canceledAt:new Date().toISOString(), canceledReason:'stripe_webhook' });
     }
@@ -2111,7 +2149,46 @@ app.post('/api/webhook', async (req, res) => {
     }
   }
 
+  await storage.finishExternalEvent('stripe',event.id,'completed');
   res.json({ received: true });
+  } catch(error) {
+    await storage.finishExternalEvent('stripe',event.id,'failed',error.message);
+    console.error(`[stripe webhook ${event.id}]`,error);
+    res.status(500).json({received:false,error:'Webhook processing failed'});
+  }
+});
+
+app.post('/api/account/email-change/request',requireUserSession,rateLimit('email_change_request',60*60*1000,5,req=>req.userEmail),async(req,res)=>{
+  try{res.json(await authService.requestEmailChange(req.userEmail,req.body?.newEmail,req.body?.currentPassword));}catch(error){res.status(400).json({error:error.message,code:error.code});}
+});
+app.post('/api/account/email-change/confirm',requireUserSession,rateLimit('email_change_confirm',15*60*1000,10,req=>req.userEmail),async(req,res)=>{
+  try{res.json(authService.confirmEmailChange(req.userEmail,req.body?.newEmail,req.body?.code));}catch(error){res.status(400).json({error:error.message,code:error.code});}
+});
+
+// Safe self-service recovery: re-reads an already issued provider profile.
+// It never creates a new provider order and never charges the customer.
+app.post('/api/account/esim/recover',requireUserSession,rateLimit('self_esim_recovery',60*60*1000,3,req=>req.userEmail),async(req,res)=>{
+  const user=getUser(req.userEmail);
+  if(!user?.esim?.iccid||!user?.plan)return res.status(409).json({error:'Немає виданої eSIM для відновлення',code:'ESIM_NOT_ISSUED'});
+  try{
+    const esim=await recoverEsim({iccid:user.esim.iccid,plan:user.plan});
+    const merged={...user.esim,...esim,recoveredAt:new Date().toISOString()};
+    saveUser(req.userEmail,{esim:merged,lastEsimProvisionError:null});
+    recordDiagnostic(req,{email:req.userEmail,source:'esim_access',type:'esim_flow',action:'self_service_recovery',outcome:'success',severity:'info',message:'Existing eSIM profile recovered by customer'});
+    res.json({ok:true,esim:userStatusView({esim:merged}).esim});
+  }catch(error){recordDiagnostic(req,{email:req.userEmail,source:'esim_access',type:'esim_flow',action:'self_service_recovery',outcome:'failed',severity:'error',message:'Self-service eSIM recovery failed',errorCode:error.code||'RECOVERY_FAILED'});res.status(502).json({error:'Не вдалося синхронізувати eSIM. Створіть звернення в підтримку.',code:error.code||'RECOVERY_FAILED'});}
+});
+
+app.get('/api/account/order-status',requireUserSession,(req,res)=>{
+  const user=getUser(req.userEmail);if(!user)return res.status(404).json({error:'Акаунт не знайдено'});
+  const purchase=(user.purchases||[])[0]||null;
+  const steps=[
+    {key:'payment',label:'Оплата',status:purchase?.paymentStatus==='paid'||purchase?.paidAt?'complete':user.status==='registered'?'pending':'complete'},
+    {key:'provisioning',label:'Підготовка eSIM',status:purchase?.fulfillmentStatus==='failed'?'failed':user.esim?.orderNo?'complete':purchase?.fulfillmentStatus==='provisioning'?'active':'pending'},
+    {key:'ready',label:'eSIM готова',status:user.esim?.orderNo?'complete':purchase?.fulfillmentStatus==='failed'?'failed':'pending'},
+    {key:'installed',label:'Встановлення',status:user.esim?.activateTime?'complete':user.esim?.orderNo?'active':'pending'},
+  ];
+  res.json({status:user.status,purchase:purchase?{id:purchase.id,name:purchase.packageName||purchase.plan,fulfillmentStatus:purchase.fulfillmentStatus,error:purchase.fulfillmentStatus==='failed'?'Потрібна допомога з видачею eSIM':null}:null,steps});
 });
 
 // ---------- 3. Статус користувача (для дашборду) ----------
@@ -2133,10 +2210,10 @@ app.get('/api/status', requireUserSession, (req, res) => {
 
 // ---------- 3.5. Оновити реальне використання трафіку ----------
 app.get('/api/usage', requireUserSession, async (req, res) => {
+  const email = req.userEmail;
+  const cachedUser = getUser(email);
   try {
-    const email = req.userEmail;
-
-    const user = getUser(email);
+    const user = cachedUser;
     if (!user || !user.esim?.orderNo) {
       return res.status(404).json({ error: 'Немає активної eSIM для цього користувача' });
     }
@@ -2179,7 +2256,10 @@ app.get('/api/usage', requireUserSession, async (req, res) => {
 
     res.json({ usedBytes, totalBytes, remainingBytes, usedGb, totalGb, remainingGb, source:'esim_access_operator', esimStatus: usage.esimStatus, apn: usage.apn, expiredTime: usage.expiredTime, activateTime: usage.activateTime, lastUpdateTime: usage.lastUpdateTime });
   } catch (err) {
+    if(inboundId)await storage.finishExternalEvent('resend',inboundId,'failed',err.message).catch(()=>{});
     console.error(err);
+    const cached=cachedUser?.esim;
+    if(cached&&cached.usedBytes!=null)return res.json({usedBytes:cached.usedBytes,totalBytes:cached.totalBytes??null,remainingBytes:cached.remainingBytes??null,usedGb:cached.usedGb??0,totalGb:cached.dataLimitGb??null,remainingGb:cached.remainingGb??null,source:'cached',stale:true,lastUpdateTime:cached.lastUpdateTime||cached.updatedAt||null,warning:'Оператор тимчасово недоступний. Показано останні відомі дані.'});
     res.status(502).json({ error: 'Не вдалося отримати дані оператора eSIM' });
   }
 });
@@ -2202,6 +2282,11 @@ app.get('/api/billing', requireUserSession, async (req, res) => {
   }
 });
 
+app.post('/api/billing/portal',requireUserSession,rateLimit('billing_portal',15*60*1000,10,req=>req.userEmail),async(req,res)=>{
+  try{const user=getUser(req.userEmail);if(!user?.stripeCustomerId)return res.status(404).json({error:'Платіжний профіль не знайдено'});const session=await createBillingPortalSession(user.stripeCustomerId);res.json({url:session.url});}
+  catch(error){console.error('[billing portal]',error.message);res.status(502).json({error:'Не вдалося відкрити керування оплатою'});}
+});
+
 // ---------- 4. Скасування підписки ----------
 app.post('/api/cancel', requireUserSession, async (req, res) => {
   try {
@@ -2210,9 +2295,10 @@ app.post('/api/cancel', requireUserSession, async (req, res) => {
     if (!user || !user.stripeSubscriptionId) {
       return res.status(404).json({ error: 'Активної підписки не знайдено' });
     }
-    await cancelSubscription(user.stripeSubscriptionId);
-    saveUser(email, { status: 'canceled' });
-    res.json({ ok: true });
+    const subscription=await cancelSubscriptionAtPeriodEnd(user.stripeSubscriptionId);
+    const periodEnd=subscription.current_period_end?new Date(subscription.current_period_end*1000).toISOString():null;
+    saveUser(email, { status: 'active', cancelAtPeriodEnd:true, subscriptionPeriodEnd:periodEnd });
+    res.json({ ok: true, cancelAtPeriodEnd:true, periodEnd });
   } catch (err) {
     console.error(err);
     res.status(502).json({ error: 'Не вдалося скасувати підписку' });
@@ -2237,6 +2323,9 @@ storage.init().then(() => Promise.all([
   processDuePlanChanges().catch(error=>console.error('[plan change scheduler]',error.message));
   const planChangeTimer=setInterval(()=>processDuePlanChanges().catch(error=>console.error('[plan change scheduler]',error.message)),60*1000);
   planChangeTimer.unref?.();
+  processOperationalJobs().catch(error=>console.error('[operations worker]',error.message));
+  const operationsTimer=setInterval(()=>processOperationalJobs().catch(error=>console.error('[operations worker]',error.message)),30*1000);
+  operationsTimer.unref?.();
   runDailySuperAdminReport().catch(error=>console.error('[daily report]',error.message));
   const dailyReportTimer=setInterval(()=>runDailySuperAdminReport().catch(error=>console.error('[daily report]',error.message)),30*60*1000);
   dailyReportTimer.unref?.();

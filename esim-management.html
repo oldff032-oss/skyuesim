@@ -51,10 +51,12 @@
           ${installAction}
           ${esim.activationCode ? `<p class="muted" style="margin-top:18px;">Код активації для ручного встановлення:</p><code class="qr" style="display:block;margin-top:9px;word-break:break-all;">${escapeHtml(esim.activationCode)}</code>` : ''}
           ${esim.apn ? `<p class="muted" style="margin-top:16px;">APN: <b style="color:var(--text);">${escapeHtml(esim.apn)}</b></p>` : ''}
+          <button class="btn ghost" onclick="recoverProfile()" style="margin-top:14px">Синхронізувати з оператором</button>
           </div>
           <div class="glass glass-card" style="margin-top:14px;"><p style="font-family:'Space Grotesk',sans-serif;font-weight:700;">Як встановити</p><ol class="muted" style="margin:12px 0 0 20px;font-size:13px;line-height:1.7;"><li>Відкрий налаштування мобільного зв’язку.</li><li>Обери «Додати eSIM».</li><li>Відскануй QR-код або введи код вручну.</li><li>Після встановлення обери цю eSIM для мобільних даних.</li></ol></div>`;
       }catch(error){ content.innerHTML = `<div class="glass glass-card"><p class="err-text">${escapeHtml(error.message)}</p><a href="support.html" class="btn ghost" style="margin-top:14px;">Написати в підтримку</a></div>`; }
     }
+    async function recoverProfile(){if(!confirm('Синхронізувати вже видану eSIM? Нове замовлення не створюється.'))return;const response=await fetch(`${API_URL}/api/account/esim/recover`,{method:'POST',headers:{'Content-Type':'application/json','x-session-token':token},body:'{}'}),data=await response.json();if(!response.ok)return alert(data.error||'Не вдалося синхронізувати');alert('eSIM синхронізовано');load();}
     load();
   </script>
 </body>

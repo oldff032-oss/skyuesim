@@ -7,6 +7,7 @@ let ready = false;
 const states = new Map();
 const writes = new Map();
 const localRateLimits = new Map();
+const localExternalEvents = new Map();
 
 function localFile(name) { return path.join(__dirname, 'data', name); }
 function readLocal(name, fallback) {
@@ -31,6 +32,9 @@ async function init() {
   pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: process.env.DATABASE_SSL === 'false' ? false : { rejectUnauthorized: false } });
   await pool.query("CREATE TABLE IF NOT EXISTS public.app_state (key TEXT PRIMARY KEY, value JSONB NOT NULL DEFAULT '{}'::jsonb, updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())");
   await pool.query('CREATE TABLE IF NOT EXISTS public.security_rate_limits (key TEXT PRIMARY KEY, window_started TIMESTAMPTZ NOT NULL DEFAULT NOW(), count INTEGER NOT NULL DEFAULT 1)');
+  await pool.query("CREATE TABLE IF NOT EXISTS public.external_events (provider TEXT NOT NULL, event_id TEXT NOT NULL, event_type TEXT, status TEXT NOT NULL DEFAULT 'processing', attempts INTEGER NOT NULL DEFAULT 1, error TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), PRIMARY KEY(provider,event_id))");
+  await pool.query("CREATE TABLE IF NOT EXISTS public.background_jobs (id UUID PRIMARY KEY, type TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', payload JSONB NOT NULL DEFAULT '{}'::jsonb, attempts INTEGER NOT NULL DEFAULT 0, max_attempts INTEGER NOT NULL DEFAULT 3, run_after TIMESTAMPTZ NOT NULL DEFAULT NOW(), locked_at TIMESTAMPTZ, locked_by TEXT, last_error TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())");
+  await pool.query('CREATE INDEX IF NOT EXISTS background_jobs_ready_idx ON public.background_jobs(status,run_after)');
   ready = true;
   console.log('[storage] PostgreSQL persistence is enabled.');
 }
@@ -102,4 +106,16 @@ async function consumeRateLimit(key, windowMs, maximum) {
   const item=result.rows[0],started=new Date(item.window_started).getTime();return {allowed:Number(item.count)<=maximum,count:Number(item.count),retryAfterMs:Math.max(0,started+windowMs-now)};
 }
 
-module.exports = { init, load, save, snapshot, saveNow, restoreMany, consumeRateLimit };
+async function claimExternalEvent(provider,eventId,eventType){
+  const key=`${provider}:${eventId}`;
+  if(!pool){const existing=localExternalEvents.get(key);if(existing&&existing.status!=='failed')return false;localExternalEvents.set(key,{status:'processing',eventType,attempts:Number(existing?.attempts||0)+1});return true;}
+  const result=await pool.query("INSERT INTO public.external_events(provider,event_id,event_type) VALUES($1,$2,$3) ON CONFLICT(provider,event_id) DO UPDATE SET status='processing',attempts=public.external_events.attempts+1,error=NULL,updated_at=NOW() WHERE public.external_events.status='failed' RETURNING event_id",[provider,eventId,eventType]);
+  return result.rowCount===1;
+}
+async function finishExternalEvent(provider,eventId,status='completed',error=null){
+  const key=`${provider}:${eventId}`;
+  if(!pool){localExternalEvents.set(key,{...(localExternalEvents.get(key)||{}),status,error});return;}
+  await pool.query('UPDATE public.external_events SET status=$3,error=$4,updated_at=NOW() WHERE provider=$1 AND event_id=$2',[provider,eventId,status,error?String(error).slice(0,1000):null]);
+}
+
+module.exports = { init, load, save, snapshot, saveNow, restoreMany, consumeRateLimit, claimExternalEvent, finishExternalEvent };

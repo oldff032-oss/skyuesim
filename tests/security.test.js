@@ -259,3 +259,42 @@ test('support performance is attributed to individual administrators',()=>{
   assert.match(tickets,/adminEmail/);assert.match(service,/byAdmin/);assert.match(service,/averageFirstResponseMinutes/);assert.match(service,/averageResolutionMinutes/);assert.match(service,/reopened/);
   assert.match(page,/Результати адміністраторів/);assert.match(page,/Повторно відкрито/);
 });
+
+test('Stripe webhooks use durable idempotency and production-safe tolerance',()=>{
+  const server=read('server.js'),stripe=read('stripeService.js'),storage=read('persistentState.js');
+  assert.match(server,/claimExternalEvent\('stripe',event\.id,event\.type\)/);
+  assert.match(server,/session\.payment_status!==['"]paid['"]/);
+  assert.match(storage,/CREATE TABLE IF NOT EXISTS public\.external_events/);
+  assert.match(stripe,/STRIPE_WEBHOOK_TOLERANCE_SECONDS \|\| 300/);
+  assert.doesNotMatch(stripe,/24 \* 60 \* 60/);
+});
+
+test('customer cancellation is scheduled and billing is self-service',()=>{
+  const server=read('server.js'),stripe=read('stripeService.js'),payments=read('payments.html');
+  assert.match(server,/app\.post\('\/api\/billing\/portal',requireUserSession/);
+  assert.match(server,/cancelSubscriptionAtPeriodEnd\(user\.stripeSubscriptionId\)/);
+  assert.match(stripe,/stripe\.billingPortal\.sessions\.create/);
+  assert.match(payments,/Керувати карткою та підпискою/);
+});
+
+test('email changes require ownership verification at the new address',()=>{
+  const server=read('server.js'),auth=read('authService.js'),settings=read('account-settings.html');
+  assert.match(server,/\/api\/account\/email-change\/request/);
+  assert.match(server,/\/api\/account\/email-change\/confirm/);
+  assert.match(auth,/EMAIL_VERIFICATION_REQUIRED/);
+  assert.match(settings,/Надіслати код на новий email/);
+});
+
+test('self-service eSIM recovery never provisions a new order',()=>{
+  const server=read('server.js'),page=read('esim-management.html');
+  const route=server.slice(server.indexOf("app.post('/api/account/esim/recover'"),server.indexOf("app.get('/api/account/order-status'"));
+  assert.match(route,/recoverEsim/);
+  assert.doesNotMatch(route,/provisionEsim/);
+  assert.match(page,/Синхронізувати з оператором/);
+});
+
+test('marketing broadcasts only target explicit opt-ins',()=>{
+  const server=read('server.js'),settings=read('account-settings.html');
+  assert.match(server,/preferences\?\.marketingEmails===true/);
+  assert.match(settings,/Новини та пропозиції email/);
+});
