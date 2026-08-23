@@ -1,7 +1,7 @@
 // Register from every entry page so a fresh "Add to Home Screen" install has
 // a service worker even when it starts directly on dashboard.html.
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('/sw.js?v=54', { updateViaCache: 'none' }).then(registration => registration.update()).catch(() => {});
+  navigator.serviceWorker.register('/sw.js?v=55', { updateViaCache: 'none' }).then(registration => registration.update()).catch(() => {});
   navigator.serviceWorker.addEventListener('controllerchange',()=>{
     if(sessionStorage.getItem('signal_sw_reloaded_v32')==='1')return;
     sessionStorage.setItem('signal_sw_reloaded_v32','1');
@@ -46,7 +46,7 @@ if (window.location.pathname.endsWith('/app-tools.html')) {
 // auth headers, PINs, tokens, QR data or full URLs/query strings.
 const signalOriginalFetch = window.fetch.bind(window);
 let signalDiagnosticCount = 0;
-const SIGNAL_FRONTEND_VERSION='1.3.1',SIGNAL_SW_VERSION='v54',SIGNAL_CACHE_VERSION='signal-shell-v54-maintenance-countdown';
+const SIGNAL_FRONTEND_VERSION='1.4.0',SIGNAL_SW_VERSION='v55',SIGNAL_CACHE_VERSION='signal-shell-v55-dashboard-notice';
 window.addEventListener('load',async()=>{
   if(typeof API_URL==='undefined')return;
   const token=localStorage.getItem('signal_session_token');
@@ -102,6 +102,7 @@ window.addEventListener('load',()=>signalReportDiagnostic('page_view','info','Pa
 const signalEscapeHtml = (value) => String(value || '').replace(/[&<>"']/g, char => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[char]));
 let signalMaintenanceTimer=null;
 function startMaintenanceCountdown(expiresAt){clearInterval(signalMaintenanceTimer);const target=new Date(expiresAt).getTime(),root=document.getElementById('signal-maintenance-countdown');if(!root||!Number.isFinite(target)){root?.remove();return;}const tick=()=>{const remaining=Math.max(0,target-Date.now()),days=Math.floor(remaining/86400000),hours=Math.floor(remaining%86400000/3600000),minutes=Math.floor(remaining%3600000/60000),seconds=Math.floor(remaining%60000/1000),value=document.getElementById('signal-maintenance-countdown-value'),exact=document.getElementById('signal-maintenance-countdown-exact');if(value)value.textContent=`${days?`${days} дн. `:''}${String(hours).padStart(2,'0')}:${String(minutes).padStart(2,'0')}:${String(seconds).padStart(2,'0')}`;if(exact)exact.textContent=`Орієнтовне завершення: ${new Date(target).toLocaleString(localStorage.getItem('signal_language')==='en'?'en-GB':'uk-UA',{dateStyle:'medium',timeStyle:'short'})}`;if(remaining<=0){clearInterval(signalMaintenanceTimer);setTimeout(checkAppAnnouncements,500);}};tick();signalMaintenanceTimer=setInterval(tick,1000);}
+function renderSignalDashboardNotice(notice){const home=document.querySelector('.home'),existing=document.getElementById('signal-dashboard-notice');if(!home||!notice)return;if(existing?.dataset.noticeId===notice.id)return;existing?.remove();const anchor=document.getElementById('loading')||document.getElementById('content');if(!anchor)return;anchor.insertAdjacentHTML('beforebegin',`<article id="signal-dashboard-notice" class="signal-dashboard-notice" data-notice-id="${signalEscapeHtml(notice.id)}"><i class="dashboard-notice-glow" aria-hidden="true"></i><header><span class="dashboard-notice-logo"><img src="signal-premium-logo.png" alt="Signal"></span><span><small><i></i> Актуальне повідомлення</small><strong>${signalEscapeHtml(notice.title||'Повідомлення Signal')}</strong></span></header><div class="dashboard-notice-copy">${signalEscapeHtml(notice.message).replace(/\n/g,'<br>')}</div><footer><span>Signal інформує</span><button type="button" aria-expanded="false">Читати повністю</button></footer></article>`);const card=document.getElementById('signal-dashboard-notice'),button=card.querySelector('footer button');button.onclick=()=>{const expanded=card.classList.toggle('expanded');button.setAttribute('aria-expanded',String(expanded));button.textContent=expanded?'Згорнути':'Читати повністю';};}
 async function checkAppAnnouncements() {
   if (typeof API_URL === 'undefined' || !document.body) return;
   const token = localStorage.getItem('signal_session_token');
@@ -139,12 +140,17 @@ async function checkAppAnnouncements() {
     }
     if(maintenance?.expiresAt&&!signalMaintenanceTimer)startMaintenanceCountdown(maintenance.expiresAt);
     if (maintenance || !token) return;
-    const notice = announcements.find(item => item.type !== 'maintenance' && localStorage.getItem(`signal_announcement_seen:${item.id}`) !== '1');
+    const activeNotice = announcements.find(item => !['maintenance','security'].includes(item.type));
+    const dashboardNotice=document.getElementById('signal-dashboard-notice');
+    if(!activeNotice)dashboardNotice?.remove();
+    const notice = activeNotice&&localStorage.getItem(`signal_announcement_seen:${activeNotice.id}`)!=='1'?activeNotice:null;
+    if(activeNotice&&!notice)renderSignalDashboardNotice(activeNotice);
     if (notice && !document.getElementById('signal-announcement-modal')) {
       document.body.insertAdjacentHTML('beforeend', `<div id="signal-announcement-modal" class="signal-announcement-modal" role="dialog" aria-modal="true" aria-label="Повідомлення Signal"><i class="notice-orb one" aria-hidden="true"></i><i class="notice-orb two" aria-hidden="true"></i><section class="signal-announcement-card"><span class="notice-logo"><img src="signal-premium-logo.png" alt="Signal"><i></i></span><div class="notice-badge"><i></i> Повідомлення Signal</div><h2>${signalEscapeHtml(notice.title||'Важливе повідомлення')}</h2><div class="notice-message">${signalEscapeHtml(notice.message).replace(/\n/g,'<br>')}</div><button id="signal-announcement-close" type="button">Зрозуміло</button></section></div>`);
       document.getElementById('signal-announcement-close').onclick = () => {
         localStorage.setItem(`signal_announcement_seen:${notice.id}`, '1');
         document.getElementById('signal-announcement-modal')?.remove();
+        renderSignalDashboardNotice(notice);
       };
     }
   } catch (error) {
