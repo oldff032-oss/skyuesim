@@ -171,7 +171,7 @@ test('maintenance support works without account unlock and remains rate limited'
 test('service worker bypasses stale cache for maintenance and localization assets', () => {
   const worker=read('sw.js');
   const support=read('support.html');
-  assert.match(worker, /signal-shell-v49-baked-nav-art/);
+  assert.match(worker, /signal-shell-v50-maintenance-center/);
   assert.match(worker, /fetch\(event\.request, \{ cache:'no-store' \}\)/);
   assert.match(worker, /'\/i18n\.js'/);
   assert.match(worker, /'\/style\.css'/);
@@ -196,8 +196,8 @@ test('admin navigation exposes every section and scrolls independently', () => {
   const css=read('style.css');
   const common=read('admin-common.js');
   assert.match(css, /\.admin-sidebar[\s\S]*overflow-y:auto/);
-  for(const page of ['admin-dashboard.html','admin-users.html','admin-purchases.html','admin-tickets.html','admin-control-center.html','admin-team.html','admin-diagnostics.html']) assert.match(common,new RegExp(page.replace('.','\\.')));
-  assert.doesNotMatch(common, /admin-(operations|feedback|error-guide|plan-changes|notifications|versions|guide)\.html/);
+  for(const page of ['admin-dashboard.html','admin-users.html','admin-purchases.html','admin-tickets.html','admin-operations.html','admin-control-center.html','admin-team.html','admin-diagnostics.html']) assert.match(common,new RegExp(page.replace('.','\\.')));
+  assert.doesNotMatch(common, /admin-(feedback|error-guide|plan-changes|notifications|versions|guide)\.html/);
   assert.match(common, /admin-nav-icon/);
   assert.match(common, /nav\.innerHTML=links\.map/);
 });
@@ -304,7 +304,7 @@ test('bottom navigation always identifies usage and charts stay visible without 
   assert.match(css, /nav-art/);
   assert.match(css, /clip:rect\(0,0,0,0\)/);
   assert.match(pwa, /setAttribute\('aria-label',label\)/);
-  assert.match(pwa, /\/sw\.js\?v=49/);
+  assert.match(pwa, /\/sw\.js\?v=50/);
   for(const marker of ['nav-home-v2.png','nav-plans-v2.png','nav-usage-v2.png','nav-profile-v2.png']) assert.match(pwa,new RegExp(marker.replace('.', '\\.')));
   assert.doesNotMatch(css, /navBreathe[\s\S]{0,80}infinite/);
   assert.match(headers, /\/pwa\.js[\s\S]*Cache-Control: no-store/);

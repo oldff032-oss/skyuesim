@@ -1,7 +1,7 @@
 // Register from every entry page so a fresh "Add to Home Screen" install has
 // a service worker even when it starts directly on dashboard.html.
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('/sw.js?v=49', { updateViaCache: 'none' }).then(registration => registration.update()).catch(() => {});
+  navigator.serviceWorker.register('/sw.js?v=50', { updateViaCache: 'none' }).then(registration => registration.update()).catch(() => {});
   navigator.serviceWorker.addEventListener('controllerchange',()=>{
     if(sessionStorage.getItem('signal_sw_reloaded_v32')==='1')return;
     sessionStorage.setItem('signal_sw_reloaded_v32','1');
@@ -46,7 +46,7 @@ if (window.location.pathname.endsWith('/app-tools.html')) {
 // auth headers, PINs, tokens, QR data or full URLs/query strings.
 const signalOriginalFetch = window.fetch.bind(window);
 let signalDiagnosticCount = 0;
-const SIGNAL_FRONTEND_VERSION='1.1.3',SIGNAL_SW_VERSION='v49',SIGNAL_CACHE_VERSION='signal-shell-v49-baked-nav-art';
+const SIGNAL_FRONTEND_VERSION='1.2.0',SIGNAL_SW_VERSION='v50',SIGNAL_CACHE_VERSION='signal-shell-v50-maintenance-center';
 window.addEventListener('load',async()=>{
   if(typeof API_URL==='undefined')return;
   const token=localStorage.getItem('signal_session_token');
@@ -129,7 +129,7 @@ async function checkAppAnnouncements() {
     // is the standalone form, which deliberately does not load this script.
     const onSupportPage = /\/maintenance-support\.html$/i.test(location.pathname);
     if (maintenance && !existingMaintenance && !onSupportPage) {
-      document.body.insertAdjacentHTML('beforeend', `<div id="signal-maintenance-screen" role="dialog" aria-modal="true" aria-label="Технічні роботи" style="position:fixed;inset:0;z-index:2147483647;background:radial-gradient(circle at 50% -10%,#172d68 0,#080b19 48%,#03050b 100%);color:#f5f7ff;display:grid;place-items:center;padding:24px;text-align:center;font-family:Inter,-apple-system,sans-serif"><div style="width:min(100%,540px);padding:30px 24px;border:1px solid #5a7dff44;border-radius:28px;background:#090d1ddd;box-shadow:0 28px 90px #000a,0 0 70px #376dff22;backdrop-filter:blur(18px)"><img src="signal-premium-logo.png" alt="Signal" width="104" height="104" style="display:block;margin:0 auto;border-radius:24px;box-shadow:0 14px 42px #3178ff55"><div style="display:inline-flex;margin-top:22px;padding:7px 12px;border-radius:999px;background:#ffb02018;border:1px solid #ffb02055;color:#ffc45c;font-size:12px;font-weight:800;letter-spacing:.06em;text-transform:uppercase">Оновлення системи</div><h1 style="font-size:clamp(27px,6vw,36px);margin:18px 0 0">${signalEscapeHtml(maintenance.title || 'Тимчасово недоступно')}</h1><p style="color:#bec8df;line-height:1.7;margin:15px auto 0;max-width:460px">${signalEscapeHtml(maintenance.message).replace(/\n/g,'<br>')}</p><p style="color:#7f8aa3;font-size:13px;margin-top:22px">Дані акаунта та активні eSIM залишаються захищеними. Стан перевіряється автоматично.</p><div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:22px"><button type="button" onclick="location.reload()" style="padding:13px 16px;border:0;border-radius:13px;background:linear-gradient(135deg,#3e87ff,#7457ff);color:white;font-weight:800;cursor:pointer">Перевірити стан</button><button type="button" onclick="location.href='support.html?maintenance=1'" style="padding:13px 16px;border:1px solid #7386b955;border-radius:13px;background:#ffffff0b;color:#eef3ff;font-weight:800;cursor:pointer">Звернутися в підтримку</button></div></div></div>`);
+      document.body.insertAdjacentHTML('beforeend', `<div id="signal-maintenance-screen" class="signal-maintenance-screen" role="dialog" aria-modal="true" aria-label="Технічні роботи"><i class="maintenance-orb one" aria-hidden="true"></i><i class="maintenance-orb two" aria-hidden="true"></i><div class="signal-maintenance-card"><span class="maintenance-logo"><img src="signal-premium-logo.png" alt="Signal"><i></i></span><div class="maintenance-badge"><i></i> Оновлення системи</div><h1>${signalEscapeHtml(maintenance.title || 'Тимчасово недоступно')}</h1><p class="maintenance-message">${signalEscapeHtml(maintenance.message).replace(/\n/g,'<br>')}</p><p class="maintenance-safe">Дані акаунта та активні eSIM залишаються захищеними. Стан перевіряється автоматично.</p><div class="maintenance-actions"><button type="button" onclick="location.reload()">Перевірити стан</button><button type="button" onclick="location.href='maintenance-support.html'">Написати в підтримку</button></div></div></div>`);
       return;
     }
     if (maintenance || !token) return;
