@@ -182,17 +182,17 @@ input.error{ border-color:var(--danger); animation: shake .3s ease; }
 .usage-track{ height:8px; background:rgba(255,255,255,0.05); border-radius:99px; overflow:hidden; }
 .usage-fill{ height:100%; background:linear-gradient(90deg, var(--cyan), var(--success)); border-radius:99px; transition:width .8s cubic-bezier(.4,0,.2,1); }
 
-.bottomnav{position:fixed;left:50%;transform:translateX(-50%);bottom:max(10px,env(safe-area-inset-bottom));z-index:20;width:min(410px,calc(100% - 28px));height:68px;padding:7px 11px;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));background:linear-gradient(135deg,rgba(13,18,38,.97),rgba(7,10,24,.98));border:1px solid rgba(126,151,255,.2);border-radius:25px;box-shadow:0 20px 54px rgba(0,0,0,.52),inset 0 1px rgba(255,255,255,.06);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px)}
+.bottomnav{position:fixed;left:50%;transform:translateX(-50%);bottom:max(10px,env(safe-area-inset-bottom));z-index:20;width:min(390px,calc(100% - 28px));height:62px;padding:7px 12px;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));background:linear-gradient(135deg,rgba(13,18,38,.97),rgba(7,10,24,.98));border:1px solid rgba(126,151,255,.2);border-radius:23px;box-shadow:0 20px 54px rgba(0,0,0,.52),inset 0 1px rgba(255,255,255,.06);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px)}
 .bottomnav a{position:relative;min-width:0;display:grid;place-items:center;color:#8792ad;border-radius:19px;isolation:isolate;transition:color .28s ease,transform .28s cubic-bezier(.2,.85,.2,1)}
-.bottomnav a::before{content:"";position:absolute;width:49px;height:49px;border-radius:17px;background:linear-gradient(145deg,rgba(22,220,255,.2),rgba(106,73,255,.3));border:1px solid rgba(93,224,255,.3);opacity:0;transform:scale(.62) rotate(-9deg);z-index:-1;transition:opacity .25s ease,transform .45s cubic-bezier(.2,1,.2,1);box-shadow:inset 0 1px rgba(255,255,255,.1)}
-.bottomnav a::after{content:"";position:absolute;width:54px;height:54px;border-radius:19px;background:conic-gradient(from 0deg,transparent,#35ddff,transparent 35%,#7c5cff,transparent 70%);opacity:0;filter:blur(7px);z-index:-2}
+.bottomnav a::before{content:"";position:absolute;width:42px;height:42px;border-radius:14px;background:linear-gradient(145deg,rgba(22,220,255,.14),rgba(106,73,255,.22));border:1px solid rgba(93,224,255,.24);opacity:0;transform:scale(.62) rotate(-9deg);z-index:-1;transition:opacity .25s ease,transform .45s cubic-bezier(.2,1,.2,1);box-shadow:inset 0 1px rgba(255,255,255,.08)}
+.bottomnav a::after{content:"";position:absolute;width:45px;height:45px;border-radius:16px;background:conic-gradient(from 0deg,transparent,#35ddff,transparent 35%,#7c5cff,transparent 70%);opacity:0;filter:blur(6px);z-index:-2}
 .bottomnav a.active{color:#78efff;transform:translateY(-2px)}
 .bottomnav a.active::before{opacity:1;transform:scale(1) rotate(0)}
 .bottomnav a.active::after{opacity:.42;transform:rotate(18deg)}
-.bottomnav .nav-icon{width:49px;height:49px;display:grid;place-items:center;transition:transform .38s cubic-bezier(.2,.9,.2,1),filter .28s ease}
-.bottomnav .nav-art{width:49px;height:49px;display:block;object-fit:contain;opacity:.66;filter:saturate(.65) brightness(.82);transition:opacity .25s ease,filter .25s ease,transform .25s ease}
-.bottomnav a.active .nav-icon{filter:drop-shadow(0 0 11px rgba(51,217,255,.72));animation:navSelect .68s cubic-bezier(.2,1.35,.3,1) both}
-.bottomnav a.active .nav-art{opacity:1;filter:saturate(1.16) brightness(1.08)}
+.bottomnav .nav-icon{width:40px;height:40px;display:grid;place-items:center;transition:transform .38s cubic-bezier(.2,.9,.2,1),filter .28s ease}
+.bottomnav .nav-art{width:35px;height:35px;display:block;object-fit:contain;opacity:.9;filter:saturate(1.02) brightness(.96);transition:opacity .25s ease,filter .25s ease,transform .25s ease}
+.bottomnav a.active .nav-icon{filter:drop-shadow(0 0 7px rgba(51,217,255,.62));animation:navSelect .62s cubic-bezier(.2,1.25,.3,1) both}
+.bottomnav a.active .nav-art{width:38px;height:38px;opacity:1;filter:saturate(1.12) brightness(1.06)}
 .bottomnav a:active{transform:translateY(1px) scale(.88)}
 .bottomnav a:active .nav-icon{transform:rotate(-7deg) scale(.82)}
 .bottomnav .nav-label{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important}
