@@ -1,7 +1,7 @@
 // Register from every entry page so a fresh "Add to Home Screen" install has
 // a service worker even when it starts directly on dashboard.html.
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('/sw.js?v=53', { updateViaCache: 'none' }).then(registration => registration.update()).catch(() => {});
+  navigator.serviceWorker.register('/sw.js?v=54', { updateViaCache: 'none' }).then(registration => registration.update()).catch(() => {});
   navigator.serviceWorker.addEventListener('controllerchange',()=>{
     if(sessionStorage.getItem('signal_sw_reloaded_v32')==='1')return;
     sessionStorage.setItem('signal_sw_reloaded_v32','1');
@@ -46,7 +46,7 @@ if (window.location.pathname.endsWith('/app-tools.html')) {
 // auth headers, PINs, tokens, QR data or full URLs/query strings.
 const signalOriginalFetch = window.fetch.bind(window);
 let signalDiagnosticCount = 0;
-const SIGNAL_FRONTEND_VERSION='1.3.0',SIGNAL_SW_VERSION='v53',SIGNAL_CACHE_VERSION='signal-shell-v53-notice-layout';
+const SIGNAL_FRONTEND_VERSION='1.3.1',SIGNAL_SW_VERSION='v54',SIGNAL_CACHE_VERSION='signal-shell-v54-maintenance-countdown';
 window.addEventListener('load',async()=>{
   if(typeof API_URL==='undefined')return;
   const token=localStorage.getItem('signal_session_token');
@@ -100,6 +100,8 @@ window.addEventListener('online',()=>signalReportDiagnostic('connection','info',
 window.addEventListener('load',()=>signalReportDiagnostic('page_view','info','Page opened',{online:navigator.onLine,userAgent:navigator.userAgent.slice(0,160)}));
 
 const signalEscapeHtml = (value) => String(value || '').replace(/[&<>"']/g, char => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[char]));
+let signalMaintenanceTimer=null;
+function startMaintenanceCountdown(expiresAt){clearInterval(signalMaintenanceTimer);const target=new Date(expiresAt).getTime(),root=document.getElementById('signal-maintenance-countdown');if(!root||!Number.isFinite(target)){root?.remove();return;}const tick=()=>{const remaining=Math.max(0,target-Date.now()),days=Math.floor(remaining/86400000),hours=Math.floor(remaining%86400000/3600000),minutes=Math.floor(remaining%3600000/60000),seconds=Math.floor(remaining%60000/1000),value=document.getElementById('signal-maintenance-countdown-value'),exact=document.getElementById('signal-maintenance-countdown-exact');if(value)value.textContent=`${days?`${days} дн. `:''}${String(hours).padStart(2,'0')}:${String(minutes).padStart(2,'0')}:${String(seconds).padStart(2,'0')}`;if(exact)exact.textContent=`Орієнтовне завершення: ${new Date(target).toLocaleString(localStorage.getItem('signal_language')==='en'?'en-GB':'uk-UA',{dateStyle:'medium',timeStyle:'short'})}`;if(remaining<=0){clearInterval(signalMaintenanceTimer);setTimeout(checkAppAnnouncements,500);}};tick();signalMaintenanceTimer=setInterval(tick,1000);}
 async function checkAppAnnouncements() {
   if (typeof API_URL === 'undefined' || !document.body) return;
   const token = localStorage.getItem('signal_session_token');
@@ -126,14 +128,16 @@ async function checkAppAnnouncements() {
     if (securityIncident) return;
     const maintenance = announcements.find(item => item.type === 'maintenance' && item.audience === 'all')||(serviceStatus.status==='maintenance'?{title:'Тимчасово недоступно',message:serviceStatus.message||'Ми проводимо технічні роботи. Спробуйте відкрити застосунок трохи пізніше.',audience:'all',type:'maintenance'}:null);
     const existingMaintenance = document.getElementById('signal-maintenance-screen');
-    if (!maintenance) existingMaintenance?.remove();
+    if (!maintenance){existingMaintenance?.remove();clearInterval(signalMaintenanceTimer);signalMaintenanceTimer=null;}
     // During maintenance every customer page is blocked. The only exception
     // is the standalone form, which deliberately does not load this script.
     const onSupportPage = /\/maintenance-support\.html$/i.test(location.pathname);
     if (maintenance && !existingMaintenance && !onSupportPage) {
-      document.body.insertAdjacentHTML('beforeend', `<div id="signal-maintenance-screen" class="signal-maintenance-screen" role="dialog" aria-modal="true" aria-label="Технічні роботи"><i class="maintenance-orb one" aria-hidden="true"></i><i class="maintenance-orb two" aria-hidden="true"></i><div class="signal-maintenance-card"><span class="maintenance-logo"><img src="signal-premium-logo.png" alt="Signal"><i></i></span><div class="maintenance-badge"><i></i> Оновлення системи</div><h1>${signalEscapeHtml(maintenance.title || 'Тимчасово недоступно')}</h1><p class="maintenance-message">${signalEscapeHtml(maintenance.message).replace(/\n/g,'<br>')}</p><p class="maintenance-safe">Дані акаунта та активні eSIM залишаються захищеними. Стан перевіряється автоматично.</p><div class="maintenance-actions"><button type="button" onclick="location.reload()">Перевірити стан</button><button type="button" onclick="location.href='maintenance-support.html'">Написати в підтримку</button></div></div></div>`);
+      document.body.insertAdjacentHTML('beforeend', `<div id="signal-maintenance-screen" class="signal-maintenance-screen" role="dialog" aria-modal="true" aria-label="Технічні роботи"><i class="maintenance-orb one" aria-hidden="true"></i><i class="maintenance-orb two" aria-hidden="true"></i><div class="signal-maintenance-card"><span class="maintenance-logo"><img src="signal-premium-logo.png" alt="Signal"><i></i></span><div class="maintenance-badge"><i></i> Оновлення системи</div><h1>${signalEscapeHtml(maintenance.title || 'Тимчасово недоступно')}</h1><p class="maintenance-message">${signalEscapeHtml(maintenance.message).replace(/\n/g,'<br>')}</p>${maintenance.expiresAt?'<div id="signal-maintenance-countdown" class="maintenance-countdown"><span>До завершення робіт</span><strong id="signal-maintenance-countdown-value">00:00:00</strong><small id="signal-maintenance-countdown-exact"></small></div>':''}<p class="maintenance-safe">Дані акаунта та активні eSIM залишаються захищеними. Стан перевіряється автоматично.</p><div class="maintenance-actions"><button type="button" onclick="location.reload()">Перевірити стан</button><button type="button" onclick="location.href='maintenance-support.html'">Написати в підтримку</button></div></div></div>`);
+      if(maintenance.expiresAt)startMaintenanceCountdown(maintenance.expiresAt);
       return;
     }
+    if(maintenance?.expiresAt&&!signalMaintenanceTimer)startMaintenanceCountdown(maintenance.expiresAt);
     if (maintenance || !token) return;
     const notice = announcements.find(item => item.type !== 'maintenance' && localStorage.getItem(`signal_announcement_seen:${item.id}`) !== '1');
     if (notice && !document.getElementById('signal-announcement-modal')) {

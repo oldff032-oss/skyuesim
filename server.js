@@ -1214,6 +1214,7 @@ app.post('/api/admin/announcements', adminAuth.requireAdmin, adminAuth.requireRo
   const { title, message, audience='all', expiresAt=null, sendPush=false, type='notice' } = req.body || {};
   if(!title || !message) return res.status(400).json({error:'Вкажіть заголовок і текст'});
   const isMaintenance = type === 'maintenance' || /^\s*\[maintenance\]/i.test(String(title));
+  if(isMaintenance&&!expiresAt)return res.status(400).json({error:'Для технічних робіт обов’язково вкажіть час завершення'});
   const normalizedAudience = isMaintenance ? 'all' : String(audience || 'all').trim().toLowerCase();
   if (normalizedAudience !== 'all' && !authStore.readAll().users?.[normalizedAudience] && !getUser(normalizedAudience)) return res.status(404).json({error:'Користувача з таким email не знайдено'});
   if (expiresAt && Number.isNaN(new Date(expiresAt).getTime())) return res.status(400).json({error:'Некоректна дата завершення'});
