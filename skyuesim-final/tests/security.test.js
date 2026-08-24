@@ -191,7 +191,7 @@ test('maintenance support works without account unlock and remains rate limited'
 test('service worker bypasses stale cache for maintenance and localization assets', () => {
   const worker=read('sw.js');
   const support=read('support.html');
-  assert.match(worker, /signal-shell-v60-support-mobile/);
+  assert.match(worker, /signal-shell-v61-ticket-flow/);
   assert.match(worker, /fetch\(event\.request, \{ cache:'no-store' \}\)/);
   assert.match(worker, /'\/i18n\.js'/);
   assert.match(worker, /'\/style\.css'/);
@@ -324,7 +324,7 @@ test('bottom navigation always identifies usage and charts stay visible without 
   assert.match(css, /nav-art/);
   assert.match(css, /clip:rect\(0,0,0,0\)/);
   assert.match(pwa, /setAttribute\('aria-label',label\)/);
-  assert.match(pwa, /\/sw\.js\?v=60/);
+  assert.match(pwa, /\/sw\.js\?v=61/);
   for(const marker of ['nav-home-v2.png','nav-plans-v2.png','nav-usage-v2.png','nav-profile-v2.png']) assert.match(pwa,new RegExp(marker.replace('.', '\\.')));
   assert.doesNotMatch(css, /navBreathe[\s\S]{0,80}infinite/);
   assert.match(headers, /\/pwa\.js[\s\S]*Cache-Control: no-store/);
@@ -426,5 +426,9 @@ test('ticket diagnostics use a strict secret-free whitelist',()=>{
   assert.doesNotMatch(customer,/diagnosticCard|diag-shared|Діагностику додано/);
   assert.doesNotMatch(form,/автоматично додадуться|статус Stripe, статус провайдера/);
   assert.match(customer,/@media\(max-width:600px\)/);
-  assert.match(customer,/position:relative;bottom:auto/);
+  assert.match(customer,/id="ticketHeader"/);
+  assert.match(customer,/id="ticketConversation"/);
+  assert.match(customer,/#replyBox\{display:block!important/);
+  assert.match(customer,/replyBox\.hidden=ticket\.status==='closed'/);
+  assert.match(customer,/Відповісти та відкрити знову/);
 });
