@@ -18,12 +18,12 @@
     const salt=crypto.getRandomValues(new Uint8Array(16)),iv=crypto.getRandomValues(new Uint8Array(12)),key=await keyFromPin(pin,salt),payload=await crypto.subtle.encrypt({name:'AES-GCM',iv},key,encoder.encode(JSON.stringify(vault)));
     localStorage.setItem(STORAGE_KEY,JSON.stringify({version:1,salt:toBase64(salt),iv:toBase64(iv),payload:toBase64(payload),updatedAt:new Date().toISOString()}));
   }
-  async function imageAsDataUrl(url){
+  async function imageAsDataUrl(url,authToken){
     if(!url||String(url).startsWith('data:'))return url||null;
-    try{const response=await fetch(url,{cache:'no-store'});if(!response.ok)throw new Error('image');const blob=await response.blob();if(blob.size>900000)throw new Error('large');return await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=reject;reader.readAsDataURL(blob)});}catch{return null;}
+    try{const headers=authToken?{'x-session-token':authToken}:{};const response=await fetch(url,{cache:'no-store',headers});if(!response.ok)throw new Error('image');const blob=await response.blob();if(!blob.type.startsWith('image/')||blob.size>900000)throw new Error('large');return await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=reject;reader.readAsDataURL(blob)});}catch{return null;}
   }
   async function prepareCard(card){
-    const qrDataUrl=await imageAsDataUrl(card.qrCodeUrl);
+    const qrDataUrl=await imageAsDataUrl(card.qrDownloadUrl||card.qrCodeUrl,card.qrAuthToken);
     return {id:String(card.id||'primary').slice(0,100),ownerLabel:String(card.ownerLabel||'Моя eSIM').slice(0,80),packageName:String(card.packageName||'eSIM').slice(0,120),location:String(card.location||'').slice(0,100)||null,activationCode:String(card.activationCode||'').slice(0,500)||null,qrDataUrl,apn:String(card.apn||'').slice(0,120)||null,iccidLast4:card.iccid?String(card.iccid).slice(-4):null,status:String(card.status||'active').slice(0,50),expiredTime:card.expiredTime||null,savedAt:new Date().toISOString()};
   }
   async function saveCard(card,pin){const vault=await decrypt(pin),safe=await prepareCard(card),index=vault.cards.findIndex(item=>item.id===safe.id);if(index>=0)vault.cards[index]=safe;else vault.cards.unshift(safe);vault.cards=vault.cards.slice(0,30);await encrypt(vault,pin);return safe;}

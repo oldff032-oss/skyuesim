@@ -41,6 +41,10 @@ function deleteTicketsByEmail(email) {
   if (removed) writeAll(store);
   return removed;
 }
-function stripNotesForUser(ticket) { return ticket ? { ...ticket, messages: ticket.messages.filter(message => message.from !== 'note') } : ticket; }
+function stripNotesForUser(ticket) {
+  if (!ticket) return ticket;
+  const { diagnostics, ...customerTicket } = ticket;
+  return { ...customerTicket, messages: ticket.messages.filter(message => message.from !== 'note') };
+}
 
 module.exports = { bootstrap, createTicket, getTicketsByEmail, getAllTickets, getTicket, addMessage, updateTicket, deleteTicket, deleteTicketsByEmail, stripNotesForUser };

@@ -821,6 +821,55 @@ app.get('/api/account/esim', requireUserSession, (req, res) => {
   });
 });
 
+function isSafeQrImageUrl(value) {
+  try {
+    const parsed = new URL(String(value || ''));
+    const host = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+    if (parsed.protocol !== 'https:' || !host || parsed.username || parsed.password) return false;
+    if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') || host.endsWith('.internal')) return false;
+    if (host.includes(':') && (host === '::1' || host.startsWith('fc') || host.startsWith('fd') || host.startsWith('fe80:') || host.includes('::ffff:'))) return false;
+    const parts = host.split('.').map(Number);
+    if (parts.length === 4 && parts.every(part => Number.isInteger(part) && part >= 0 && part <= 255)) {
+      if (parts[0] === 10 || parts[0] === 127 || parts[0] === 0 || (parts[0] === 169 && parts[1] === 254) || (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) || (parts[0] === 192 && parts[1] === 168)) return false;
+    }
+    return true;
+  } catch { return false; }
+}
+
+// Same-origin, authenticated QR proxy. The provider image can be displayed by
+// <img>, but often blocks browser fetch/CORS, which prevented encrypted offline
+// storage. Only a QR URL already owned by this authenticated account is fetched.
+app.get('/api/account/esim/qr-image', requireUserSession, rateLimit('esim_qr_image',60*1000,20,req=>req.userEmail), async (req, res) => {
+  try {
+    const user = getUser(req.userEmail);
+    if (!user || user.status === 'blocked') return res.status(403).json({ error:'Доступ до eSIM недоступний' });
+    const scope = String(req.query.scope || 'primary');
+    let esim = user.esim;
+    if (scope === 'family') {
+      const id = String(req.query.id || '');
+      if (!/^[A-Za-z0-9:_-]{1,120}$/.test(id)) return res.status(400).json({ error:'Некоректний ID eSIM' });
+      esim = (user.sharedEsims || []).find(item => item.id === id)?.esim;
+    } else if (scope !== 'primary') return res.status(400).json({ error:'Некоректний тип eSIM' });
+    const qrUrl = esim?.qrCodeUrl;
+    if (!qrUrl) return res.status(404).json({ error:'QR-код ще не надано оператором' });
+    if (!isSafeQrImageUrl(qrUrl)) return res.status(400).json({ error:'Неприпустиме джерело QR-коду' });
+    const upstream = await fetch(qrUrl, { headers:{ Accept:'image/png,image/jpeg,image/webp,image/gif' }, redirect:'error', signal:AbortSignal.timeout(12000) });
+    if (!upstream.ok) return res.status(502).json({ error:'Оператор тимчасово не віддає QR-код' });
+    const contentType = String(upstream.headers.get('content-type') || '').split(';')[0].toLowerCase();
+    const allowed = new Set(['image/png','image/jpeg','image/webp','image/gif']);
+    if (!allowed.has(contentType)) return res.status(502).json({ error:'Оператор повернув непідтримуваний формат QR-коду' });
+    const declaredSize = Number(upstream.headers.get('content-length') || 0);
+    if (declaredSize > 900000) return res.status(413).json({ error:'QR-код завеликий для офлайн-картки' });
+    const payload = Buffer.from(await upstream.arrayBuffer());
+    if (!payload.length || payload.length > 900000) return res.status(413).json({ error:'QR-код завеликий для офлайн-картки' });
+    res.set({ 'Content-Type':contentType, 'Content-Length':String(payload.length), 'Cache-Control':'private, no-store', 'X-Content-Type-Options':'nosniff' });
+    res.send(payload);
+  } catch (error) {
+    recordDiagnostic(req,{email:req.userEmail,type:'esim_flow',action:'offline_qr_download',outcome:'failed',severity:'warning',message:'Offline QR image download failed',errorCode:error.name==='TimeoutError'?'QR_DOWNLOAD_TIMEOUT':'QR_DOWNLOAD_FAILED'});
+    res.status(502).json({ error:error.name==='TimeoutError'?'Оператор не відповів вчасно':'Не вдалося завантажити QR-код оператора' });
+  }
+});
+
 app.get('/api/push/public-key', requireUserSession, (req, res) => {
   if (!isPushConfigured()) return res.status(503).json({ error: 'Push ще не налаштовано на сервері' });
   res.json({ publicKey: process.env.VAPID_PUBLIC_KEY });
@@ -1022,14 +1071,14 @@ app.post('/api/support/tickets', requireUserSession,rateLimit('support_ticket',6
     const ticket = ticketStore.createTicket({ email, category: category || 'Інше', subject, message, attachment:safeAttachment, diagnostics });
     notifySuperAdminsAboutTicket(ticket);
     sendEmail({to:email,subject:`Звернення #${ticket.id} отримано — Signal`,html:emailTemplates.notification({title:'Ми отримали ваше звернення',message:`Звернення «${subject}» зареєстровано під номером #${ticket.id}. Відповідь з’явиться в застосунку та надійде на email.`,actionUrl:`/ticket.html?id=${ticket.id}`,actionLabel:'Переглянути звернення'})}).catch(()=>{});
-    res.json(ticket);
+    res.json(ticketStore.stripNotesForUser(ticket));
   } catch (err) {
     res.status(err.code === 'INVALID_ATTACHMENT' ? 400 : 500).json({ error: err.code === 'INVALID_ATTACHMENT' ? err.message : 'Не вдалося створити звернення' });
   }
 });
 
 app.get('/api/support/tickets', requireUserSession, (req, res) => {
-  res.json(ticketStore.getTicketsByEmail(req.userEmail));
+  res.json(ticketStore.getTicketsByEmail(req.userEmail).map(ticketStore.stripNotesForUser));
 });
 
 app.get('/api/support/tickets/:id', requireUserSession, (req, res) => {
