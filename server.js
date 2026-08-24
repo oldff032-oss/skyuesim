@@ -69,6 +69,27 @@ function userStatusView(user) {
 }
 function validateSupportAttachment(attachment){if(!attachment)return null;const type=String(attachment.type||'').toLowerCase(),allowed=['image/png','image/jpeg','image/webp','application/pdf'];if(!allowed.includes(type)||typeof attachment.dataUrl!=='string'||attachment.dataUrl.length>800000||!attachment.dataUrl.startsWith(`data:${type};base64,`))throw Object.assign(new Error('Дозволено PNG, JPG, WEBP або PDF до 550 КБ'),{code:'INVALID_ATTACHMENT'});return {name:String(attachment.name||'attachment').replace(/[\r\n<>"']/g,'').slice(0,120),type,dataUrl:attachment.dataUrl};}
 
+function buildSupportDiagnostics(user, client = {}) {
+  const latestPurchase = Array.isArray(user?.purchases) ? user.purchases[0] : null;
+  const trackedVersion = operationsStore.store().clientVersions?.[user?.email] || null;
+  const clean = (value, maximum = 120) => {
+    const text = String(value || '').replace(/[\r\n<>]/g, ' ').trim();
+    return text ? text.slice(0, maximum) : null;
+  };
+  return {
+    capturedAt:new Date().toISOString(),
+    deviceModel:clean(client?.deviceModel, 100) || 'Не визначено',
+    appVersion:clean(trackedVersion?.frontend || client?.appVersion, 40) || 'Не визначено',
+    platform:clean(trackedVersion?.platform || client?.platform, 40) || 'web',
+    esimStatus:clean(user?.esim?.status || (user?.esim ? user?.status : 'not_issued'), 60),
+    lastSyncAt:user?.esim?.lastUpdateTime || user?.esim?.recoveredAt || user?.updatedAt || null,
+    purchaseId:clean(latestPurchase?.id, 100),
+    stripeStatus:clean(latestPurchase?.paymentStatus || (user?.stripeCustomerId ? 'profile_linked' : 'profile_not_linked'), 60),
+    providerStatus:clean(latestPurchase?.fulfillmentStatus || user?.esim?.provider || (user?.esim ? 'issued' : 'not_issued'), 80),
+    apn:clean(user?.esim?.apn, 100),
+  };
+}
+
 function recordDiagnostic(req,event={}) {
   return diagnosticsStore.add({ source:'server', requestId:req?.requestId||null, page:req?.path||'', ...event });
 }
@@ -619,10 +640,13 @@ app.post('/api/travel-packages/checkout', requireUserSession, requireFeature('tr
   const started=Date.now();
   try {
     const currentUser=getUser(req.userEmail);
-    const hasActiveEsim=Boolean(currentUser?.esim&&['active','payment_confirmed','renewal_failed'].includes(currentUser.status));
+    const recipientMode=String(req.body?.purchaseFor||'self')==='family'?'family':'self';
+    const recipientName=recipientMode==='family'?String(req.body?.recipientName||'').replace(/[\r\n<>]/g,' ').trim().slice(0,60):'';
+    if(recipientMode==='family'&&(recipientName.length<2||recipientName.length>60))return res.status(400).json({error:'Вкажи ім’я близької людини — від 2 до 60 символів.',code:'RECIPIENT_NAME_INVALID'});
+    const hasActiveEsim=recipientMode==='self'&&Boolean(currentUser?.esim&&['active','payment_confirmed','renewal_failed'].includes(currentUser.status));
     const changeMode=hasActiveEsim?String(req.body?.changeMode||''):'';
     if(hasActiveEsim&&!['immediate','after_expiry'].includes(changeMode)){recordDiagnostic(req,{email:req.userEmail,type:'plan_change',action:'change_mode_required',outcome:'blocked',severity:'warning',message:'Plan change mode is required',errorCode:'CHANGE_MODE_REQUIRED'});return res.status(409).json({error:'Вибери: змінити зараз або після завершення поточного тарифу.',code:'CHANGE_MODE_REQUIRED'});}
-    if(currentUser?.pendingPlanChange){return res.status(409).json({error:'Вже є оплачена відкладена зміна тарифу. Її можна перевірити в профілі або через підтримку.',code:'PLAN_CHANGE_ALREADY_PENDING'});}
+    if(recipientMode==='self'&&currentUser?.pendingPlanChange){return res.status(409).json({error:'Вже є оплачена відкладена зміна тарифу. Її можна перевірити в профілі або через підтримку.',code:'PLAN_CHANGE_ALREADY_PENDING'});}
     const packageCode=String(req.body?.packageCode||'').trim();
     if(!/^[A-Za-z0-9_-]{3,80}$/.test(packageCode)){recordDiagnostic(req,{email:req.userEmail,type:'payment_flow',action:'travel_checkout',outcome:'blocked',severity:'warning',message:'Invalid travel package code',errorCode:'PACKAGE_CODE_INVALID'});return res.status(400).json({error:'Некоректний пакет'});}
     const packages=await getTravelPackages(true);
@@ -651,8 +675,10 @@ app.post('/api/travel-packages/checkout', requireUserSession, requireFeature('tr
       previousPlan:currentUser?.plan||'',
       previousSubscriptionId:currentUser?.stripeSubscriptionId||'',
       scheduledFor,
+      recipientMode,
+      recipientName,
     });
-    recordDiagnostic(req,{email:req.userEmail,type:changeMode?'plan_change':'payment_flow',action:'stripe_checkout_created',outcome:'success',severity:'info',message:changeMode?'Stripe Checkout created for plan change':'Stripe Checkout created for travel package',purchaseId:session.id,durationMs:Date.now()-started,context:{packageCode:selected.packageCode,amountCents:selected.amountCents,currency:'usd',dataLimitGb:selected.dataLimitGb,durationDays:selected.durationDays,location:selected.location,changeMode:changeMode||'new',scheduledFor:scheduledFor||null,previousPlan:currentUser?.plan||null}});
+    recordDiagnostic(req,{email:req.userEmail,type:changeMode?'plan_change':'payment_flow',action:'stripe_checkout_created',outcome:'success',severity:'info',message:recipientMode==='family'?'Stripe Checkout created for family eSIM':changeMode?'Stripe Checkout created for plan change':'Stripe Checkout created for travel package',purchaseId:session.id,durationMs:Date.now()-started,context:{packageCode:selected.packageCode,amountCents:selected.amountCents,currency:'usd',dataLimitGb:selected.dataLimitGb,durationDays:selected.durationDays,location:selected.location,changeMode:recipientMode==='family'?'family':changeMode||'new',scheduledFor:scheduledFor||null,previousPlan:currentUser?.plan||null,recipientMode}});
     res.json({url:session.url});
   } catch(error) {
     recordDiagnostic(req,{email:req.userEmail,type:'payment_flow',action:'stripe_checkout_create',outcome:'failed',severity:'error',message:'Stripe Checkout creation failed',errorCode:error.code||error.type||'STRIPE_CHECKOUT_ERROR',durationMs:Date.now()-started,context:{provider:'stripe'}});
@@ -992,7 +1018,8 @@ app.post('/api/support/tickets', requireUserSession,rateLimit('support_ticket',6
     const email=req.userEmail;
     if (!subject || !message) return res.status(400).json({ error: 'Потрібні subject і message' });
     const safeAttachment=validateSupportAttachment(attachment);
-    const ticket = ticketStore.createTicket({ email, category: category || 'Інше', subject, message, attachment:safeAttachment });
+    const diagnostics=buildSupportDiagnostics(getUser(email),req.body?.diagnostics);
+    const ticket = ticketStore.createTicket({ email, category: category || 'Інше', subject, message, attachment:safeAttachment, diagnostics });
     notifySuperAdminsAboutTicket(ticket);
     sendEmail({to:email,subject:`Звернення #${ticket.id} отримано — Signal`,html:emailTemplates.notification({title:'Ми отримали ваше звернення',message:`Звернення «${subject}» зареєстровано під номером #${ticket.id}. Відповідь з’явиться в застосунку та надійде на email.`,actionUrl:`/ticket.html?id=${ticket.id}`,actionLabel:'Переглянути звернення'})}).catch(()=>{});
     res.json(ticket);
@@ -2276,8 +2303,11 @@ app.post('/api/webhook', async (req, res) => {
     const previousPlan = String(session.metadata.previousPlan || '');
     const previousSubscriptionId = String(session.metadata.previousSubscriptionId || '');
     const scheduledFor = String(session.metadata.scheduledFor || '');
+    const recipientMode = String(session.metadata.recipientMode || '');
+    const recipientName = String(session.metadata.recipientName || '').slice(0,60);
+    const familyPurchase = plan === 'custom' && recipientMode === 'family';
     const purchaseDefaults = {
-      kind: plan === 'custom' ? 'custom_package' : 'subscription',
+      kind: familyPurchase ? 'family_esim' : plan === 'custom' ? 'custom_package' : 'subscription',
       plan,
       packageCode: packageCode || null,
       packageName: session.metadata.packageName || plan,
@@ -2296,9 +2326,32 @@ app.post('/api/webhook', async (req, res) => {
       previousPlan:previousPlan||null,
       previousSubscriptionId:previousSubscriptionId||null,
       scheduledFor:scheduledFor||null,
+      recipientName:familyPurchase?recipientName:null,
     };
     const existingPurchase = (getUser(email)?.purchases || []).find(item => item.id === session.id);
     recordDiagnostic(req,{email,source:'stripe',type:'payment_flow',action:'checkout_completed',outcome:'success',severity:'info',message:'Stripe confirmed checkout payment',purchaseId:session.id,context:{plan,packageCode:packageCode||null,amountCents:session.amount_total??null,currency:session.currency||null,paymentStatus:session.payment_status||null,mode:session.mode||null}});
+
+    if(familyPurchase){
+      if(existingPurchase?.fulfillmentStatus!=='provisioned')upsertPurchase(email,session.id,{fulfillmentStatus:'provisioning',fulfillmentError:null},purchaseDefaults);
+      saveUser(email,{stripeCustomerId:typeof session.customer==='string'?session.customer:session.customer?.id||getUser(email)?.stripeCustomerId||null});
+      if(existingPurchase?.fulfillmentStatus!=='provisioned')try{
+        const esim=await provisionEsim({email,plan,packageCode,dataLimitGb});
+        const owner=getUser(email)||{},shared=Array.isArray(owner.sharedEsims)?[...owner.sharedEsims]:[];
+        const sharedId=`family_${session.id.replace(/[^A-Za-z0-9_-]/g,'').slice(-48)}`;
+        const record={id:sharedId,recipientName,packageName:session.metadata.packageName||'eSIM для подорожі',location:session.metadata.location||null,dataLimitGb,durationDays,purchaseId:session.id,createdAt:new Date().toISOString(),esim};
+        const existingIndex=shared.findIndex(item=>item.purchaseId===session.id);
+        if(existingIndex>=0)shared[existingIndex]=record;else shared.unshift(record);
+        saveUser(email,{sharedEsims:shared.slice(0,30)});
+        upsertPurchase(email,session.id,{fulfillmentStatus:'provisioned',fulfilledAt:new Date().toISOString(),fulfillmentError:null,esimOrderNo:esim.orderNo||null,iccid:esim.iccid||null,esimTranNo:esim.esimTranNo||null},purchaseDefaults);
+        recordDiagnostic(req,{email,source:'esim_access',type:'esim_flow',action:'family_esim_provisioned',outcome:'success',severity:'info',message:'Family eSIM provisioned without replacing account owner profile',purchaseId:session.id,context:{packageCode,provider:esim.provider||'esim_access'}});
+      }catch(err){
+        upsertPurchase(email,session.id,{fulfillmentStatus:'failed',failedAt:new Date().toISOString(),fulfillmentError:err.message,fulfillmentErrorCode:err.code||null},purchaseDefaults);
+        recordDiagnostic(req,{email,source:'esim_access',type:'esim_flow',action:'family_esim_failed',outcome:'failed',severity:'error',message:'Paid family eSIM provisioning failed',errorCode:err.code||'ESIM_PROVISION_FAILED',purchaseId:session.id});
+      }
+      await deliverPurchaseReceipt(email,session.id,purchaseDefaults);
+      await storage.finishExternalEvent('stripe',event.id,'completed');
+      return res.json({received:true,familyEsim:true});
+    }
 
     if(changeMode==='after_expiry'){
       let cancellationScheduled=false,cancellationError=null;
@@ -2439,13 +2492,21 @@ app.post('/api/account/esim/recover',requireUserSession,rateLimit('self_esim_rec
 app.get('/api/account/order-status',requireUserSession,(req,res)=>{
   const user=getUser(req.userEmail);if(!user)return res.status(404).json({error:'Акаунт не знайдено'});
   const purchase=(user.purchases||[])[0]||null;
+  const familyEsim=purchase?.kind==='family_esim'?(user.sharedEsims||[]).find(item=>item.purchaseId===purchase.id):null;
+  const readyEsim=familyEsim?.esim||user.esim||null;
   const steps=[
     {key:'payment',label:'Оплата',status:purchase?.paymentStatus==='paid'||purchase?.paidAt?'complete':user.status==='registered'?'pending':'complete'},
-    {key:'provisioning',label:'Підготовка eSIM',status:purchase?.fulfillmentStatus==='failed'?'failed':user.esim?.orderNo?'complete':purchase?.fulfillmentStatus==='provisioning'?'active':'pending'},
-    {key:'ready',label:'eSIM готова',status:user.esim?.orderNo?'complete':purchase?.fulfillmentStatus==='failed'?'failed':'pending'},
-    {key:'installed',label:'Встановлення',status:user.esim?.activateTime?'complete':user.esim?.orderNo?'active':'pending'},
+    {key:'provisioning',label:'Підготовка eSIM',status:purchase?.fulfillmentStatus==='failed'?'failed':readyEsim?.orderNo?'complete':purchase?.fulfillmentStatus==='provisioning'?'active':'pending'},
+    {key:'ready',label:'eSIM готова',status:readyEsim?.orderNo?'complete':purchase?.fulfillmentStatus==='failed'?'failed':'pending'},
+    {key:'installed',label:purchase?.kind==='family_esim'?'Передача близькій людині':'Встановлення',status:readyEsim?.activateTime?'complete':readyEsim?.orderNo?'active':'pending'},
   ];
-  res.json({status:user.status,purchase:purchase?{id:purchase.id,name:purchase.packageName||purchase.plan,fulfillmentStatus:purchase.fulfillmentStatus,error:purchase.fulfillmentStatus==='failed'?'Потрібна допомога з видачею eSIM':null}:null,steps});
+  res.json({status:user.status,purchase:purchase?{id:purchase.id,name:purchase.packageName||purchase.plan,kind:purchase.kind||null,recipientName:purchase.recipientName||null,fulfillmentStatus:purchase.fulfillmentStatus,error:purchase.fulfillmentStatus==='failed'?'Потрібна допомога з видачею eSIM':null}:null,steps});
+});
+
+app.get('/api/account/family-esims',requireUserSession,(req,res)=>{
+  const user=getUser(req.userEmail);if(!user)return res.status(404).json({error:'Акаунт не знайдено'});
+  const items=(user.sharedEsims||[]).map(item=>({id:item.id,recipientName:item.recipientName,packageName:item.packageName,location:item.location||null,dataLimitGb:item.dataLimitGb??null,durationDays:item.durationDays??null,purchaseId:item.purchaseId,createdAt:item.createdAt,esim:{iccid:item.esim?.iccid||null,activationCode:item.esim?.activationCode||null,qrCodeUrl:item.esim?.qrCodeUrl||null,apn:item.esim?.apn||null,status:item.esim?.status||null,provider:item.esim?.provider||null,activateTime:item.esim?.activateTime||null,expiredTime:item.esim?.expiredTime||null}}));
+  res.json({items});
 });
 
 // ---------- 3. Статус користувача (для дашборду) ----------

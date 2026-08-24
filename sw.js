@@ -3,8 +3,24 @@
 // Кешує тільки статичну "оболонку" — самі дані (підписка, тікети) завжди
 // тягнуться наживо з бекенду, ніколи не кешуються.
 
-const CACHE_NAME = 'signal-shell-v57-mobile-topups';
+const CACHE_NAME = 'signal-shell-v58-offline-family';
 const SHELL_FILES = [
+  '/dashboard.html',
+  '/profile.html',
+  '/plans.html',
+  '/travel-plans.html',
+  '/usage.html',
+  '/installing.html',
+  '/esim-management.html',
+  '/family-esims.html',
+  '/offline-esim.html',
+  '/app-tools.html',
+  '/support.html',
+  '/style.css',
+  '/pwa.js',
+  '/config.js',
+  '/i18n.js',
+  '/offline-esim.js',
   '/icon-192.png',
   '/icon-512.png',
   '/signal-premium-logo.png',
@@ -41,7 +57,9 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
   const neverCache = ['/pwa.js','/config.js','/sw.js','/i18n.js','/style.css'].includes(url.pathname);
   if (neverCache) {
-    event.respondWith(fetch(event.request, { cache:'no-store' }));
+    event.respondWith(fetch(event.request, { cache:'no-store' }).then(response=>{
+      const copy=response.clone();caches.open(CACHE_NAME).then(cache=>cache.put(event.request,copy));return response;
+    }).catch(()=>caches.match(event.request)));
     return;
   }
   const critical = event.request.mode === 'navigate';

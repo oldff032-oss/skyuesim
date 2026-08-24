@@ -52,7 +52,8 @@ test('travel package prices are calculated only on the server', () => {
   const page = read('travel-plans.html');
   assert.match(server, /packageRetailCents\(item\)/);
   assert.match(server, /packages\.find\(item=>item\.packageCode===packageCode\)/);
-  assert.match(page, /body:JSON\.stringify\(\{packageCode:code,changeMode\}\)/);
+  assert.match(page, /body:JSON\.stringify\(\{packageCode:code,changeMode:/);
+  assert.match(page, /purchaseFor:changeMode==='gift'\?'family':'self'/);
 });
 
 test('language selection is explicit, persistent, and synchronized', () => {
@@ -190,7 +191,7 @@ test('maintenance support works without account unlock and remains rate limited'
 test('service worker bypasses stale cache for maintenance and localization assets', () => {
   const worker=read('sw.js');
   const support=read('support.html');
-  assert.match(worker, /signal-shell-v57-mobile-topups/);
+  assert.match(worker, /signal-shell-v58-offline-family/);
   assert.match(worker, /fetch\(event\.request, \{ cache:'no-store' \}\)/);
   assert.match(worker, /'\/i18n\.js'/);
   assert.match(worker, /'\/style\.css'/);
@@ -323,7 +324,7 @@ test('bottom navigation always identifies usage and charts stay visible without 
   assert.match(css, /nav-art/);
   assert.match(css, /clip:rect\(0,0,0,0\)/);
   assert.match(pwa, /setAttribute\('aria-label',label\)/);
-  assert.match(pwa, /\/sw\.js\?v=57/);
+  assert.match(pwa, /\/sw\.js\?v=58/);
   for(const marker of ['nav-home-v2.png','nav-plans-v2.png','nav-usage-v2.png','nav-profile-v2.png']) assert.match(pwa,new RegExp(marker.replace('.', '\\.')));
   assert.doesNotMatch(css, /navBreathe[\s\S]{0,80}infinite/);
   assert.match(headers, /\/pwa\.js[\s\S]*Cache-Control: no-store/);
@@ -380,4 +381,34 @@ test('mobile top-up administration masks numbers and protects money-moving retry
   assert.match(server,/app\.post\('\/api\/admin\/mobile-topups\/:orderId\/retry',[^\n]*requirePermission\('operations\.manage',\{requireTwoFactor:true\}\)/);
   assert.match(admin,/phoneMasked/);
   assert.match(admin,/Super Admin із підтвердженою 2FA/);
+});
+
+test('offline eSIM cards are encrypted and API responses are never cached',()=>{
+  const vault=read('offline-esim.js'),worker=read('sw.js'),page=read('offline-esim.html');
+  assert.match(vault,/PBKDF2/);
+  assert.match(vault,/AES-GCM/);
+  assert.match(vault,/iterations:\s*210000/);
+  assert.match(vault,/\^\\d\{6\}\$/);
+  assert.match(page,/Майстер встановлення/);
+  assert.match(worker,/if \(event\.request\.url\.includes\('\/api\/'\)\) return/);
+  for(const file of ['/offline-esim.html','/offline-esim.js','/esim-management.html'])assert.match(worker,new RegExp(file.replace('.','\\.')));
+});
+
+test('family purchases provision a separate eSIM without replacing the buyer eSIM',()=>{
+  const server=read('server.js'),page=read('travel-plans.html'),family=read('family-esims.html');
+  assert.match(server,/familyPurchase = plan === 'custom' && recipientMode === 'family'/);
+  assert.match(server,/saveUser\(email,\{sharedEsims:shared\.slice\(0,30\)\}\)/);
+  assert.match(server,/kind: familyPurchase \? 'family_esim'/);
+  assert.match(server,/app\.get\('\/api\/account\/family-esims',requireUserSession/);
+  assert.match(page,/purchaseFor:changeMode==='gift'\?'family':'self'/);
+  assert.match(family,/Зберегти офлайн/);
+});
+
+test('ticket diagnostics use a strict secret-free whitelist',()=>{
+  const server=read('server.js'),ticketStore=read('ticketStore.js'),admin=read('admin-ticket.html');
+  const block=server.slice(server.indexOf('function buildSupportDiagnostics'),server.indexOf('function recordDiagnostic'));
+  for(const field of ['deviceModel','appVersion','esimStatus','lastSyncAt','purchaseId','stripeStatus','providerStatus','apn'])assert.match(block,new RegExp(field));
+  for(const secret of ['activationCode','qrCode','pinHash','passwordHash','stripePaymentMethod'])assert.doesNotMatch(block,new RegExp(secret));
+  assert.match(ticketStore,/diagnostics = null/);
+  assert.match(admin,/Діагностика звернення/);
 });

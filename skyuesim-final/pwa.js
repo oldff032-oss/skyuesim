@@ -1,10 +1,10 @@
 // Register from every entry page so a fresh "Add to Home Screen" install has
 // a service worker even when it starts directly on dashboard.html.
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('/sw.js?v=57', { updateViaCache: 'none' }).then(registration => registration.update()).catch(() => {});
+  navigator.serviceWorker.register('/sw.js?v=58', { updateViaCache: 'none' }).then(registration => registration.update()).catch(() => {});
   navigator.serviceWorker.addEventListener('controllerchange',()=>{
-    if(sessionStorage.getItem('signal_sw_reloaded_v32')==='1')return;
-    sessionStorage.setItem('signal_sw_reloaded_v32','1');
+    if(sessionStorage.getItem('signal_sw_reloaded_v58')==='1')return;
+    sessionStorage.setItem('signal_sw_reloaded_v58','1');
     location.reload();
   });
 }
@@ -24,7 +24,8 @@ window.addEventListener('load',()=>{enhanceSignalNavigation();setTimeout(enhance
 const maintenanceGateStyle=document.createElement('style');
 maintenanceGateStyle.textContent='html.signal-maintenance-check body{visibility:hidden!important}';
 document.head.appendChild(maintenanceGateStyle);
-document.documentElement.classList.add('signal-maintenance-check');
+const signalOfflineCardPage=/\/offline-esim\.html$/i.test(location.pathname);
+if(!signalOfflineCardPage)document.documentElement.classList.add('signal-maintenance-check');
 window.setTimeout(()=>document.documentElement.classList.remove('signal-maintenance-check'),5000);
 // All customer pages already load pwa.js, so language support is loaded once
 // and stays consistent across the app.
@@ -46,7 +47,8 @@ if (window.location.pathname.endsWith('/app-tools.html')) {
 // auth headers, PINs, tokens, QR data or full URLs/query strings.
 const signalOriginalFetch = window.fetch.bind(window);
 let signalDiagnosticCount = 0;
-const SIGNAL_FRONTEND_VERSION='1.5.0',SIGNAL_SW_VERSION='v57',SIGNAL_CACHE_VERSION='signal-shell-v57-mobile-topups';
+const SIGNAL_FRONTEND_VERSION='1.6.0',SIGNAL_SW_VERSION='v58',SIGNAL_CACHE_VERSION='signal-shell-v58-offline-family';
+window.SIGNAL_APP_VERSION=SIGNAL_FRONTEND_VERSION;
 window.addEventListener('load',async()=>{
   if(typeof API_URL==='undefined')return;
   const token=localStorage.getItem('signal_session_token');
@@ -95,8 +97,15 @@ window.fetch = async function(input, init = {}) {
 };
 window.addEventListener('error',event=>signalReportDiagnostic('javascript_error','error',event.message||'JavaScript error',{file:event.filename?String(event.filename).split('/').pop():null,line:event.lineno||null,column:event.colno||null}));
 window.addEventListener('unhandledrejection',event=>signalReportDiagnostic('promise_rejection','error',event.reason?.message||'Unhandled promise rejection',{}));
-window.addEventListener('offline',()=>signalReportDiagnostic('connection','warning','Device went offline',{online:false}));
-window.addEventListener('online',()=>signalReportDiagnostic('connection','info','Device is online',{online:true}));
+function signalRenderOfflineState(){
+  const existing=document.getElementById('signal-offline-banner');
+  if(navigator.onLine){existing?.remove();return;}
+  if(existing||/\/offline-esim\.html$/i.test(location.pathname))return;
+  document.body?.insertAdjacentHTML('afterbegin','<div id="signal-offline-banner" role="status" style="position:fixed;z-index:2147483000;top:max(8px,env(safe-area-inset-top));left:50%;transform:translateX(-50%);width:min(calc(100% - 24px),520px);padding:10px 14px;border:1px solid rgba(78,211,255,.32);border-radius:14px;background:rgba(7,11,27,.94);box-shadow:0 12px 40px rgba(0,0,0,.45);backdrop-filter:blur(16px);color:#d9efff;font:600 12px Inter,sans-serif;text-align:center">Офлайн-режим · збережені eSIM доступні <a href="/offline-esim.html" style="color:#5ee7ff;margin-left:6px">Відкрити</a></div>');
+}
+window.addEventListener('offline',()=>{signalReportDiagnostic('connection','warning','Device went offline',{online:false});signalRenderOfflineState();});
+window.addEventListener('online',()=>{signalReportDiagnostic('connection','info','Device is online',{online:true});signalRenderOfflineState();});
+document.readyState==='loading'?document.addEventListener('DOMContentLoaded',signalRenderOfflineState):signalRenderOfflineState();
 window.addEventListener('load',()=>signalReportDiagnostic('page_view','info','Page opened',{online:navigator.onLine,userAgent:navigator.userAgent.slice(0,160)}));
 
 const signalEscapeHtml = (value) => String(value || '').replace(/[&<>"']/g, char => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[char]));
@@ -133,7 +142,7 @@ async function checkAppAnnouncements() {
     // During maintenance every customer page is blocked. The only exception
     // is the standalone form, which deliberately does not load this script.
     const onSupportPage = /\/maintenance-support\.html$/i.test(location.pathname);
-    if (maintenance && !existingMaintenance && !onSupportPage) {
+    if (maintenance && !existingMaintenance && !onSupportPage && !signalOfflineCardPage) {
       document.body.insertAdjacentHTML('beforeend', `<div id="signal-maintenance-screen" class="signal-maintenance-screen" role="dialog" aria-modal="true" aria-label="Технічні роботи"><i class="maintenance-orb one" aria-hidden="true"></i><i class="maintenance-orb two" aria-hidden="true"></i><div class="signal-maintenance-card"><span class="maintenance-logo"><img src="signal-premium-logo.png" alt="Signal"><i></i></span><div class="maintenance-badge"><i></i> Оновлення системи</div><h1>${signalEscapeHtml(maintenance.title || 'Тимчасово недоступно')}</h1><p class="maintenance-message">${signalEscapeHtml(maintenance.message).replace(/\n/g,'<br>')}</p>${maintenance.expiresAt?'<div id="signal-maintenance-countdown" class="maintenance-countdown"><span>До завершення робіт</span><strong id="signal-maintenance-countdown-value">00:00:00</strong><small id="signal-maintenance-countdown-exact"></small></div>':''}<p class="maintenance-safe">Дані акаунта та активні eSIM залишаються захищеними. Стан перевіряється автоматично.</p><div class="maintenance-actions"><button type="button" onclick="location.reload()">Перевірити стан</button><button type="button" onclick="location.href='maintenance-support.html'">Написати в підтримку</button></div></div></div>`);
       if(maintenance.expiresAt)startMaintenanceCountdown(maintenance.expiresAt);
       return;

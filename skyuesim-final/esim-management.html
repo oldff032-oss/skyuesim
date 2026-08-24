@@ -12,6 +12,7 @@
 <meta name="theme-color" content="#05060d">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<style>.install-wizard{display:grid;gap:9px;margin-top:14px}.install-step{display:flex;gap:11px;align-items:flex-start;padding:12px;border:1px solid var(--border);border-radius:13px;background:rgba(255,255,255,.025);cursor:pointer}.install-step input{width:20px;height:20px;accent-color:#6d6fff;flex:none}.install-step b{display:block;font-size:13px}.install-step span span{display:block;font-size:11px;line-height:1.45;margin-top:3px;color:var(--text-muted)}.offline-actions{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:14px}@media(max-width:430px){.offline-actions{grid-template-columns:1fr}}</style>
 </head>
 <body class="has-bottomnav">
   <div class="wrap">
@@ -22,6 +23,7 @@
   </div>
   <nav class="bottomnav" aria-label="Головна навігація"><a href="dashboard.html" aria-label="Головна" title="Головна" data-nav="dashboard"><span class="nav-icon" aria-hidden="true"><img class="nav-art" src="nav-home-v2.png" alt=""></span></a><a href="plans.html" aria-label="Тарифи" title="Тарифи" data-nav="plans"><span class="nav-icon" aria-hidden="true"><img class="nav-art" src="nav-plans-v2.png" alt=""></span></a><a href="usage.html" aria-label="Витрати" title="Витрати" data-nav="usage"><span class="nav-icon" aria-hidden="true"><img class="nav-art" src="nav-usage-v2.png" alt=""></span></a><a href="profile.html" class="active" aria-label="Профіль" title="Профіль" data-nav="profile"><span class="nav-icon" aria-hidden="true"><img class="nav-art" src="nav-profile-v2.png" alt=""></span></a></nav>
   <script src="config.js"></script>
+  <script src="offline-esim.js"></script>
   <script>
     const token = localStorage.getItem('signal_session_token');
     if(!token) window.location.href = 'login.html';
@@ -49,11 +51,13 @@
           ${installAction}
           ${esim.activationCode ? `<p class="muted" style="margin-top:18px;">Код активації для ручного встановлення:</p><code class="qr" style="display:block;margin-top:9px;word-break:break-all;">${escapeHtml(esim.activationCode)}</code>` : ''}
           ${esim.apn ? `<p class="muted" style="margin-top:16px;">APN: <b style="color:var(--text);">${escapeHtml(esim.apn)}</b></p>` : ''}
-          <button class="btn ghost" onclick="recoverProfile()" style="margin-top:14px">Синхронізувати з оператором</button>
+          <div class="offline-actions"><button class="btn" onclick="saveOfflineCard()">Зберегти офлайн</button><a class="btn ghost" href="offline-esim.html">Відкрити офлайн-картку</a></div>
+          <button class="btn ghost" onclick="recoverProfile()" style="margin-top:10px">Синхронізувати з оператором</button>
           </div>
-          <div class="glass glass-card" style="margin-top:14px;"><p style="font-family:'Space Grotesk',sans-serif;font-weight:700;">Як встановити</p><ol class="muted" style="margin:12px 0 0 20px;font-size:13px;line-height:1.7;"><li>Відкрий налаштування мобільного зв’язку.</li><li>Обери «Додати eSIM».</li><li>Відскануй QR-код або введи код вручну.</li><li>Після встановлення обери цю eSIM для мобільних даних.</li></ol></div>`;
-      }catch(error){ content.innerHTML = `<div class="glass glass-card"><p class="err-text">${escapeHtml(error.message)}</p><a href="support.html" class="btn ghost" style="margin-top:14px;">Написати в підтримку</a></div>`; }
+          <div class="glass glass-card" style="margin-top:14px;"><p style="font-family:'Space Grotesk',sans-serif;font-weight:700;">Майстер встановлення</p><div class="install-wizard"><label class="install-step"><input type="checkbox"><span><b>1. Додай eSIM</b><span>${isAppleMobile?'Натисни «Відкрити встановлення eSIM» або використай QR-код.':'Відкрий налаштування SIM та відскануй QR-код.'}</span></span></label><label class="install-step"><input type="checkbox"><span><b>2. Увімкни нову лінію</b><span>Переконайся, що нова eSIM активна в налаштуваннях мобільного зв’язку.</span></span></label><label class="install-step"><input type="checkbox"><span><b>3. Обери для мобільних даних</b><span>Основну SIM можна залишити для дзвінків, а Signal eSIM — для інтернету.</span></span></label><label class="install-step"><input type="checkbox"><span><b>4. Увімкни роумінг даних</b><span>Туристична eSIM підключається через партнерські мережі.</span></span></label><label class="install-step"><input type="checkbox"><span><b>5. Перевір APN і з’єднання</b><span>${esim.apn?`APN: ${escapeHtml(esim.apn)}.`:'APN встановлюється автоматично.'} Вимкни Wi‑Fi та відкрий будь-який сайт.</span></span></label></div><a class="btn ghost" href="app-tools.html" style="margin-top:13px">Запустити діагностику</a></div>`;
+      }catch(error){ content.innerHTML = `<div class="glass glass-card"><p class="err-text">${escapeHtml(error.message)}</p>${SignalOfflineEsimVault.exists()?'<a href="offline-esim.html" class="btn" style="margin-top:14px">Відкрити збережену офлайн-картку</a>':''}<a href="support.html" class="btn ghost" style="margin-top:10px;">Написати в підтримку</a></div>`; }
     }
+    async function saveOfflineCard(){if(!esim)return;const first=!SignalOfflineEsimVault.exists(),pin=prompt(first?'Створи окремий 6-значний PIN для офлайн-картки:':'Введи PIN офлайн-карток:');if(!pin)return;if(!/^\d{6}$/.test(pin))return alert('PIN має містити рівно 6 цифр.');if(first){const repeat=prompt('Повтори офлайн-PIN:');if(repeat!==pin)return alert('PIN-коди не збігаються.')}try{await SignalOfflineEsimVault.saveCard({id:'primary',ownerLabel:'Моя eSIM',packageName:'Signal eSIM',activationCode:esim.activationCode,qrCodeUrl:esim.qrCodeUrl,apn:esim.apn,iccid:esim.iccid,status:esim.status||'active',expiredTime:esim.expiredTime},pin);alert('Картку зашифровано й збережено на цьому телефоні. Вона працюватиме без інтернету.')}catch(error){alert(error.message)}}
     async function recoverProfile(){if(!confirm('Синхронізувати вже видану eSIM? Нове замовлення не створюється.'))return;const response=await fetch(`${API_URL}/api/account/esim/recover`,{method:'POST',headers:{'Content-Type':'application/json','x-session-token':token},body:'{}'}),data=await response.json();if(!response.ok)return alert(data.error||'Не вдалося синхронізувати');alert('eSIM синхронізовано');load();}
     load();
   </script>

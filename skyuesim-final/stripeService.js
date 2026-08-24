@@ -57,14 +57,14 @@ async function getNextBillingDate(subscriptionId) {
   return sub.current_period_end ? new Date(sub.current_period_end * 1000).toISOString() : null;
 }
 
-async function createCustomPackageCheckout({ email, customerId = null, packageCode, packageName, amountCents, currency = 'usd', dataLimitGb = null, durationDays = null, location = '', changeMode = '', previousPlan = '', previousSubscriptionId = '', scheduledFor = '' }) {
+async function createCustomPackageCheckout({ email, customerId = null, packageCode, packageName, amountCents, currency = 'usd', dataLimitGb = null, durationDays = null, location = '', changeMode = '', previousPlan = '', previousSubscriptionId = '', scheduledFor = '', recipientMode = '', recipientName = '' }) {
   const session = await stripe.checkout.sessions.create({
     mode: 'payment',
     ...(customerId ? { customer:customerId } : { customer_email:email, customer_creation:'always' }),
     line_items: [{ price_data: { currency, product_data: { name: packageName }, unit_amount: amountCents }, quantity: 1 }],
     success_url: `${process.env.FRONTEND_URL}/installing.html?session_id={CHECKOUT_SESSION_ID}`,
     cancel_url: `${process.env.FRONTEND_URL}/profile.html`,
-    metadata: { plan: 'custom', email, packageCode, packageName, dataLimitGb: dataLimitGb == null ? '' : String(dataLimitGb), durationDays: durationDays == null ? '' : String(durationDays), location: String(location || '').slice(0,80), changeMode:String(changeMode||'').slice(0,30), previousPlan:String(previousPlan||'').slice(0,40), previousSubscriptionId:String(previousSubscriptionId||'').slice(0,100), scheduledFor:String(scheduledFor||'').slice(0,40) },
+    metadata: { plan: 'custom', email, packageCode, packageName, dataLimitGb: dataLimitGb == null ? '' : String(dataLimitGb), durationDays: durationDays == null ? '' : String(durationDays), location: String(location || '').slice(0,80), changeMode:String(changeMode||'').slice(0,30), previousPlan:String(previousPlan||'').slice(0,40), previousSubscriptionId:String(previousSubscriptionId||'').slice(0,100), scheduledFor:String(scheduledFor||'').slice(0,40), recipientMode:String(recipientMode||'').slice(0,20), recipientName:String(recipientName||'').slice(0,60) },
   });
   return session;
 }

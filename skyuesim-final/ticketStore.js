@@ -3,11 +3,11 @@ let store = { tickets: [], nextId: 1001 };
 
 async function bootstrap() { store = { tickets: [], nextId: 1001, ...(await storage.load('tickets.json', store)) }; }
 function writeAll(data) { store = data; storage.save('tickets.json', store); }
-function createTicket({ email, category, subject, message, attachment, recoveryRequest = null }) {
+function createTicket({ email, category, subject, message, attachment, recoveryRequest = null, diagnostics = null }) {
   const now = new Date().toISOString();
   const priority=category === 'access_recovery' ? 'high' : 'normal';
   const slaMinutes=priority==='high'?240:1440;
-  const ticket = { id: store.nextId++, email, category, subject, status: 'open', priority, tags:[], createdAt: now, updatedAt: now, slaDueAt:new Date(Date.now()+slaMinutes*60000).toISOString(), messages: [{ from: 'user', text: message, attachment: attachment || null, createdAt: now }], ...(recoveryRequest ? { recoveryRequest } : {}) };
+  const ticket = { id: store.nextId++, email, category, subject, status: 'open', priority, tags:[], createdAt: now, updatedAt: now, slaDueAt:new Date(Date.now()+slaMinutes*60000).toISOString(), messages: [{ from: 'user', text: message, attachment: attachment || null, createdAt: now }], ...(recoveryRequest ? { recoveryRequest } : {}), ...(diagnostics ? { diagnostics } : {}) };
   store.tickets.push(ticket); writeAll(store); return ticket;
 }
 function getTicketsByEmail(email) { return store.tickets.filter(t => t.email === email).sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt)); }

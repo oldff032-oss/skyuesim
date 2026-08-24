@@ -8,7 +8,7 @@ const defaults = () => ({
   },
   featureRules: { disabledCountries:[], disabledPackages:[], paymentMethods:{stripeCard:true} },
   providerBalance: { amount:null, currency:'USD', averageOrderCost:null, updatedAt:null, source:'not_configured' },
-  versionInfo: { frontend:'1.0.0', backend:'1.0.0', serviceWorker:'v57', cache:'signal-shell-v57-mobile-topups', deployedAt:null, changelog:[],criticalRefreshToken:null,criticalAssets:['/i18n.js','/style.css','/pwa.js','/sw.js'] },
+  versionInfo: { frontend:'1.6.0', backend:'1.0.0', serviceWorker:'v58', cache:'signal-shell-v58-offline-family', deployedAt:null, changelog:[],criticalRefreshToken:null,criticalAssets:['/i18n.js','/style.css','/pwa.js','/sw.js'] },
   clientVersions: {},
   dailyReports: [], reportSettings: { enabled:true, hour:8, lastSentDate:null },
 });

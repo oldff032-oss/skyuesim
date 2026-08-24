@@ -9,6 +9,10 @@
   "background_color": "#05060d",
   "theme_color": "#05060d",
   "lang": "uk",
+  "shortcuts": [
+    { "name": "Офлайн-картки eSIM", "short_name": "Офлайн eSIM", "url": "/offline-esim.html", "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }] },
+    { "name": "eSIM для близьких", "short_name": "Для близьких", "url": "/family-esims.html", "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }] }
+  ],
   "icons": [
     { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
     { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
