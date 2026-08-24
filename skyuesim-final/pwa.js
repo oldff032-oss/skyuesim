@@ -1,7 +1,7 @@
 // Register from every entry page so a fresh "Add to Home Screen" install has
 // a service worker even when it starts directly on dashboard.html.
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' }).then(registration => registration.update()).catch(() => {});
+  navigator.serviceWorker.register('/sw.js?v=57', { updateViaCache: 'none' }).then(registration => registration.update()).catch(() => {});
   navigator.serviceWorker.addEventListener('controllerchange',()=>{
     if(sessionStorage.getItem('signal_sw_reloaded_v32')==='1')return;
     sessionStorage.setItem('signal_sw_reloaded_v32','1');
@@ -10,9 +10,17 @@ if ('serviceWorker' in navigator) {
 }
 const applyTheme = () => document.documentElement.classList.toggle('light-theme', localStorage.getItem('signal_theme') === 'light');
 applyTheme();
-const signalNavIcons={'dashboard.html':'<path d="M3 11.5 12 4l9 7.5"/><path d="M5.5 10.5V20h13v-9.5"/><path d="M9.5 20v-6h5v6"/>','plans.html':'<path d="M4 7.5h16M6 4h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z"/><path d="M8 12h8M8 16h5"/>','usage.html':'<rect x="6" y="3" width="12" height="18" rx="3"/><path d="M9 7h6M10 17h4"/>','profile.html':'<circle cx="12" cy="8" r="4"/><path d="M4.5 21a7.5 7.5 0 0 1 15 0"/>'};
-function enhanceSignalNavigation(){document.querySelectorAll('.bottomnav a').forEach(link=>{const page=(link.getAttribute('href')||'').split(/[?#]/)[0].split('/').pop(),paths=signalNavIcons[page];if(!paths)return;const label=link.textContent.trim();link.innerHTML=`<span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${paths}</svg></span><span>${label}</span>`;});}
+const signalAuthPages=new Set(['login.html','register-email.html','verify-code.html','set-password.html','forgot-password.html','reset-code.html','new-password.html','account-created.html']);
+const signalCurrentPage=location.pathname.split('/').pop()||'index.html';
+if(signalAuthPages.has(signalCurrentPage))document.documentElement.classList.add('signal-auth-page');
+function signalMountAuthExperience(){if(!signalAuthPages.has(signalCurrentPage)||!document.body)return;const wrap=document.querySelector('.wrap');if(wrap&&!wrap.querySelector('.auth-atmosphere'))wrap.insertAdjacentHTML('afterbegin','<div class="auth-atmosphere" aria-hidden="true"><i></i><i></i><i></i></div>');if(!document.getElementById('signal-auth-loader'))document.body.insertAdjacentHTML('beforeend','<div id="signal-auth-loader" class="auth-loader" role="status" aria-live="polite" aria-hidden="true"><div class="auth-loader-core"><span class="auth-logo-stage"><img src="signal-premium-logo.png" alt=""><i></i><b></b></span><strong id="signal-auth-loader-title">Захищений вхід</strong><small id="signal-auth-loader-copy">Підключаємо твій акаунт до Signal</small><span class="auth-loader-progress"><i></i></span></div></div>');const splashAllowed=['login.html','register-email.html'].includes(signalCurrentPage),splashKey=`signal_auth_intro:${signalCurrentPage}`;if(splashAllowed&&!sessionStorage.getItem(splashKey)){sessionStorage.setItem(splashKey,'1');signalAuthLoading(true,signalCurrentPage==='login.html'?'Ласкаво просимо':'Створюємо твій Signal');setTimeout(()=>signalAuthLoading(false),1150);}}
+window.signalAuthLoading=function(active,title,copy){const loader=document.getElementById('signal-auth-loader');if(!loader)return;if(title)document.getElementById('signal-auth-loader-title').textContent=title;if(copy)document.getElementById('signal-auth-loader-copy').textContent=copy;loader.classList.toggle('visible',Boolean(active));loader.setAttribute('aria-hidden',active?'false':'true');document.body.classList.toggle('auth-busy',Boolean(active));};
+window.signalAuthSuccess=function(title='Готово!'){const loader=document.getElementById('signal-auth-loader');if(!loader)return;document.getElementById('signal-auth-loader-title').textContent=title;document.getElementById('signal-auth-loader-copy').textContent='Відкриваємо твій особистий простір';loader.classList.add('visible','success');loader.setAttribute('aria-hidden','false');document.body.classList.add('auth-busy');};
+document.readyState==='loading'?document.addEventListener('DOMContentLoaded',signalMountAuthExperience):signalMountAuthExperience();
+const signalNavItems={'dashboard.html':{label:'Головна',labelEn:'Home',image:'nav-home-v2.png'},'plans.html':{label:'Тарифи',labelEn:'Plans',image:'nav-plans-v2.png'},'usage.html':{label:'Витрати',labelEn:'Usage',image:'nav-usage-v2.png'},'profile.html':{label:'Профіль',labelEn:'Profile',image:'nav-profile-v2.png'}};
+function enhanceSignalNavigation(){const current=location.pathname.split('/').pop(),isCore=Boolean(signalNavItems[current]),english=localStorage.getItem('signal_language')==='en';document.querySelectorAll('.bottomnav a').forEach(link=>{const page=(link.getAttribute('href')||'').split(/[?#]/)[0].split('/').pop(),item=signalNavItems[page];if(!item)return;const label=english?item.labelEn:item.label;if(isCore)link.classList.toggle('active',page===current);link.dataset.nav=page.replace('.html','');link.setAttribute('aria-label',label);link.setAttribute('title',label);link.innerHTML=`<span class="nav-icon" aria-hidden="true"><img class="nav-art" src="${item.image}" alt=""></span><span class="nav-label" data-no-auto-translate>${label}</span>`;});const dashboardLogo=document.querySelector('.logo-orbit');if(dashboardLogo&&!dashboardLogo.querySelector('img'))dashboardLogo.innerHTML='<img src="signal-premium-logo.png" alt="Signal">';}
 document.readyState==='loading'?document.addEventListener('DOMContentLoaded',enhanceSignalNavigation):enhanceSignalNavigation();
+window.addEventListener('load',()=>{enhanceSignalNavigation();setTimeout(enhanceSignalNavigation,500);});
 const maintenanceGateStyle=document.createElement('style');
 maintenanceGateStyle.textContent='html.signal-maintenance-check body{visibility:hidden!important}';
 document.head.appendChild(maintenanceGateStyle);
@@ -38,7 +46,7 @@ if (window.location.pathname.endsWith('/app-tools.html')) {
 // auth headers, PINs, tokens, QR data or full URLs/query strings.
 const signalOriginalFetch = window.fetch.bind(window);
 let signalDiagnosticCount = 0;
-const SIGNAL_FRONTEND_VERSION='1.0.0',SIGNAL_SW_VERSION='v39',SIGNAL_CACHE_VERSION='signal-shell-v39-control-center';
+const SIGNAL_FRONTEND_VERSION='1.5.0',SIGNAL_SW_VERSION='v57',SIGNAL_CACHE_VERSION='signal-shell-v57-mobile-topups';
 window.addEventListener('load',async()=>{
   if(typeof API_URL==='undefined')return;
   const token=localStorage.getItem('signal_session_token');
@@ -68,7 +76,7 @@ window.fetch = async function(input, init = {}) {
   const rawUrl = typeof input === 'string' ? input : input?.url || '';
   let path = 'unknown';
   try { path = new URL(rawUrl, location.origin).pathname; } catch {}
-  const protectedLegacyPaths=['/api/status','/api/usage','/api/billing','/api/cancel','/api/create-subscription','/api/support/tickets'];
+  const protectedLegacyPaths=['/api/status','/api/usage','/api/billing','/api/cancel','/api/create-subscription','/api/support/tickets','/api/mobile-topups'];
   const sessionToken=localStorage.getItem('signal_session_token');
   if(sessionToken&&protectedLegacyPaths.some(prefix=>path===prefix||path.startsWith(`${prefix}/`))){
     const headers=new Headers(init.headers||{});if(!headers.has('x-session-token'))headers.set('x-session-token',sessionToken);init={...init,headers};
@@ -78,7 +86,7 @@ window.fetch = async function(input, init = {}) {
     const response = await signalOriginalFetch(input, init);
     const durationMs=Math.round(performance.now()-started),requestId=response.headers.get('x-request-id');
     if (response.status >= 400) signalReportDiagnostic('api_error',response.status>=500?'error':'warning',`API returned ${response.status}`,{path,method:String(init.method||'GET').toUpperCase(),status:response.status,durationMs,requestId,outcome:'failed'});
-    else if(['/api/travel-packages','/api/travel-packages/checkout','/api/create-subscription','/api/cancel','/api/support/tickets'].some(prefix=>path===prefix||path.startsWith(`${prefix}/`))) signalReportDiagnostic('api_flow','info','API operation completed',{path,method:String(init.method||'GET').toUpperCase(),status:response.status,durationMs,requestId,outcome:'success'});
+    else if(['/api/travel-packages','/api/travel-packages/checkout','/api/mobile-topups','/api/create-subscription','/api/cancel','/api/support/tickets'].some(prefix=>path===prefix||path.startsWith(`${prefix}/`))) signalReportDiagnostic('api_flow','info','API operation completed',{path,method:String(init.method||'GET').toUpperCase(),status:response.status,durationMs,requestId,outcome:'success'});
     return response;
   } catch (error) {
     signalReportDiagnostic('network_error','error','Network request failed',{path,method:String(init.method||'GET').toUpperCase(),durationMs:Math.round(performance.now()-started),online:navigator.onLine});
@@ -92,19 +100,24 @@ window.addEventListener('online',()=>signalReportDiagnostic('connection','info',
 window.addEventListener('load',()=>signalReportDiagnostic('page_view','info','Page opened',{online:navigator.onLine,userAgent:navigator.userAgent.slice(0,160)}));
 
 const signalEscapeHtml = (value) => String(value || '').replace(/[&<>"']/g, char => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[char]));
+let signalMaintenanceTimer=null;
+function startMaintenanceCountdown(expiresAt){clearInterval(signalMaintenanceTimer);const target=new Date(expiresAt).getTime(),root=document.getElementById('signal-maintenance-countdown');if(!root||!Number.isFinite(target)){root?.remove();return;}const tick=()=>{const remaining=Math.max(0,target-Date.now()),days=Math.floor(remaining/86400000),hours=Math.floor(remaining%86400000/3600000),minutes=Math.floor(remaining%3600000/60000),seconds=Math.floor(remaining%60000/1000),value=document.getElementById('signal-maintenance-countdown-value'),exact=document.getElementById('signal-maintenance-countdown-exact');if(value)value.textContent=`${days?`${days} дн. `:''}${String(hours).padStart(2,'0')}:${String(minutes).padStart(2,'0')}:${String(seconds).padStart(2,'0')}`;if(exact)exact.textContent=`Орієнтовне завершення: ${new Date(target).toLocaleString(localStorage.getItem('signal_language')==='en'?'en-GB':'uk-UA',{dateStyle:'medium',timeStyle:'short'})}`;if(remaining<=0){clearInterval(signalMaintenanceTimer);setTimeout(checkAppAnnouncements,500);}};tick();signalMaintenanceTimer=setInterval(tick,1000);}
+function renderSignalDashboardNotice(notice){const home=document.querySelector('.home'),existing=document.getElementById('signal-dashboard-notice');if(!home||!notice)return;if(existing?.dataset.noticeId===notice.id)return;existing?.remove();const anchor=document.getElementById('loading')||document.getElementById('content');if(!anchor)return;anchor.insertAdjacentHTML('beforebegin',`<article id="signal-dashboard-notice" class="signal-dashboard-notice" data-notice-id="${signalEscapeHtml(notice.id)}"><i class="dashboard-notice-glow" aria-hidden="true"></i><header><span class="dashboard-notice-logo"><img src="signal-premium-logo.png" alt="Signal"></span><span><small><i></i> Актуальне повідомлення</small><strong>${signalEscapeHtml(notice.title||'Повідомлення Signal')}</strong></span></header><div class="dashboard-notice-copy">${signalEscapeHtml(notice.message).replace(/\n/g,'<br>')}</div><footer><span>Signal інформує</span><button type="button" aria-expanded="false">Читати повністю</button></footer></article>`);const card=document.getElementById('signal-dashboard-notice'),button=card.querySelector('footer button');button.onclick=()=>{const expanded=card.classList.toggle('expanded');button.setAttribute('aria-expanded',String(expanded));button.textContent=expanded?'Згорнути':'Читати повністю';};}
 async function checkAppAnnouncements() {
   if (typeof API_URL === 'undefined' || !document.body) return;
   const token = localStorage.getItem('signal_session_token');
   const email = localStorage.getItem('signal_email');
   const endpoint = token ? '/api/account/announcements' : '/api/announcements';
   try {
+    const statusResponse=await signalOriginalFetch(`${API_URL}/api/service-status?_=${Date.now()}`,{cache:'no-store'});
+    const serviceStatus=statusResponse.ok?await statusResponse.json():{status:'unknown'};
     let response = await fetch(`${API_URL}${endpoint}${!token && email ? `?email=${encodeURIComponent(email)}` : ''}`, {
       headers: token ? { 'x-session-token': token } : {},
       cache: 'no-store',
     });
     if (response.status === 401 && token) response = await fetch(`${API_URL}/api/announcements`, { cache:'no-store' });
-    if (!response.ok){document.documentElement.classList.remove('signal-maintenance-check');return;}
-    const { announcements = [] } = await response.json();
+    const announcements=response.ok?((await response.json()).announcements||[]):[];
+    if(!response.ok&&serviceStatus.status!=='maintenance'){document.documentElement.classList.remove('signal-maintenance-check');return;}
     document.documentElement.classList.remove('signal-maintenance-check');
     const securityIncident = announcements.find(item => item.type === 'security' && item.audience === 'all');
     const existingSecurity = document.getElementById('signal-security-incident-screen');
@@ -114,23 +127,30 @@ async function checkAppAnnouncements() {
       return;
     }
     if (securityIncident) return;
-    const maintenance = announcements.find(item => item.type === 'maintenance' && item.audience === 'all');
+    const maintenance = announcements.find(item => item.type === 'maintenance' && item.audience === 'all')||(serviceStatus.status==='maintenance'?{title:'Тимчасово недоступно',message:serviceStatus.message||'Ми проводимо технічні роботи. Спробуйте відкрити застосунок трохи пізніше.',audience:'all',type:'maintenance'}:null);
     const existingMaintenance = document.getElementById('signal-maintenance-screen');
-    if (!maintenance) existingMaintenance?.remove();
+    if (!maintenance){existingMaintenance?.remove();clearInterval(signalMaintenanceTimer);signalMaintenanceTimer=null;}
     // During maintenance every customer page is blocked. The only exception
     // is the standalone form, which deliberately does not load this script.
     const onSupportPage = /\/maintenance-support\.html$/i.test(location.pathname);
     if (maintenance && !existingMaintenance && !onSupportPage) {
-      document.body.insertAdjacentHTML('beforeend', `<div id="signal-maintenance-screen" role="dialog" aria-modal="true" aria-label="Технічні роботи" style="position:fixed;inset:0;z-index:2147483647;background:radial-gradient(circle at 50% -10%,#172d68 0,#080b19 48%,#03050b 100%);color:#f5f7ff;display:grid;place-items:center;padding:24px;text-align:center;font-family:Inter,-apple-system,sans-serif"><div style="width:min(100%,540px);padding:30px 24px;border:1px solid #5a7dff44;border-radius:28px;background:#090d1ddd;box-shadow:0 28px 90px #000a,0 0 70px #376dff22;backdrop-filter:blur(18px)"><img src="signal-premium-logo.png" alt="Signal" width="104" height="104" style="display:block;margin:0 auto;border-radius:24px;box-shadow:0 14px 42px #3178ff55"><div style="display:inline-flex;margin-top:22px;padding:7px 12px;border-radius:999px;background:#ffb02018;border:1px solid #ffb02055;color:#ffc45c;font-size:12px;font-weight:800;letter-spacing:.06em;text-transform:uppercase">Оновлення системи</div><h1 style="font-size:clamp(27px,6vw,36px);margin:18px 0 0">${signalEscapeHtml(maintenance.title || 'Тимчасово недоступно')}</h1><p style="color:#bec8df;line-height:1.7;margin:15px auto 0;max-width:460px">${signalEscapeHtml(maintenance.message).replace(/\n/g,'<br>')}</p><p style="color:#7f8aa3;font-size:13px;margin-top:22px">Дані акаунта та активні eSIM залишаються захищеними. Стан перевіряється автоматично.</p><div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:22px"><button type="button" onclick="location.reload()" style="padding:13px 16px;border:0;border-radius:13px;background:linear-gradient(135deg,#3e87ff,#7457ff);color:white;font-weight:800;cursor:pointer">Перевірити стан</button><button type="button" onclick="location.href='support.html?maintenance=1'" style="padding:13px 16px;border:1px solid #7386b955;border-radius:13px;background:#ffffff0b;color:#eef3ff;font-weight:800;cursor:pointer">Звернутися в підтримку</button></div></div></div>`);
+      document.body.insertAdjacentHTML('beforeend', `<div id="signal-maintenance-screen" class="signal-maintenance-screen" role="dialog" aria-modal="true" aria-label="Технічні роботи"><i class="maintenance-orb one" aria-hidden="true"></i><i class="maintenance-orb two" aria-hidden="true"></i><div class="signal-maintenance-card"><span class="maintenance-logo"><img src="signal-premium-logo.png" alt="Signal"><i></i></span><div class="maintenance-badge"><i></i> Оновлення системи</div><h1>${signalEscapeHtml(maintenance.title || 'Тимчасово недоступно')}</h1><p class="maintenance-message">${signalEscapeHtml(maintenance.message).replace(/\n/g,'<br>')}</p>${maintenance.expiresAt?'<div id="signal-maintenance-countdown" class="maintenance-countdown"><span>До завершення робіт</span><strong id="signal-maintenance-countdown-value">00:00:00</strong><small id="signal-maintenance-countdown-exact"></small></div>':''}<p class="maintenance-safe">Дані акаунта та активні eSIM залишаються захищеними. Стан перевіряється автоматично.</p><div class="maintenance-actions"><button type="button" onclick="location.reload()">Перевірити стан</button><button type="button" onclick="location.href='maintenance-support.html'">Написати в підтримку</button></div></div></div>`);
+      if(maintenance.expiresAt)startMaintenanceCountdown(maintenance.expiresAt);
       return;
     }
+    if(maintenance?.expiresAt&&!signalMaintenanceTimer)startMaintenanceCountdown(maintenance.expiresAt);
     if (maintenance || !token) return;
-    const notice = announcements.find(item => item.type !== 'maintenance' && localStorage.getItem(`signal_announcement_seen:${item.id}`) !== '1');
+    const activeNotice = announcements.find(item => !['maintenance','security'].includes(item.type));
+    const dashboardNotice=document.getElementById('signal-dashboard-notice');
+    if(!activeNotice)dashboardNotice?.remove();
+    const notice = activeNotice&&localStorage.getItem(`signal_announcement_seen:${activeNotice.id}`)!=='1'?activeNotice:null;
+    if(activeNotice&&!notice)renderSignalDashboardNotice(activeNotice);
     if (notice && !document.getElementById('signal-announcement-modal')) {
-      document.body.insertAdjacentHTML('beforeend', `<div id="signal-announcement-modal" style="position:fixed;inset:0;z-index:2147483646;background:rgba(2,5,15,.82);backdrop-filter:blur(10px);display:grid;place-items:center;padding:20px;color:#f5f7ff;font-family:Inter,-apple-system,sans-serif"><section style="width:min(100%,470px);background:#10162a;border:1px solid rgba(100,130,255,.45);border-radius:20px;padding:24px;box-shadow:0 24px 80px rgba(0,0,0,.55)"><div style="font-size:36px">📢</div><h2 style="font-size:22px;margin:12px 0 0">${signalEscapeHtml(notice.title)}</h2><p style="color:#bdc6da;line-height:1.6;margin-top:10px">${signalEscapeHtml(notice.message).replace(/\n/g,'<br>')}</p><button id="signal-announcement-close" type="button" style="width:100%;margin-top:20px;padding:12px;border:0;border-radius:11px;background:#5578ff;color:white;font-weight:700">Зрозуміло</button></section></div>`);
+      document.body.insertAdjacentHTML('beforeend', `<div id="signal-announcement-modal" class="signal-announcement-modal" role="dialog" aria-modal="true" aria-label="Повідомлення Signal"><i class="notice-orb one" aria-hidden="true"></i><i class="notice-orb two" aria-hidden="true"></i><section class="signal-announcement-card"><span class="notice-logo"><img src="signal-premium-logo.png" alt="Signal"><i></i></span><div class="notice-badge"><i></i> Повідомлення Signal</div><h2>${signalEscapeHtml(notice.title||'Важливе повідомлення')}</h2><div class="notice-message">${signalEscapeHtml(notice.message).replace(/\n/g,'<br>')}</div><button id="signal-announcement-close" type="button">Зрозуміло</button></section></div>`);
       document.getElementById('signal-announcement-close').onclick = () => {
         localStorage.setItem(`signal_announcement_seen:${notice.id}`, '1');
         document.getElementById('signal-announcement-modal')?.remove();
+        renderSignalDashboardNotice(notice);
       };
     }
   } catch (error) {
@@ -140,7 +160,7 @@ async function checkAppAnnouncements() {
 }
 window.addEventListener('load', () => {
   checkAppAnnouncements();
-  window.setInterval(checkAppAnnouncements, 30000);
+  window.setInterval(checkAppAnnouncements, 5000);
 });
 document.addEventListener('click',event=>{
   const button=event.target.closest?.('#signal-maintenance-screen button');

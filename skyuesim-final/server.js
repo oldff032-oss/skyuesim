@@ -9,7 +9,7 @@ const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const { generateRegistrationOptions, verifyRegistrationResponse } = require('@simplewebauthn/server');
 
-const { createCheckoutSession, createCustomPackageCheckout, createBillingPortalSession, cancelSubscription, cancelSubscriptionAtPeriodEnd, cancelAllSubscriptionsForCustomers, deleteStripeCustomer, constructWebhookEvent, getNextBillingDate, getBillingHistory, getRecoveryPaymentEvidence, findCustomerIdsByEmail, getCustomerEmail, getSubscriptionStateByEmail, listCompletedCheckoutPurchasesByEmail, getCheckoutPurchaseDetails, listRefundablePaymentsByEmail, refundPayment } = require('./stripeService');
+const { createCheckoutSession, createCustomPackageCheckout, createMobileTopupCheckout, createBillingPortalSession, cancelSubscription, cancelSubscriptionAtPeriodEnd, cancelAllSubscriptionsForCustomers, deleteStripeCustomer, constructWebhookEvent, getNextBillingDate, getBillingHistory, getRecoveryPaymentEvidence, findCustomerIdsByEmail, resolveStripeCustomerProfile, getCustomerEmail, getSubscriptionStateByEmail, listCompletedCheckoutPurchasesByEmail, getCheckoutPurchaseDetails, listRefundablePaymentsByEmail, refundPayment } = require('./stripeService');
 const crypto = require('crypto');
 const { provisionEsim, checkUsage, recoverEsim, topupEsim, listPackages, findRenewalTopup } = require('./esimService');
 const { bootstrap: bootstrapUsers, getUser, saveUser, deleteUser, getUserByStripeCustomerId, getAllUsers } = require('./db');
@@ -29,6 +29,7 @@ const { sendEmail, getReceivedEmail, verifyInboundSignature, isEmailConfigured }
 const emailTemplates = require('./emailTemplates');
 const backupService = require('./backupService');
 const controlCenter = require('./controlCenterService');
+const mobileTopups = require('./mobileTopupService');
 
 const app = express();
 const esimRetriesInProgress = new Set();
@@ -163,6 +164,106 @@ async function processDuePlanChanges() {
   for(const user of due){const change=user.pendingPlanChange;await executePaidPlanChange({email:user.email,purchaseId:change.purchaseId,packageCode:change.packageCode,packageName:change.packageName,dataLimitGb:change.dataLimitGb,durationDays:change.durationDays,location:change.location,previousPlan:change.previousPlan,previousSubscriptionId:change.previousSubscriptionId,requestId:change.requestId});}
 }
 
+function upsertMobileTopupOrder(email, orderId, patch, defaults = {}) {
+  const user = getUser(email) || {};
+  const orders = Array.isArray(user.mobileTopupOrders) ? [...user.mobileTopupOrders] : [];
+  const index = orders.findIndex(item => item.id === orderId);
+  const current = index >= 0 ? orders[index] : { id:orderId, createdAt:new Date().toISOString(), ...defaults };
+  const next = { ...current, ...patch, updatedAt:new Date().toISOString() };
+  if (index >= 0) orders[index] = next; else orders.unshift(next);
+  saveUser(email, { mobileTopupOrders:orders.slice(0, 100) });
+  return next;
+}
+
+function getMobileTopupOrder(email, orderId) {
+  return (getUser(email)?.mobileTopupOrders || []).find(item => item.id === orderId) || null;
+}
+
+function maskPhone(phone) {
+  const value=String(phone||'');
+  return value.length > 6 ? `${value.slice(0,3)}••••${value.slice(-3)}` : '••••';
+}
+
+function mobileTopupPurchaseDefaults(order, session = null) {
+  return {
+    kind:'mobile_topup',
+    plan:'mobile_topup',
+    packageCode:String(order.productId),
+    packageName:order.productName || 'Поповнення мобільного інтернету',
+    dataLimitGb:null,
+    durationDays:null,
+    location:[order.operatorName,order.countryName].filter(Boolean).join(' · ') || null,
+    amountCents:session?.amount_total ?? order.amountCents ?? null,
+    currency:session?.currency || order.currency || null,
+    stripeSessionId:session?.id || order.stripeSessionId || null,
+    stripeCustomerId:typeof session?.customer === 'string' ? session.customer : session?.customer?.id || null,
+    stripePaymentIntentId:typeof session?.payment_intent === 'string' ? session.payment_intent : session?.payment_intent?.id || null,
+    paidAt:session ? new Date((session.created || Math.floor(Date.now()/1000)) * 1000).toISOString() : order.paidAt || null,
+    paymentStatus:session?.payment_status || order.paymentStatus || null,
+    topupOrderId:order.id,
+    recipientPhoneMasked:maskPhone(order.phone),
+    operatorName:order.operatorName || null,
+    provider:'dtone',
+  };
+}
+
+function queueMobileTopupStatus(email, order, purchaseId) {
+  const duplicate=(operationsStore.store().jobs||[]).find(job=>job.type==='mobile_topup_status'&&job.email===email&&job.payload?.orderId===order.id&&['pending','running'].includes(job.status));
+  if(duplicate)return duplicate;
+  return operationsStore.addJob({type:'mobile_topup_status',status:'pending',email,purchaseId,payload:{orderId:order.id},maxAttempts:20,retryable:true});
+}
+
+async function fulfillMobileTopupOrder({ email, orderId, purchaseId }) {
+  let order=getMobileTopupOrder(email,orderId);
+  if(!order)throw Object.assign(new Error('Оплачене замовлення поповнення не знайдено'),{code:'TOPUP_ORDER_NOT_FOUND',nonRetryable:true});
+  if(order.status==='delivered')return {state:'delivered',duplicate:true,order};
+  if(order.paymentStatus!=='paid')throw Object.assign(new Error('Stripe ще не підтвердив оплату поповнення'),{code:'TOPUP_PAYMENT_NOT_CONFIRMED',nonRetryable:true});
+  order=upsertMobileTopupOrder(email,orderId,{status:'processing',fulfillmentError:null,fulfillmentStartedAt:new Date().toISOString(),purchaseId});
+  let transaction;
+  try{
+    transaction=order.providerTransactionId
+      ? await mobileTopups.getTransaction(order.providerTransactionId)
+      : await mobileTopups.purchaseProduct({orderId,productId:order.productId,phone:order.phone});
+  }catch(error){
+    upsertMobileTopupOrder(email,orderId,{status:'failed',failedAt:new Date().toISOString(),fulfillmentError:error.message,fulfillmentErrorCode:error.code||'TOPUP_PROVIDER_ERROR'});
+    upsertPurchase(email,purchaseId,{fulfillmentStatus:'failed',failedAt:new Date().toISOString(),fulfillmentError:error.message,fulfillmentErrorCode:error.code||'TOPUP_PROVIDER_ERROR'},mobileTopupPurchaseDefaults(order));
+    throw error;
+  }
+  const common={providerTransactionId:transaction.id||order.providerTransactionId||null,providerStatus:transaction.status||null,operatorReference:transaction.operatorReference||null};
+  if(transaction.state==='delivered'){
+    order=upsertMobileTopupOrder(email,orderId,{...common,status:'delivered',deliveredAt:transaction.completedAt||new Date().toISOString(),fulfillmentError:null});
+    upsertPurchase(email,purchaseId,{...common,fulfillmentStatus:'delivered',fulfilledAt:order.deliveredAt,fulfillmentError:null},mobileTopupPurchaseDefaults(order));
+    return {state:'delivered',order,transaction};
+  }
+  if(transaction.state==='processing'){
+    order=upsertMobileTopupOrder(email,orderId,{...common,status:'processing'});
+    upsertPurchase(email,purchaseId,{...common,fulfillmentStatus:'processing',fulfillmentError:null},mobileTopupPurchaseDefaults(order));
+    queueMobileTopupStatus(email,order,purchaseId);
+    return {state:'processing',order,transaction};
+  }
+  const error=Object.assign(new Error(`Оператор не зарахував пакет: ${transaction.status||'відхилено'}`),{code:'TOPUP_PROVIDER_DECLINED',nonRetryable:true});
+  upsertMobileTopupOrder(email,orderId,{...common,status:'failed',failedAt:new Date().toISOString(),fulfillmentError:error.message,fulfillmentErrorCode:error.code});
+  upsertPurchase(email,purchaseId,{...common,fulfillmentStatus:'failed',failedAt:new Date().toISOString(),fulfillmentError:error.message,fulfillmentErrorCode:error.code},mobileTopupPurchaseDefaults(order));
+  throw error;
+}
+
+async function recoverStripeProfile(email) {
+  const normalizedEmail=String(email||'').trim().toLowerCase(),user=getUser(normalizedEmail)||{};
+  const purchaseCustomerIds=(user.purchases||[]).map(purchase=>purchase.stripeCustomerId).filter(Boolean);
+  const profile=await resolveStripeCustomerProfile({email:normalizedEmail,knownCustomerId:user.stripeCustomerId||null,purchaseCustomerIds});
+  if(profile.customerId){
+    saveUser(normalizedEmail,{
+      stripeCustomerId:profile.customerId,
+      ...(profile.subscriptionId?{stripeSubscriptionId:profile.subscriptionId}:{}),
+      stripeProfileLinkedAt:user.stripeCustomerId===profile.customerId?(user.stripeProfileLinkedAt||new Date().toISOString()):new Date().toISOString(),
+      stripeProfileSource:profile.source,
+      stripeProfileCustomerCount:profile.customerCount,
+      stripeProfileLastCheckedAt:new Date().toISOString(),
+    });
+  }
+  return profile;
+}
+
 let operationalJobsRunning=false;
 async function processOperationalJobs(){
   if(operationalJobsRunning)return;operationalJobsRunning=true;
@@ -174,6 +275,9 @@ async function processOperationalJobs(){
         if(job.type==='plan_change'){
           const user=getUser(job.email),purchase=(user?.purchases||[]).find(item=>item.id===job.purchaseId);if(!user||!purchase)throw new Error('Purchase for plan change was not found');
           const result=await executePaidPlanChange({email:job.email,purchaseId:purchase.id,packageCode:purchase.packageCode,packageName:purchase.packageName,dataLimitGb:purchase.dataLimitGb,durationDays:purchase.durationDays,location:purchase.location,previousPlan:purchase.previousPlan,previousSubscriptionId:purchase.previousSubscriptionId});if(!result.ok)throw result.error||new Error('Plan change failed');
+        }else if(job.type==='mobile_topup_status'){
+          const result=await fulfillMobileTopupOrder({email:job.email,orderId:job.payload?.orderId,purchaseId:job.purchaseId});
+          if(result.state==='processing')throw new Error('Оператор ще обробляє поповнення');
         }else throw Object.assign(new Error(`Unsupported job type: ${job.type}`),{nonRetryable:true});
         operationsStore.updateJob(job.id,{status:'succeeded',completedAt:new Date().toISOString(),error:null});
       }catch(error){const attempts=Number(job.attempts||0)+1,retryable=!error.nonRetryable&&attempts<Number(job.maxAttempts||3);operationsStore.updateJob(job.id,{status:retryable?'pending':'failed',retryable,error:error.message,nextAttemptAt:retryable?new Date(Date.now()+Math.min(30*60*1000,2**attempts*60000)).toISOString():null,completedAt:retryable?null:new Date().toISOString()});}
@@ -391,6 +495,7 @@ app.post('/api/account/diagnostics', requireUserSession, (req, res) => {
 });
 
 async function localizedAnnouncements(email) {
+  await operationsStore.refresh();
   const announcements = operationsStore.activeAnnouncements(email);
   const userLanguage = getUser(email)?.language || 'uk';
   if (userLanguage !== 'en') return announcements;
@@ -472,9 +577,11 @@ app.get('/api/admin/feedback', adminAuth.requireAdmin, (req,res) => {
 });
 app.patch('/api/admin/feedback/:id',adminAuth.requireAdmin,adminAuth.requirePermission('operations.manage'),(req,res)=>{const item=(operationsStore.store().feedback||[]).find(x=>x.id===req.params.id);if(!item)return res.status(404).json({error:'Відгук не знайдено'});if(req.body?.status&&['new','reviewed','planned','done'].includes(req.body.status))item.status=req.body.status;if(req.body?.assignedTo!==undefined)item.assignedTo=String(req.body.assignedTo||'').slice(0,254)||null;if(req.body?.createTask){item.task={id:`feedback_${item.id}`,title:String(req.body.taskTitle||item.message||'Опрацювати відгук').slice(0,200),status:'open',createdAt:new Date().toISOString(),createdBy:req.admin.email};}item.updatedAt=new Date().toISOString();operationsStore.save();auditStore.log({adminEmail:req.admin.email,action:'feedback_updated',target:item.id,details:{status:item.status,assignedTo:item.assignedTo,task:Boolean(item.task)}});res.json(item);});
 
-app.get('/api/service-status', (req, res) => {
+app.get('/api/service-status', async (req, res) => {
+  await operationsStore.refresh();
   const maintenance = operationsStore.activeAnnouncements(null).find((item) => item.type === 'maintenance');
-  res.json({ status: maintenance ? 'maintenance' : 'operational', message: maintenance?.message || null, checkedAt: new Date().toISOString() });
+  res.set('Cache-Control','no-store, no-cache, must-revalidate');
+  res.json({ status: maintenance ? 'maintenance' : 'operational', maintenanceId:maintenance?.id||null, title:maintenance?.title||null, message: maintenance?.message || null, expiresAt:maintenance?.expiresAt||null, checkedAt: new Date().toISOString() });
 });
 
 app.get('/api/travel-packages', requireUserSession, requireFeature('travelPackages','Пакети для подорожей тимчасово недоступні'), rateLimit('travel_catalog',60*1000,30,req=>req.userEmail), async (req,res) => {
@@ -529,8 +636,10 @@ app.post('/api/travel-packages/checkout', requireUserSession, requireFeature('tr
       scheduledFor=scheduledFor||currentUser.subscriptionPeriodEnd||currentUser.esim?.expiredTime||'';
       if(!scheduledFor||Number.isNaN(new Date(scheduledFor).getTime())||new Date(scheduledFor).getTime()<=Date.now()) return res.status(409).json({error:'Не вдалося визначити дату завершення поточного тарифу. Вибери «Змінити зараз» або звернися в підтримку.',code:'CURRENT_PLAN_END_UNKNOWN'});
     }
+    const recoveredProfile=await recoverStripeProfile(req.userEmail).catch(()=>({customerId:currentUser?.stripeCustomerId||null}));
     const session=await createCustomPackageCheckout({
       email:req.userEmail,
+      customerId:recoveredProfile.customerId||currentUser?.stripeCustomerId||null,
       packageCode:selected.packageCode,
       packageName:selected.name,
       amountCents:selected.amountCents,
@@ -549,6 +658,90 @@ app.post('/api/travel-packages/checkout', requireUserSession, requireFeature('tr
     recordDiagnostic(req,{email:req.userEmail,type:'payment_flow',action:'stripe_checkout_create',outcome:'failed',severity:'error',message:'Stripe Checkout creation failed',errorCode:error.code||error.type||'STRIPE_CHECKOUT_ERROR',durationMs:Date.now()-started,context:{provider:'stripe'}});
     console.error('[travel checkout]',error.message);
     res.status(502).json({error:'Не вдалося створити безпечну оплату пакета'});
+  }
+});
+
+function safeMobileTopupOrder(order) {
+  return {
+    id:order.id,
+    productName:order.productName,
+    data:order.data,
+    validity:order.validity||null,
+    operatorName:order.operatorName,
+    countryName:order.countryName,
+    phoneMasked:maskPhone(order.phone),
+    amountCents:order.amountCents,
+    currency:order.currency,
+    status:order.status,
+    paymentStatus:order.paymentStatus||null,
+    providerStatus:order.providerStatus||null,
+    operatorReference:order.operatorReference||null,
+    fulfillmentError:order.fulfillmentError?String(order.fulfillmentError).slice(0,240):null,
+    createdAt:order.createdAt,
+    paidAt:order.paidAt||null,
+    deliveredAt:order.deliveredAt||null,
+  };
+}
+
+app.get('/api/mobile-topups/status', requireUserSession, requireFeature('mobileTopups','Поповнення SIM тимчасово недоступне'), (req,res) => {
+  res.json(mobileTopups.publicStatus());
+});
+
+app.get('/api/mobile-topups/countries', requireUserSession, requireFeature('mobileTopups'), rateLimit('mobile_topup_catalog',60*1000,30,req=>req.userEmail), async(req,res)=>{
+  try{res.json({countries:await mobileTopups.listCountries()});}
+  catch(error){recordDiagnostic(req,{email:req.userEmail,source:'dtone',type:'mobile_topup',action:'countries_load',outcome:'failed',severity:'error',message:error.message,errorCode:error.code});res.status(error.status||502).json({error:error.message,code:error.code});}
+});
+
+app.get('/api/mobile-topups/operators', requireUserSession, requireFeature('mobileTopups'), rateLimit('mobile_topup_catalog',60*1000,30,req=>req.userEmail), async(req,res)=>{
+  try{res.json({operators:await mobileTopups.listOperators(req.query.country)});}
+  catch(error){recordDiagnostic(req,{email:req.userEmail,source:'dtone',type:'mobile_topup',action:'operators_load',outcome:'failed',severity:'warning',message:error.message,errorCode:error.code});res.status(error.status||502).json({error:error.message,code:error.code});}
+});
+
+app.get('/api/mobile-topups/products', requireUserSession, requireFeature('mobileTopups'), rateLimit('mobile_topup_catalog',60*1000,30,req=>req.userEmail), async(req,res)=>{
+  try{
+    const products=await mobileTopups.listProducts({countryIsoCode:req.query.country,operatorId:req.query.operatorId});
+    res.json({products});
+  }catch(error){recordDiagnostic(req,{email:req.userEmail,source:'dtone',type:'mobile_topup',action:'products_load',outcome:'failed',severity:'warning',message:error.message,errorCode:error.code});res.status(error.status||502).json({error:error.message,code:error.code});}
+});
+
+app.get('/api/mobile-topups/orders', requireUserSession, requireFeature('mobileTopups'), (req,res)=>{
+  const orders=(getUser(req.userEmail)?.mobileTopupOrders||[]).map(safeMobileTopupOrder);
+  res.json({orders});
+});
+
+app.get('/api/mobile-topups/orders/:orderId', requireUserSession, requireFeature('mobileTopups'), (req,res)=>{
+  const order=getMobileTopupOrder(req.userEmail,String(req.params.orderId||''));
+  if(!order)return res.status(404).json({error:'Замовлення не знайдено'});
+  res.json({order:safeMobileTopupOrder(order)});
+});
+
+app.post('/api/mobile-topups/checkout', requireUserSession, requireFeature('mobileTopups','Поповнення SIM тимчасово недоступне'), requireFeature('cardPayments','Оплати тимчасово призупинено'), rateLimit('mobile_topup_checkout',60*60*1000,8,req=>req.userEmail), async(req,res)=>{
+  const started=Date.now();
+  let orderId=null;
+  try{
+    const providerStatus=mobileTopups.publicStatus();
+    if(!providerStatus.configured)return res.status(503).json({error:'Партнер мобільних поповнень ще не підключений. Оплата не створена.',code:'TOPUP_PROVIDER_NOT_CONFIGURED'});
+    if(!paymentMethodEnabled('stripeCard'))return res.status(503).json({error:'Оплата карткою Stripe тимчасово недоступна',code:'PAYMENT_METHOD_DISABLED'});
+    const phone=mobileTopups.normalizePhone(req.body?.phone);
+    const product=await mobileTopups.getProduct(req.body?.productId,{includeCost:true});
+    orderId=`topup_${Date.now().toString(36)}_${crypto.randomBytes(8).toString('hex')}`;
+    const defaults={
+      productId:product.id,productName:product.name,data:product.data,validity:product.validity,
+      operatorId:product.operator.id,operatorName:product.operator.name,countryIsoCode:product.country.isoCode,countryName:product.country.name,
+      phone,amountCents:product.amountCents,currency:product.currency,providerCost:product.providerCost,providerCurrency:product.providerCurrency,
+      provider:'dtone',providerEnvironment:providerStatus.environment,status:'awaiting_payment',paymentStatus:'unpaid',
+    };
+    upsertMobileTopupOrder(req.userEmail,orderId,{},defaults);
+    const currentUser=getUser(req.userEmail);
+    const recoveredProfile=await recoverStripeProfile(req.userEmail).catch(()=>({customerId:currentUser?.stripeCustomerId||null}));
+    const session=await createMobileTopupCheckout({email:req.userEmail,customerId:recoveredProfile.customerId||currentUser?.stripeCustomerId||null,orderId,productName:`${product.data} · ${product.operator.name}`,amountCents:product.amountCents,currency:product.currency});
+    upsertMobileTopupOrder(req.userEmail,orderId,{stripeSessionId:session.id,checkoutCreatedAt:new Date().toISOString()});
+    recordDiagnostic(req,{email:req.userEmail,source:'stripe',type:'mobile_topup',action:'checkout_created',outcome:'success',severity:'info',message:'Mobile data top-up checkout created',purchaseId:session.id,durationMs:Date.now()-started,context:{orderId,productId:product.id,operatorId:product.operator.id,country:product.country.isoCode,amountCents:product.amountCents,currency:product.currency,phone:maskPhone(phone)}});
+    res.json({url:session.url,orderId});
+  }catch(error){
+    if(orderId)upsertMobileTopupOrder(req.userEmail,orderId,{status:'checkout_failed',fulfillmentError:error.message,fulfillmentErrorCode:error.code||error.type||'CHECKOUT_ERROR'});
+    recordDiagnostic(req,{email:req.userEmail,source:error.code?.startsWith('TOPUP_')?'dtone':'stripe',type:'mobile_topup',action:'checkout_create',outcome:'failed',severity:'error',message:error.message,errorCode:error.code||error.type||'TOPUP_CHECKOUT_ERROR',durationMs:Date.now()-started,context:{orderId}});
+    res.status(error.status&&error.status<500?error.status:502).json({error:error.message||'Не вдалося створити безпечну оплату',code:error.code});
   }
 });
 
@@ -1164,7 +1357,7 @@ async function runDailySuperAdminReport(){
 app.get('/api/admin/control-center',adminAuth.requireAdmin,(req,res)=>{
   const c=controlContext(),recon=controlCenter.reconciliation(c.users),balance=c.operations.providerBalance||{},estimated=balance.amount!=null&&balance.averageOrderCost>0?Math.floor(balance.amount/balance.averageOrderCost):null;
   const providerLevel=estimated==null?'unknown':estimated<3?'critical':estimated<10?'warning':'healthy';
-  res.json({generatedAt:new Date().toISOString(),summary:{attention:c.attention.length,critical:c.attention.filter(i=>i.severity==='critical').length,jobsFailed:(c.operations.jobs||[]).filter(j=>j.status==='failed').length,deliveriesFailed:(c.operations.deliveryEvents||[]).filter(d=>d.status==='failed').length,reconciliationIssues:recon.summary.issues},attention:c.attention.slice(0,300),reconciliation:recon,support:c.support,provider:{...balance,estimatedOrders:estimated,level:providerLevel,salesPaused:providerLevel==='critical'},services:{server:true,database:Boolean(process.env.DATABASE_URL),stripe:Boolean(process.env.STRIPE_SECRET_KEY),esim:Boolean(process.env.ESIM_PROVIDER_API_KEY||process.env.ESIM_ACCESS_CODE),email:isEmailConfigured(),push:isPushConfigured(),deepl:translationService.status()},jobs:(c.operations.jobs||[]).slice(0,300),deliveries:(c.operations.deliveryEvents||[]).slice(0,300),featureFlags:c.operations.featureFlags,featureRules:c.operations.featureRules,versionInfo:c.operations.versionInfo,latestReport:(c.operations.dailyReports||[])[0]||null});
+  res.json({generatedAt:new Date().toISOString(),summary:{attention:c.attention.length,critical:c.attention.filter(i=>i.severity==='critical').length,jobsFailed:(c.operations.jobs||[]).filter(j=>j.status==='failed').length,deliveriesFailed:(c.operations.deliveryEvents||[]).filter(d=>d.status==='failed').length,reconciliationIssues:recon.summary.issues},attention:c.attention.slice(0,300),reconciliation:recon,support:c.support,provider:{...balance,estimatedOrders:estimated,level:providerLevel,salesPaused:providerLevel==='critical'},services:{server:true,database:Boolean(process.env.DATABASE_URL),stripe:Boolean(process.env.STRIPE_SECRET_KEY),esim:Boolean(process.env.ESIM_PROVIDER_API_KEY||process.env.ESIM_ACCESS_CODE),mobileTopups:mobileTopups.publicStatus(),email:isEmailConfigured(),push:isPushConfigured(),deepl:translationService.status()},jobs:(c.operations.jobs||[]).slice(0,300),deliveries:(c.operations.deliveryEvents||[]).slice(0,300),featureFlags:c.operations.featureFlags,featureRules:c.operations.featureRules,versionInfo:c.operations.versionInfo,latestReport:(c.operations.dailyReports||[])[0]||null});
 });
 app.get('/api/app-version',(req,res)=>{const v=operationsStore.store().versionInfo;res.json({frontend:v.frontend,serviceWorker:v.serviceWorker,cache:v.cache,criticalRefreshToken:v.criticalRefreshToken,criticalAssets:v.criticalAssets||[]});});
 app.post('/api/account/client-version',requireUserSession,(req,res)=>{const state=operationsStore.store(),safe={frontend:String(req.body?.frontend||'unknown').slice(0,40),serviceWorker:String(req.body?.serviceWorker||'unknown').slice(0,40),cache:String(req.body?.cache||'unknown').slice(0,80),platform:String(req.body?.platform||'web').slice(0,40),lastSeenAt:new Date().toISOString()};state.clientVersions[req.userEmail]=safe;operationsStore.save();res.status(202).json({ok:true});});
@@ -1186,16 +1379,19 @@ app.patch('/api/admin/version-info',adminAuth.requireAdmin,adminAuth.requirePerm
 app.post('/api/admin/daily-report/generate',adminAuth.requireAdmin,adminAuth.requirePermission('operations.manage'),(req,res)=>{const c=controlContext(),report=controlCenter.dailyReport(c);c.operations.dailyReports.unshift(report);c.operations.dailyReports=c.operations.dailyReports.slice(0,90);operationsStore.save();auditStore.log({adminEmail:req.admin.email,action:'daily_report_generated',details:{status:report.status}});res.json(report);});
 app.patch('/api/admin/team/:email/permissions',adminAuth.requireAdmin,adminAuth.requireRole('super_admin'),(req,res)=>{try{const result=adminAuth.setPermissions({email:req.params.email,permissions:req.body?.permissions});auditStore.log({adminEmail:req.admin.email,action:'admin_permissions_updated',target:result.email,details:{permissions:result.permissions}});res.json(result);}catch(error){res.status(400).json({error:error.message});}});
 
-app.get('/api/admin/operations', adminAuth.requireAdmin, (req, res) => res.json(operationsStore.store()));
+app.get('/api/admin/operations', adminAuth.requireAdmin, async (req, res) => {await operationsStore.refresh();res.json(operationsStore.store());});
 app.post('/api/admin/announcements', adminAuth.requireAdmin, adminAuth.requireRole('super_admin','admin'), async (req,res) => {
+  await operationsStore.refresh();
   const { title, message, audience='all', expiresAt=null, sendPush=false, type='notice' } = req.body || {};
   if(!title || !message) return res.status(400).json({error:'Вкажіть заголовок і текст'});
   const isMaintenance = type === 'maintenance' || /^\s*\[maintenance\]/i.test(String(title));
+  if(isMaintenance&&!expiresAt)return res.status(400).json({error:'Для технічних робіт обов’язково вкажіть час завершення'});
   const normalizedAudience = isMaintenance ? 'all' : String(audience || 'all').trim().toLowerCase();
   if (normalizedAudience !== 'all' && !authStore.readAll().users?.[normalizedAudience] && !getUser(normalizedAudience)) return res.status(404).json({error:'Користувача з таким email не знайдено'});
   if (expiresAt && Number.isNaN(new Date(expiresAt).getTime())) return res.status(400).json({error:'Некоректна дата завершення'});
+  if (expiresAt && new Date(expiresAt).getTime() <= Date.now()) return res.status(400).json({error:'Час завершення має бути в майбутньому'});
   const announcement={ id:Date.now().toString(36), title:String(title).replace(/^\s*\[maintenance\]\s*/i,'').slice(0,100), message:String(message).slice(0,500), audience:normalizedAudience, type:isMaintenance?'maintenance':'notice', startsAt:new Date().toISOString(), expiresAt:expiresAt||null, createdBy:req.admin.email };
-  operationsStore.store().announcements.unshift(announcement); operationsStore.save();
+  operationsStore.store().announcements.unshift(announcement); await operationsStore.saveNow();
   let pushRecipients = 0, pushDelivered = 0;
   if(sendPush && isPushConfigured()) {
     const recipients = normalizedAudience === 'all' ? Object.keys(authStore.readAll().users || {}) : [normalizedAudience];
@@ -1305,7 +1501,7 @@ app.post('/api/admin/email-broadcasts/:audience',adminAuth.requireAdmin,adminAut
   auditStore.log({adminEmail:req.admin.email,action:'email_broadcast_sent',target:audience,details:{id:record.id,filter,recipients:recipients.length,delivered:delivery.delivered.length,failed:delivery.failed.length}});
   res.json({ok:delivery.failed.length===0,...record});
 });
-app.delete('/api/admin/announcements/:id', adminAuth.requireAdmin, adminAuth.requireRole('super_admin','admin'), (req,res)=>{ const s=operationsStore.store(),found=s.announcements.find(a=>a.id===req.params.id);if(found?.type==='security'&&req.admin.role!=='super_admin')return res.status(403).json({error:'Режим безпеки може вимкнути лише Super Admin'});s.announcements=s.announcements.filter(a=>a.id!==req.params.id); operationsStore.save(); auditStore.log({adminEmail:req.admin.email,action:'announcement_deleted',target:req.params.id}); res.json({ok:true}); });
+app.delete('/api/admin/announcements/:id', adminAuth.requireAdmin, adminAuth.requireRole('super_admin','admin'), async (req,res)=>{ await operationsStore.refresh();const s=operationsStore.store(),found=s.announcements.find(a=>a.id===req.params.id);if(found?.type==='security'&&req.admin.role!=='super_admin')return res.status(403).json({error:'Режим безпеки може вимкнути лише Super Admin'});s.announcements=s.announcements.filter(a=>a.id!==req.params.id);await operationsStore.saveNow();auditStore.log({adminEmail:req.admin.email,action:'announcement_deleted',target:req.params.id});res.json({ok:true}); });
 app.post('/api/admin/users/:email/note', adminAuth.requireAdmin, adminAuth.requireRole('super_admin','admin','support'), (req,res)=>{ const text=String(req.body?.text||'').trim(); if(!text) return res.status(400).json({error:'Введіть нотатку'}); const s=operationsStore.store(); (s.notes[req.params.email] ||= []).push({text:text.slice(0,1000),by:req.admin.email,createdAt:new Date().toISOString()}); operationsStore.save(); auditStore.log({adminEmail:req.admin.email,action:'user_note_added',target:req.params.email}); res.json({ok:true}); });
 app.post('/api/admin/blacklist', adminAuth.requireAdmin, adminAuth.requireRole('super_admin','admin'), (req,res)=>{ const {type,value}=req.body||{}; if(!['emails','iccids'].includes(type)||!value) return res.status(400).json({error:'Некоректні дані'}); const list=operationsStore.store().blacklist[type]; if(!list.includes(value)) list.push(value); operationsStore.save(); auditStore.log({adminEmail:req.admin.email,action:'blacklist_added',target:value}); res.json({ok:true}); });
 app.delete('/api/admin/blacklist/:type/:value', adminAuth.requireAdmin, adminAuth.requireRole('super_admin','admin'), (req,res)=>{ const list=operationsStore.store().blacklist[req.params.type]; if(!list) return res.status(400).json({error:'Некоректний список'}); operationsStore.store().blacklist[req.params.type]=list.filter(v=>v!==req.params.value); operationsStore.save(); res.json({ok:true}); });
@@ -1387,6 +1583,7 @@ app.get('/api/admin/users/:email', adminAuth.requireAdmin, (req, res) => {
     } : null,
     subscription: safeSubscription,
     security: { activeSessions: sessions, pushDevices },
+    billing: subscription ? {linked:Boolean(subscription.stripeCustomerId),customerId:subscription.stripeCustomerId||null,subscriptionId:subscription.stripeSubscriptionId||null,linkedAt:subscription.stripeProfileLinkedAt||null,lastCheckedAt:subscription.stripeProfileLastCheckedAt||null,source:subscription.stripeProfileSource||null,duplicateProfiles:Math.max(0,Number(subscription.stripeProfileCustomerCount||0)-1)} : {linked:false},
     notes: operationsStore.store().notes[email] || [],
     tickets: ticketStore.getTicketsByEmail(email),
   });
@@ -1408,17 +1605,20 @@ app.post('/api/admin/users/:email/sync-stripe-status', adminAuth.requireAdmin, a
   const user = getUser(email);
   if (!user && !authStore.readAll().users?.[email]) return res.status(404).json({ error:'Користувача не знайдено' });
   try {
-    const state = await getSubscriptionStateByEmail(email, user?.stripeCustomerId || null);
-    const status = state.active.length ? 'active' : 'canceled';
+    const profile=await recoverStripeProfile(email);
+    const state = await getSubscriptionStateByEmail(email, profile.customerId || user?.stripeCustomerId || null);
+    const status = state.active.length ? 'active' : state.subscriptions.length ? 'canceled' : (user?.status || 'registered');
     saveUser(email, {
       status,
       stripeCustomerIds: state.customerIds,
       stripeSubscriptionIds: state.subscriptions.map(subscription => subscription.id),
+      ...(profile.customerId?{stripeCustomerId:profile.customerId}:{}),
+      ...(profile.subscriptionId?{stripeSubscriptionId:profile.subscriptionId}:{}),
       stripeStatusSyncedAt: new Date().toISOString(),
       ...(status === 'canceled' ? { canceledAt:new Date().toISOString(), canceledReason:'stripe_sync' } : {}),
     });
     auditStore.log({ adminEmail:req.admin.email, action:'stripe_status_synchronized', target:email, details:{ status, customerIds:state.customerIds, subscriptions:state.subscriptions } });
-    res.json({ ok:true, status, activeSubscriptions:state.active.length, subscriptions:state.subscriptions });
+    res.json({ ok:true, status, linked:Boolean(profile.customerId), customerId:profile.customerId, duplicateProfiles:Math.max(0,profile.customerCount-1), activeSubscriptions:state.active.length, subscriptions:state.subscriptions });
   } catch (error) {
     res.status(502).json({ error:`Не вдалося перевірити Stripe: ${error.message}` });
   }
@@ -1437,10 +1637,40 @@ app.post('/api/admin/users/:email/sync-purchases', adminAuth.requireAdmin, admin
   }
 });
 
+app.get('/api/admin/mobile-topups', adminAuth.requireAdmin, adminAuth.requireRole('super_admin','admin','support','viewer'), (req,res)=>{
+  const canSeePhone=['super_admin','admin'].includes(req.admin.role);
+  const orders=Object.values(getAllUsers()).flatMap(user=>(user.mobileTopupOrders||[]).map(order=>({
+    ...safeMobileTopupOrder(order),
+    email:user.email,
+    phone:canSeePhone?order.phone:undefined,
+    providerTransactionId:order.providerTransactionId||null,
+    providerEnvironment:order.providerEnvironment||null,
+    stripeSessionId:order.stripeSessionId||null,
+  }))).sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt));
+  res.json({provider:mobileTopups.publicStatus(),orders,totals:{all:orders.length,awaitingPayment:orders.filter(item=>item.status==='awaiting_payment').length,processing:orders.filter(item=>item.status==='processing').length,delivered:orders.filter(item=>item.status==='delivered').length,failed:orders.filter(item=>['failed','checkout_failed'].includes(item.status)).length}});
+});
+
+app.post('/api/admin/mobile-topups/:orderId/retry',adminAuth.requireAdmin,adminAuth.requireRole('super_admin'),adminAuth.requirePermission('operations.manage',{requireTwoFactor:true}),async(req,res)=>{
+  const orderId=String(req.params.orderId||'');
+  const owner=Object.values(getAllUsers()).find(user=>(user.mobileTopupOrders||[]).some(order=>order.id===orderId));
+  const order=(owner?.mobileTopupOrders||[]).find(item=>item.id===orderId);
+  if(!owner||!order)return res.status(404).json({error:'Замовлення поповнення не знайдено'});
+  if(order.paymentStatus!=='paid'||!order.stripeSessionId)return res.status(409).json({error:'Повторити можна лише поповнення з підтвердженою оплатою Stripe'});
+  if(order.status==='delivered')return res.status(409).json({error:'Пакет уже доставлено. Повторна видача заблокована.'});
+  try{
+    const result=await fulfillMobileTopupOrder({email:owner.email,orderId,purchaseId:order.stripeSessionId});
+    auditStore.log({adminEmail:req.admin.email,action:'mobile_topup_retried',target:orderId,details:{email:owner.email,state:result.state,providerTransactionId:result.transaction?.id||result.order?.providerTransactionId||null}});
+    res.json({ok:true,state:result.state,order:safeMobileTopupOrder(result.order)});
+  }catch(error){
+    auditStore.log({adminEmail:req.admin.email,action:'mobile_topup_retry_failed',target:orderId,details:{email:owner.email,error:error.message,code:error.code}});
+    res.status(error.nonRetryable?409:502).json({error:error.message,code:error.code});
+  }
+});
+
 app.get('/api/admin/purchases', adminAuth.requireAdmin, adminAuth.requireRole('super_admin','admin','support','viewer'), (req, res) => {
   const purchases = Object.values(getAllUsers()).flatMap(user => (user.purchases || []).map(purchase => ({ ...purchase, email:user.email, accountStatus:user.status || null })))
     .sort((a,b) => new Date(b.paidAt || b.createdAt || 0) - new Date(a.paidAt || a.createdAt || 0));
-  res.json({ purchases, totals:{ purchases:purchases.length, paid:purchases.filter(item=>item.paymentStatus==='paid').length, failed:purchases.filter(item=>item.fulfillmentStatus==='failed').length, provisioned:purchases.filter(item=>item.fulfillmentStatus==='provisioned').length } });
+  res.json({ purchases, totals:{ purchases:purchases.length, paid:purchases.filter(item=>item.paymentStatus==='paid').length, failed:purchases.filter(item=>item.fulfillmentStatus==='failed').length, provisioned:purchases.filter(item=>item.fulfillmentStatus==='provisioned').length, delivered:purchases.filter(item=>item.fulfillmentStatus==='delivered').length, fulfilled:purchases.filter(item=>['provisioned','delivered'].includes(item.fulfillmentStatus)).length, mobileTopups:purchases.filter(item=>item.kind==='mobile_topup').length } });
 });
 
 app.get('/api/admin/plan-changes', adminAuth.requireAdmin, adminAuth.requireRole('super_admin','admin','support','viewer'), (req, res) => {
@@ -1657,7 +1887,8 @@ app.post('/api/admin/users/:email/custom-package-checkout', adminAuth.requireAdm
   if (!Number.isInteger(Number(amountCents)) || Number(amountCents) < 50 || Number(amountCents) > 1000000) return res.status(400).json({ error: 'Вкажіть ціну в центах: від $0.50 до $10,000' });
   if (!/^[a-z]{3}$/i.test(currency)) return res.status(400).json({ error: 'Некоректна валюта' });
   try {
-    const session = await createCustomPackageCheckout({ email, packageCode: String(packageCode), packageName: String(packageName).trim(), amountCents: Number(amountCents), currency: String(currency).toLowerCase(), dataLimitGb, durationDays, location });
+    const profile=await recoverStripeProfile(email);
+    const session = await createCustomPackageCheckout({ email, customerId:profile.customerId||user.stripeCustomerId||null, packageCode: String(packageCode), packageName: String(packageName).trim(), amountCents: Number(amountCents), currency: String(currency).toLowerCase(), dataLimitGb, durationDays, location });
     auditStore.log({ adminEmail: req.admin.email, action: 'custom_package_checkout_created', target: email, details: { packageCode, amountCents, currency } });
     res.json({ ok: true, url: session.url });
   } catch (error) { res.status(502).json({ error: error.message }); }
@@ -1896,7 +2127,8 @@ app.post('/api/create-subscription', requireUserSession,requireFeature('monthlyP
     if (!plan) return res.status(400).json({ error: 'Потрібен plan' });
     if (operationsStore.store().blacklist.emails.includes(email.toLowerCase())) return res.status(403).json({ error: 'Цей email недоступний для оплати' });
 
-    const session = await createCheckoutSession({ email, plan });
+    const recovered=await recoverStripeProfile(email).catch(()=>({customerId:currentUser?.stripeCustomerId||null}));
+    const session = await createCheckoutSession({ email, plan, customerId:recovered.customerId||currentUser?.stripeCustomerId||null });
     // Do not change the current subscription before Stripe confirms payment.
     // If the customer closes Checkout, their existing plan and eSIM stay intact.
     res.json({ url: session.url });
@@ -2007,6 +2239,31 @@ app.post('/api/webhook', async (req, res) => {
     if(session.payment_status!=='paid'){
       await storage.finishExternalEvent('stripe',event.id,'ignored',`payment_status:${session.payment_status||'unknown'}`);
       return res.json({received:true,fulfilled:false,paymentStatus:session.payment_status||null});
+    }
+    if(session.metadata?.purchaseKind==='mobile_topup'){
+      const email=String(session.metadata.email||'').trim().toLowerCase();
+      const orderId=String(session.metadata.mobileTopupOrderId||'');
+      const stored=getMobileTopupOrder(email,orderId);
+      if(!stored||stored.stripeSessionId!==session.id){
+        await storage.finishExternalEvent('stripe',event.id,'failed','mobile_topup_order_mismatch');
+        recordDiagnostic(req,{email,source:'stripe',type:'mobile_topup',action:'paid_order_validation',outcome:'failed',severity:'critical',message:'Paid mobile top-up did not match a protected local order',errorCode:'TOPUP_ORDER_MISMATCH',purchaseId:session.id,context:{orderId}});
+        return res.status(409).json({received:true,fulfilled:false,error:'TOPUP_ORDER_MISMATCH'});
+      }
+      const paidAt=new Date((session.created||Math.floor(Date.now()/1000))*1000).toISOString();
+      let order=upsertMobileTopupOrder(email,orderId,{status:stored.status==='delivered'?'delivered':'paid',paymentStatus:'paid',paidAt,stripeCustomerId:typeof session.customer==='string'?session.customer:session.customer?.id||null,stripePaymentIntentId:typeof session.payment_intent==='string'?session.payment_intent:session.payment_intent?.id||null});
+      const defaults=mobileTopupPurchaseDefaults(order,session);
+      saveUser(email,{stripeCustomerId:defaults.stripeCustomerId||getUser(email)?.stripeCustomerId||null});
+      upsertPurchase(email,session.id,{fulfillmentStatus:order.status==='delivered'?'delivered':'processing',fulfillmentError:null},defaults);
+      recordDiagnostic(req,{email,source:'stripe',type:'mobile_topup',action:'payment_confirmed',outcome:'success',severity:'info',message:'Stripe confirmed mobile data top-up payment',purchaseId:session.id,context:{orderId,productId:order.productId,operatorId:order.operatorId,amountCents:session.amount_total??null,currency:session.currency||null,phone:maskPhone(order.phone)}});
+      try{
+        const result=await fulfillMobileTopupOrder({email,orderId,purchaseId:session.id});
+        recordDiagnostic(req,{email,source:'dtone',type:'mobile_topup',action:'delivery',outcome:result.state==='delivered'?'success':'pending',severity:'info',message:result.state==='delivered'?'Mobile data bundle delivered':'Mobile data bundle is processing',purchaseId:session.id,context:{orderId,providerTransactionId:result.transaction?.id||result.order?.providerTransactionId||null}});
+      }catch(error){
+        recordDiagnostic(req,{email,source:'dtone',type:'mobile_topup',action:'delivery',outcome:'failed',severity:'error',message:error.message,errorCode:error.code||'TOPUP_DELIVERY_FAILED',purchaseId:session.id,context:{orderId}});
+      }
+      await deliverPurchaseReceipt(email,session.id,defaults);
+      await storage.finishExternalEvent('stripe',event.id,'completed');
+      return res.json({received:true,mobileTopup:true});
     }
     const email = session.metadata.email;
     const plan = session.metadata.plan;
@@ -2282,8 +2539,13 @@ app.get('/api/billing', requireUserSession, async (req, res) => {
   }
 });
 
+app.get('/api/account/billing-profile',requireUserSession,async(req,res)=>{
+  try{const profile=await recoverStripeProfile(req.userEmail);res.json({linked:Boolean(profile.customerId),activeSubscription:profile.activeSubscription,subscriptionStatus:profile.subscriptionStatus,paidInvoiceCount:profile.paidInvoiceCount,duplicateProfiles:Math.max(0,profile.customerCount-1),customerReference:profile.customerId?`…${profile.customerId.slice(-8)}`:null});}
+  catch(error){console.error('[billing profile]',error.message);res.status(502).json({error:'Не вдалося перевірити платіжний профіль'});}
+});
+
 app.post('/api/billing/portal',requireUserSession,rateLimit('billing_portal',15*60*1000,10,req=>req.userEmail),async(req,res)=>{
-  try{const user=getUser(req.userEmail);if(!user?.stripeCustomerId)return res.status(404).json({error:'Платіжний профіль не знайдено'});const session=await createBillingPortalSession(user.stripeCustomerId);res.json({url:session.url});}
+  try{const profile=await recoverStripeProfile(req.userEmail);if(!profile.customerId)return res.status(404).json({error:'У Stripe ще немає платіжного профілю для цього акаунта. Він створиться автоматично під час першої оплати.'});const session=await createBillingPortalSession(profile.customerId);res.json({url:session.url,recovered:profile.source!=='stored_or_purchase'});}
   catch(error){console.error('[billing portal]',error.message);res.status(502).json({error:'Не вдалося відкрити керування оплатою'});}
 });
 
@@ -2344,7 +2606,8 @@ app.get('/api/account/billing-history', requireUserSession, async (req, res) => 
       detail:[purchase.location, purchase.dataLimitGb == null ? null : `${purchase.dataLimitGb} ГБ`, purchase.durationDays ? `${purchase.durationDays} днів` : null].filter(Boolean).join(' · '),
       receiptUrl:purchase.receiptUrl || null, receiptEmailSentAt:purchase.receiptEmailSentAt || null,
     }));
-    const stripeInvoices = user?.stripeCustomerId ? await getBillingHistory(user.stripeCustomerId) : [];
+    const profile=await recoverStripeProfile(req.userEmail).catch(()=>({customerId:user?.stripeCustomerId||null}));
+    const stripeInvoices = profile.customerId ? await getBillingHistory(profile.customerId) : [];
     const combined = [...local, ...stripeInvoices.filter(invoice => !local.some(item => item.id === invoice.id))]
       .sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt));
     res.json({ invoices:combined });

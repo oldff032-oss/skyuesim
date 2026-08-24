@@ -30,8 +30,8 @@ if (-not $Push) {
 }
 
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) { throw 'Git is not installed.' }
-$insideRepository = (& git rev-parse --is-inside-work-tree 2>$null)
-if ($insideRepository -ne 'true') {
+$insideRepository = Test-Path -LiteralPath (Join-Path $projectRoot '.git') -PathType Container
+if (-not $insideRepository) {
   Write-Host 'Preparing this extracted folder for GitHub...'
   & git init -b $Branch
   if ($LASTEXITCODE -ne 0) { throw 'Could not initialize Git in this folder.' }
@@ -41,8 +41,12 @@ if ($insideRepository -ne 'true') {
   if ($LASTEXITCODE -ne 0) { throw 'Could not download the current GitHub branch.' }
   & git reset "$Remote/$Branch"
   if ($LASTEXITCODE -ne 0) { throw 'Could not prepare the current GitHub history.' }
-} elseif (-not (& git remote get-url $Remote 2>$null)) {
-  & git remote add $Remote $RepositoryUrl
+} else {
+  $knownRemotes = @(& git remote)
+  if ($knownRemotes -notcontains $Remote) {
+    & git remote add $Remote $RepositoryUrl
+    if ($LASTEXITCODE -ne 0) { throw 'Could not connect the GitHub repository.' }
+  }
 }
 $currentBranch = (git branch --show-current).Trim()
 if (-not $currentBranch) { & git switch -c $Branch; $currentBranch=$Branch }

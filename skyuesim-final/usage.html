@@ -15,10 +15,15 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Сигнал">
+<style>
+.usage-track{position:relative;overflow:hidden}.usage-track::after{content:"";position:absolute;inset:0;background:linear-gradient(105deg,transparent 25%,rgba(255,255,255,.34) 48%,transparent 70%);transform:translateX(-110%);animation:usageShine 2.8s ease-in-out infinite}.usage-fill{width:var(--usage-pct)!important;transform-origin:left center;animation:usageGrow 1.15s cubic-bezier(.2,.85,.25,1) .16s both;box-shadow:0 0 18px rgba(34,213,255,.38)}
+.history-chart{height:100px;display:flex;align-items:flex-end;gap:6px;margin-top:16px;padding:8px 4px 0;border-bottom:1px solid rgba(130,150,200,.16)}.history-bar{position:relative;flex:1;min-width:7px;height:var(--bar-height);transform-origin:center bottom;border-radius:7px 7px 3px 3px;background:linear-gradient(180deg,#36e4f5 0%,#3e91ff 60%,#6958ff 100%);box-shadow:0 0 15px rgba(48,188,255,.2);animation:barRise .75s cubic-bezier(.2,.85,.3,1) both}.history-bar::after{content:"";position:absolute;inset:1px 2px auto;height:28%;border-radius:6px;background:linear-gradient(rgba(255,255,255,.35),transparent)}
+@keyframes usageGrow{from{transform:scaleX(0)}to{transform:scaleX(1)}}@keyframes usageShine{0%,35%{transform:translateX(-110%)}70%,100%{transform:translateX(110%)}}@keyframes barRise{from{transform:scaleY(0);opacity:.25}to{transform:scaleY(1);opacity:1}}
+</style>
 </head>
 <body class="has-bottomnav">
   <div class="wrap">
-    <div class="brand"><div class="mark">📶</div><span>Сигнал</span></div>
+    <div class="brand"><div class="mark">S</div><span>Signal</span></div>
     <h1 style="margin-top:20px;">Витрати трафіку</h1>
     <p class="lead">Скільки даних ти використав(ла) цього циклу</p>
 
@@ -26,12 +31,7 @@
     <div id="content" style="display:none;"></div>
   </div>
 
-  <nav class="bottomnav">
-    <a href="dashboard.html"><span class="ic">🏠</span>Головна</a>
-    <a href="plans.html"><span class="ic">📶</span>Тариф</a>
-    <a href="usage.html" class="active"><span class="ic">📊</span>Витрати</a>
-    <a href="profile.html"><span class="ic">👤</span>Профіль</a>
-  </nav>
+  <nav class="bottomnav" aria-label="Головна навігація"><a href="dashboard.html" aria-label="Головна" title="Головна" data-nav="dashboard"><span class="nav-icon" aria-hidden="true"><img class="nav-art" src="nav-home-v2.png" alt=""></span></a><a href="plans.html" aria-label="Тарифи" title="Тарифи" data-nav="plans"><span class="nav-icon" aria-hidden="true"><img class="nav-art" src="nav-plans-v2.png" alt=""></span></a><a href="usage.html" class="active" aria-label="Витрати" title="Витрати" data-nav="usage"><span class="nav-icon" aria-hidden="true"><img class="nav-art" src="nav-usage-v2.png" alt=""></span></a><a href="profile.html" aria-label="Профіль" title="Профіль" data-nav="profile"><span class="nav-icon" aria-hidden="true"><img class="nav-art" src="nav-profile-v2.png" alt=""></span></a></nav>
 
   <script src="config.js"></script>
   <script>
@@ -148,7 +148,7 @@
           const history = (historyData.history || []).slice(-14);
           if(history.length){
             const max = Math.max(...history.map(item => Number(item.usedGb) || 0), 0.01);
-            historyHtml = `<div class="card"><div class="usage-top"><span>Історія використання</span><b>${history.length} дн.</b></div><div style="height:86px;display:flex;align-items:flex-end;gap:5px;margin-top:14px;">${history.map(item => `<div title="${item.day}: ${item.usedGb} ГБ" style="flex:1;min-width:7px;height:${Math.max(7,Math.round((Number(item.usedGb)||0)/max*100))}%;border-radius:5px 5px 2px 2px;background:linear-gradient(180deg,var(--cyan),var(--blue));"></div>`).join('')}</div><p class="muted" style="font-size:11px;margin-top:9px;">Точки зберігаються після оновлення даних у застосунку.</p></div>`;
+            historyHtml = `<div class="card"><div class="usage-top"><span>Історія використання</span><b>${history.length} дн.</b></div><div class="history-chart">${history.map((item,index) => `<div class="history-bar" title="${item.day}: ${item.usedGb} ГБ" style="--bar-height:${Math.max(8,Math.round((Number(item.usedGb)||0)/max*100))}%;animation-delay:${120+index*55}ms"></div>`).join('')}</div><p class="muted" style="font-size:11px;margin-top:9px;">Точки зберігаються після оновлення даних у застосунку.</p></div>`;
           }
         }catch(e){}
 
@@ -157,7 +157,7 @@
 
           <div class="card">
             <div class="usage-top"><span>Використано</span><b>${formatBytes(usedBytes)}${totalBytes!=null?` / ${formatBytes(totalBytes)}`:' · безліміт'}</b></div>
-            ${limitGb ? `<div class="usage-track"><div class="usage-fill" style="width:${pct}%; ${isLow ? 'background:linear-gradient(90deg,#f5a623,var(--danger));' : ''}"></div></div>` : ''}
+            ${limitGb ? `<div class="usage-track"><div class="usage-fill" style="--usage-pct:${pct}%;${isLow ? 'background:linear-gradient(90deg,#f5a623,var(--danger));' : ''}"></div></div>` : ''}
             ${remainingBytes != null ? `<p class="muted" style="margin-top:12px;">Залишилось: <b style="color:var(--text);">${formatBytes(remainingBytes)}</b></p>` : ''}
             <p class="muted" style="margin-top:8px;font-size:11px;word-break:break-word;">Точне значення провайдера: ${Number(usedBytes||0).toLocaleString('uk-UA')} байт використано${totalBytes!=null?` із ${Number(totalBytes).toLocaleString('uk-UA')} байт`:''}.</p>
             ${apn ? `<p class="muted" style="margin-top:14px;">📡 Мережа: <span style="color:var(--text);">${apn}</span></p>` : ''}

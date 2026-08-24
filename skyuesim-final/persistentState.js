@@ -106,6 +106,19 @@ async function consumeRateLimit(key, windowMs, maximum) {
   const item=result.rows[0],started=new Date(item.window_started).getTime();return {allowed:Number(item.count)<=maximum,count:Number(item.count),retryAfterMs:Math.max(0,started+windowMs-now)};
 }
 
+async function reload(name, fallback) {
+  if (!ready) throw new Error('Persistent storage has not been initialized');
+  const pending = writes.get(name);
+  if (pending) await pending.catch(() => undefined);
+  let value = fallback;
+  if (pool) {
+    const result = await pool.query('SELECT value FROM public.app_state WHERE key = $1', [name]);
+    value = result.rowCount ? result.rows[0].value : fallback;
+  } else value = readLocal(name, fallback);
+  states.set(name, value);
+  return value;
+}
+
 async function claimExternalEvent(provider,eventId,eventType){
   const key=`${provider}:${eventId}`;
   if(!pool){const existing=localExternalEvents.get(key);if(existing&&existing.status!=='failed')return false;localExternalEvents.set(key,{status:'processing',eventType,attempts:Number(existing?.attempts||0)+1});return true;}
@@ -118,4 +131,4 @@ async function finishExternalEvent(provider,eventId,status='completed',error=nul
   await pool.query('UPDATE public.external_events SET status=$3,error=$4,updated_at=NOW() WHERE provider=$1 AND event_id=$2',[provider,eventId,status,error?String(error).slice(0,1000):null]);
 }
 
-module.exports = { init, load, save, snapshot, saveNow, restoreMany, consumeRateLimit, claimExternalEvent, finishExternalEvent };
+module.exports = { init, load, reload, save, snapshot, saveNow, restoreMany, consumeRateLimit, claimExternalEvent, finishExternalEvent };

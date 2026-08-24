@@ -61,12 +61,7 @@
 
   <div id="changeModal" class="change-modal" onclick="if(event.target===this)closeChangeModal()"><section class="glass change-card"><div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start"><div><div class="package-location">ЗМІНА АКТИВНОГО ТАРИФУ</div><h2 id="changeTitle" style="margin-top:7px">Новий пакет</h2></div><button class="btn ghost" style="width:auto;padding:8px 11px" onclick="closeChangeModal()">✕</button></div><p id="currentPlanText" class="muted" style="font-size:12px;line-height:1.5;margin-top:10px"></p><button class="change-option" onclick="confirmPlanChange('after_expiry')"><b>🗓 Після завершення поточного — рекомендовано</b><span>Новий пакет оплачується зараз, стає в чергу та активується у дату завершення. Поточна eSIM працює до кінця, а Stripe-підписка не поновлюється.</span></button><button class="change-option" onclick="confirmPlanChange('immediate')"><b>⚡ Змінити зараз</b><span>Спочатку видається нова eSIM. Лише після успішної видачі стара Stripe-підписка скасовується. Невикористаний залишок старого пакета може згоріти.</span></button><button class="btn ghost" style="margin-top:12px" onclick="closeChangeModal()">Не змінювати</button><p class="catalog-note">Якщо нова eSIM не видасться, стара не буде автоматично вимкнена. Оплачена помилка з’явиться в адмінці для retry або refund.</p></section></div>
 
-  <nav class="bottomnav">
-    <a href="dashboard.html"><span class="ic">🏠</span>Головна</a>
-    <a href="plans.html" class="active"><span class="ic">📶</span>Тариф</a>
-    <a href="usage.html"><span class="ic">📊</span>Витрати</a>
-    <a href="profile.html"><span class="ic">👤</span>Профіль</a>
-  </nav>
+  <nav class="bottomnav" aria-label="Головна навігація"><a href="dashboard.html" aria-label="Головна" title="Головна" data-nav="dashboard"><span class="nav-icon" aria-hidden="true"><img class="nav-art" src="nav-home-v2.png" alt=""></span></a><a href="plans.html" class="active" aria-label="Тарифи" title="Тарифи" data-nav="plans"><span class="nav-icon" aria-hidden="true"><img class="nav-art" src="nav-plans-v2.png" alt=""></span></a><a href="usage.html" aria-label="Витрати" title="Витрати" data-nav="usage"><span class="nav-icon" aria-hidden="true"><img class="nav-art" src="nav-usage-v2.png" alt=""></span></a><a href="profile.html" aria-label="Профіль" title="Профіль" data-nav="profile"><span class="nav-icon" aria-hidden="true"><img class="nav-art" src="nav-profile-v2.png" alt=""></span></a></nav>
   <script src="config.js"></script>
   <script>
     const sessionToken=localStorage.getItem('signal_session_token');

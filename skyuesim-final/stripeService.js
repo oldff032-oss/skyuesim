@@ -16,13 +16,13 @@ const PRICE_MAP = {
 // Створює Stripe Checkout Session — сторінку оплати, на яку ти
 // перенаправляєш користувача. Stripe сам показує форму картки,
 // перевіряє її і починає щомісячне списання.
-async function createCheckoutSession({ email, plan }) {
+async function createCheckoutSession({ email, plan, customerId = null }) {
   const priceId = PRICE_MAP[plan];
   if (!priceId) throw new Error(`Невідомий тариф: ${plan}`);
 
   const session = await stripe.checkout.sessions.create({
     mode: 'subscription',
-    customer_email: email,
+    ...(customerId ? { customer:customerId } : { customer_email:email }),
     line_items: [{ price: priceId, quantity: 1 }],
     success_url: `${process.env.FRONTEND_URL}/installing.html?session_id={CHECKOUT_SESSION_ID}`,
     cancel_url: `${process.env.FRONTEND_URL}/plans.html`,
@@ -57,17 +57,40 @@ async function getNextBillingDate(subscriptionId) {
   return sub.current_period_end ? new Date(sub.current_period_end * 1000).toISOString() : null;
 }
 
-async function createCustomPackageCheckout({ email, packageCode, packageName, amountCents, currency = 'usd', dataLimitGb = null, durationDays = null, location = '', changeMode = '', previousPlan = '', previousSubscriptionId = '', scheduledFor = '' }) {
+async function createCustomPackageCheckout({ email, customerId = null, packageCode, packageName, amountCents, currency = 'usd', dataLimitGb = null, durationDays = null, location = '', changeMode = '', previousPlan = '', previousSubscriptionId = '', scheduledFor = '' }) {
   const session = await stripe.checkout.sessions.create({
     mode: 'payment',
-    customer_email: email,
-    customer_creation: 'always',
+    ...(customerId ? { customer:customerId } : { customer_email:email, customer_creation:'always' }),
     line_items: [{ price_data: { currency, product_data: { name: packageName }, unit_amount: amountCents }, quantity: 1 }],
     success_url: `${process.env.FRONTEND_URL}/installing.html?session_id={CHECKOUT_SESSION_ID}`,
     cancel_url: `${process.env.FRONTEND_URL}/profile.html`,
     metadata: { plan: 'custom', email, packageCode, packageName, dataLimitGb: dataLimitGb == null ? '' : String(dataLimitGb), durationDays: durationDays == null ? '' : String(durationDays), location: String(location || '').slice(0,80), changeMode:String(changeMode||'').slice(0,30), previousPlan:String(previousPlan||'').slice(0,40), previousSubscriptionId:String(previousSubscriptionId||'').slice(0,100), scheduledFor:String(scheduledFor||'').slice(0,40) },
   });
   return session;
+}
+
+async function createMobileTopupCheckout({ email, customerId = null, orderId, productName, amountCents, currency = 'usd' }) {
+  if (!/^topup_[A-Za-z0-9_-]{8,60}$/.test(String(orderId || ''))) throw new Error('Некоректне замовлення поповнення');
+  if (!Number.isInteger(Number(amountCents)) || Number(amountCents) < 50) throw new Error('Некоректна сума поповнення');
+  const safeCurrency = String(currency || '').toLowerCase();
+  if (!/^[a-z]{3}$/.test(safeCurrency)) throw new Error('Некоректна валюта поповнення');
+  return stripe.checkout.sessions.create({
+    mode: 'payment',
+    ...(customerId ? { customer:customerId } : { customer_email:email, customer_creation:'always' }),
+    line_items: [{
+      price_data: {
+        currency:safeCurrency,
+        product_data: { name:String(productName || 'Поповнення мобільного інтернету').slice(0,120) },
+        unit_amount:Number(amountCents),
+      },
+      quantity:1,
+    }],
+    success_url: `${process.env.FRONTEND_URL}/mobile-topup.html?checkout=success&order_id=${encodeURIComponent(orderId)}`,
+    cancel_url: `${process.env.FRONTEND_URL}/mobile-topup.html?checkout=cancelled&order_id=${encodeURIComponent(orderId)}`,
+    // The phone number is deliberately stored only in our protected user
+    // record. Stripe receives the opaque order identifier, never the number.
+    metadata: { purchaseKind:'mobile_topup', mobileTopupOrderId:String(orderId), packageName:String(productName||'Поповнення мобільного інтернету').slice(0,120), email },
+  });
 }
 
 async function getBillingHistory(customerId) {
@@ -165,9 +188,9 @@ async function listCompletedCheckoutPurchasesByEmail(email, knownCustomerId = nu
     .sort((a,b) => b.created - a.created)
     .map(session => ({
       id:session.id,
-      kind:session.metadata?.plan === 'custom' ? 'custom_package' : 'subscription',
-      plan:session.metadata?.plan || null,
-      packageCode:session.metadata?.packageCode || null,
+      kind:session.metadata?.purchaseKind === 'mobile_topup' ? 'mobile_topup' : session.metadata?.plan === 'custom' ? 'custom_package' : 'subscription',
+      plan:session.metadata?.purchaseKind === 'mobile_topup' ? 'mobile_topup' : session.metadata?.plan || null,
+      packageCode:session.metadata?.purchaseKind === 'mobile_topup' ? session.metadata?.mobileTopupOrderId || null : session.metadata?.packageCode || null,
       packageName:session.metadata?.packageName || session.metadata?.plan || 'Stripe purchase',
       dataLimitGb:session.metadata?.dataLimitGb ? Number(session.metadata.dataLimitGb) : ({basic:10,standard:20,unlimited:null}[session.metadata?.plan] ?? null),
       durationDays:session.metadata?.durationDays ? Number(session.metadata.durationDays) : (session.metadata?.plan && session.metadata.plan !== 'custom' ? 30 : null),
@@ -252,4 +275,30 @@ function constructWebhookEvent(rawBody, signature) {
   );
 }
 
-module.exports = { createCheckoutSession, createCustomPackageCheckout, createBillingPortalSession, cancelSubscription, cancelSubscriptionAtPeriodEnd, cancelAllSubscriptionsForCustomers, deleteStripeCustomer, constructWebhookEvent, getNextBillingDate, getBillingHistory, getRecoveryPaymentEvidence, findCustomerIdsByEmail, getCustomerEmail, getSubscriptionStateByEmail, listCompletedCheckoutPurchasesByEmail, getCheckoutPurchaseDetails, listRefundablePaymentsByEmail, refundPayment };
+async function resolveStripeCustomerProfile({ email, knownCustomerId = null, purchaseCustomerIds = [] }) {
+  const normalizedEmail=String(email||'').trim().toLowerCase();
+  const preferred=[knownCustomerId,...purchaseCustomerIds].filter(Boolean);
+  const listed=normalizedEmail ? await stripe.customers.list({email:normalizedEmail,limit:100}) : {data:[]};
+  const candidateIds=[...new Set([...preferred,...listed.data.map(customer=>customer.id)])];
+  const candidates=[];
+  for(const id of candidateIds){
+    try{
+      const customer=listed.data.find(item=>item.id===id)||await stripe.customers.retrieve(id);
+      if(!customer||customer.deleted)continue;
+      const [subscriptions,invoices]=await Promise.all([
+        stripe.subscriptions.list({customer:id,status:'all',limit:20}),
+        stripe.invoices.list({customer:id,limit:20}),
+      ]);
+      const active=subscriptions.data.filter(subscription=>!['canceled','incomplete_expired'].includes(subscription.status));
+      const paidInvoices=invoices.data.filter(invoice=>invoice.status==='paid'&&invoice.amount_paid>0);
+      candidates.push({id,email:String(customer.email||'').trim().toLowerCase()||null,created:customer.created||0,subscriptions:subscriptions.data,active,paidInvoices,preferred:preferred.includes(id)});
+    }catch(error){if(error?.code!=='resource_missing')throw error;}
+  }
+  candidates.sort((a,b)=>Number(b.preferred)-Number(a.preferred)||b.active.length-a.active.length||b.paidInvoices.length-a.paidInvoices.length||b.subscriptions.length-a.subscriptions.length||b.created-a.created);
+  const selected=candidates[0];
+  if(!selected)return {customerId:null,subscriptionId:null,subscriptionStatus:null,activeSubscription:false,customerCount:0,paidInvoiceCount:0,source:'none'};
+  const subscription=selected.active[0]||selected.subscriptions[0]||null;
+  return {customerId:selected.id,subscriptionId:subscription?.id||null,subscriptionStatus:subscription?.status||null,activeSubscription:Boolean(selected.active.length),customerCount:candidates.length,paidInvoiceCount:selected.paidInvoices.length,source:selected.preferred?'stored_or_purchase':'verified_email'};
+}
+
+module.exports = { createCheckoutSession, createCustomPackageCheckout, createMobileTopupCheckout, createBillingPortalSession, cancelSubscription, cancelSubscriptionAtPeriodEnd, cancelAllSubscriptionsForCustomers, deleteStripeCustomer, constructWebhookEvent, getNextBillingDate, getBillingHistory, getRecoveryPaymentEvidence, findCustomerIdsByEmail, resolveStripeCustomerProfile, getCustomerEmail, getSubscriptionStateByEmail, listCompletedCheckoutPurchasesByEmail, getCheckoutPurchaseDetails, listRefundablePaymentsByEmail, refundPayment };
