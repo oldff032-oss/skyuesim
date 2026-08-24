@@ -69,6 +69,30 @@ async function createCustomPackageCheckout({ email, customerId = null, packageCo
   return session;
 }
 
+async function createMobileTopupCheckout({ email, customerId = null, orderId, productName, amountCents, currency = 'usd' }) {
+  if (!/^topup_[A-Za-z0-9_-]{8,60}$/.test(String(orderId || ''))) throw new Error('Некоректне замовлення поповнення');
+  if (!Number.isInteger(Number(amountCents)) || Number(amountCents) < 50) throw new Error('Некоректна сума поповнення');
+  const safeCurrency = String(currency || '').toLowerCase();
+  if (!/^[a-z]{3}$/.test(safeCurrency)) throw new Error('Некоректна валюта поповнення');
+  return stripe.checkout.sessions.create({
+    mode: 'payment',
+    ...(customerId ? { customer:customerId } : { customer_email:email, customer_creation:'always' }),
+    line_items: [{
+      price_data: {
+        currency:safeCurrency,
+        product_data: { name:String(productName || 'Поповнення мобільного інтернету').slice(0,120) },
+        unit_amount:Number(amountCents),
+      },
+      quantity:1,
+    }],
+    success_url: `${process.env.FRONTEND_URL}/mobile-topup.html?checkout=success&order_id=${encodeURIComponent(orderId)}`,
+    cancel_url: `${process.env.FRONTEND_URL}/mobile-topup.html?checkout=cancelled&order_id=${encodeURIComponent(orderId)}`,
+    // The phone number is deliberately stored only in our protected user
+    // record. Stripe receives the opaque order identifier, never the number.
+    metadata: { purchaseKind:'mobile_topup', mobileTopupOrderId:String(orderId), packageName:String(productName||'Поповнення мобільного інтернету').slice(0,120), email },
+  });
+}
+
 async function getBillingHistory(customerId) {
   const invoices = await stripe.invoices.list({ customer: customerId, limit: 20 });
   return invoices.data.map((invoice) => ({
@@ -164,9 +188,9 @@ async function listCompletedCheckoutPurchasesByEmail(email, knownCustomerId = nu
     .sort((a,b) => b.created - a.created)
     .map(session => ({
       id:session.id,
-      kind:session.metadata?.plan === 'custom' ? 'custom_package' : 'subscription',
-      plan:session.metadata?.plan || null,
-      packageCode:session.metadata?.packageCode || null,
+      kind:session.metadata?.purchaseKind === 'mobile_topup' ? 'mobile_topup' : session.metadata?.plan === 'custom' ? 'custom_package' : 'subscription',
+      plan:session.metadata?.purchaseKind === 'mobile_topup' ? 'mobile_topup' : session.metadata?.plan || null,
+      packageCode:session.metadata?.purchaseKind === 'mobile_topup' ? session.metadata?.mobileTopupOrderId || null : session.metadata?.packageCode || null,
       packageName:session.metadata?.packageName || session.metadata?.plan || 'Stripe purchase',
       dataLimitGb:session.metadata?.dataLimitGb ? Number(session.metadata.dataLimitGb) : ({basic:10,standard:20,unlimited:null}[session.metadata?.plan] ?? null),
       durationDays:session.metadata?.durationDays ? Number(session.metadata.durationDays) : (session.metadata?.plan && session.metadata.plan !== 'custom' ? 30 : null),
@@ -277,4 +301,4 @@ async function resolveStripeCustomerProfile({ email, knownCustomerId = null, pur
   return {customerId:selected.id,subscriptionId:subscription?.id||null,subscriptionStatus:subscription?.status||null,activeSubscription:Boolean(selected.active.length),customerCount:candidates.length,paidInvoiceCount:selected.paidInvoices.length,source:selected.preferred?'stored_or_purchase':'verified_email'};
 }
 
-module.exports = { createCheckoutSession, createCustomPackageCheckout, createBillingPortalSession, cancelSubscription, cancelSubscriptionAtPeriodEnd, cancelAllSubscriptionsForCustomers, deleteStripeCustomer, constructWebhookEvent, getNextBillingDate, getBillingHistory, getRecoveryPaymentEvidence, findCustomerIdsByEmail, resolveStripeCustomerProfile, getCustomerEmail, getSubscriptionStateByEmail, listCompletedCheckoutPurchasesByEmail, getCheckoutPurchaseDetails, listRefundablePaymentsByEmail, refundPayment };
+module.exports = { createCheckoutSession, createCustomPackageCheckout, createMobileTopupCheckout, createBillingPortalSession, cancelSubscription, cancelSubscriptionAtPeriodEnd, cancelAllSubscriptionsForCustomers, deleteStripeCustomer, constructWebhookEvent, getNextBillingDate, getBillingHistory, getRecoveryPaymentEvidence, findCustomerIdsByEmail, resolveStripeCustomerProfile, getCustomerEmail, getSubscriptionStateByEmail, listCompletedCheckoutPurchasesByEmail, getCheckoutPurchaseDetails, listRefundablePaymentsByEmail, refundPayment };

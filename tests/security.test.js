@@ -190,7 +190,7 @@ test('maintenance support works without account unlock and remains rate limited'
 test('service worker bypasses stale cache for maintenance and localization assets', () => {
   const worker=read('sw.js');
   const support=read('support.html');
-  assert.match(worker, /signal-shell-v56-active-notice-check/);
+  assert.match(worker, /signal-shell-v57-mobile-topups/);
   assert.match(worker, /fetch\(event\.request, \{ cache:'no-store' \}\)/);
   assert.match(worker, /'\/i18n\.js'/);
   assert.match(worker, /'\/style\.css'/);
@@ -323,7 +323,7 @@ test('bottom navigation always identifies usage and charts stay visible without 
   assert.match(css, /nav-art/);
   assert.match(css, /clip:rect\(0,0,0,0\)/);
   assert.match(pwa, /setAttribute\('aria-label',label\)/);
-  assert.match(pwa, /\/sw\.js\?v=56/);
+  assert.match(pwa, /\/sw\.js\?v=57/);
   for(const marker of ['nav-home-v2.png','nav-plans-v2.png','nav-usage-v2.png','nav-profile-v2.png']) assert.match(pwa,new RegExp(marker.replace('.', '\\.')));
   assert.doesNotMatch(css, /navBreathe[\s\S]{0,80}infinite/);
   assert.match(headers, /\/pwa\.js[\s\S]*Cache-Control: no-store/);
@@ -356,4 +356,28 @@ test('marketing broadcasts only target explicit opt-ins',()=>{
   const server=read('server.js'),settings=read('account-settings.html');
   assert.match(server,/preferences\?\.marketingEmails===true/);
   assert.match(settings,/Новини та пропозиції email/);
+});
+
+test('physical SIM data top-ups are server-priced, authenticated, and fulfilled only after Stripe payment',()=>{
+  const server=read('server.js'),stripe=read('stripeService.js'),provider=read('mobileTopupService.js'),page=read('mobile-topup.html');
+  for(const route of ['/api/mobile-topups/status','/api/mobile-topups/countries','/api/mobile-topups/operators','/api/mobile-topups/products','/api/mobile-topups/orders','/api/mobile-topups/checkout'])assert.match(server,new RegExp(route.replaceAll('/','\\/')));
+  assert.match(server,/app\.post\('\/api\/mobile-topups\/checkout',\s*requireUserSession/);
+  assert.match(server,/mobileTopups\.getProduct\(req\.body\?\.productId,\{includeCost:true\}\)/);
+  assert.match(server,/session\.metadata\?\.purchaseKind==='mobile_topup'/);
+  assert.match(server,/session\.payment_status!=='paid'/);
+  assert.match(stripe,/metadata:\s*\{\s*purchaseKind:'mobile_topup',\s*mobileTopupOrderId/);
+  assert.doesNotMatch(stripe,/metadata:\s*\{[^}]*phone/s);
+  assert.match(provider,/credit_party_identifier:\s*\{\s*mobile_number:/);
+  assert.match(provider,/type:\s*'FIXED_VALUE_RECHARGE'/);
+  assert.match(provider,/benefit_types:\s*'DATA'/);
+  assert.doesNotMatch(page,/DTONE_API_SECRET|DTONE_API_KEY/);
+});
+
+test('mobile top-up administration masks numbers and protects money-moving retry with 2FA',()=>{
+  const server=read('server.js'),admin=read('admin-mobile-topups.html');
+  assert.match(server,/function maskPhone/);
+  assert.match(server,/app\.get\('\/api\/admin\/mobile-topups'/);
+  assert.match(server,/app\.post\('\/api\/admin\/mobile-topups\/:orderId\/retry',[^\n]*requirePermission\('operations\.manage',\{requireTwoFactor:true\}\)/);
+  assert.match(admin,/phoneMasked/);
+  assert.match(admin,/Super Admin із підтвердженою 2FA/);
 });

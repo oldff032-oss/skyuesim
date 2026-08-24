@@ -1,7 +1,7 @@
 // Register from every entry page so a fresh "Add to Home Screen" install has
 // a service worker even when it starts directly on dashboard.html.
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('/sw.js?v=56', { updateViaCache: 'none' }).then(registration => registration.update()).catch(() => {});
+  navigator.serviceWorker.register('/sw.js?v=57', { updateViaCache: 'none' }).then(registration => registration.update()).catch(() => {});
   navigator.serviceWorker.addEventListener('controllerchange',()=>{
     if(sessionStorage.getItem('signal_sw_reloaded_v32')==='1')return;
     sessionStorage.setItem('signal_sw_reloaded_v32','1');
@@ -46,7 +46,7 @@ if (window.location.pathname.endsWith('/app-tools.html')) {
 // auth headers, PINs, tokens, QR data or full URLs/query strings.
 const signalOriginalFetch = window.fetch.bind(window);
 let signalDiagnosticCount = 0;
-const SIGNAL_FRONTEND_VERSION='1.4.1',SIGNAL_SW_VERSION='v56',SIGNAL_CACHE_VERSION='signal-shell-v56-active-notice-check';
+const SIGNAL_FRONTEND_VERSION='1.5.0',SIGNAL_SW_VERSION='v57',SIGNAL_CACHE_VERSION='signal-shell-v57-mobile-topups';
 window.addEventListener('load',async()=>{
   if(typeof API_URL==='undefined')return;
   const token=localStorage.getItem('signal_session_token');
@@ -76,7 +76,7 @@ window.fetch = async function(input, init = {}) {
   const rawUrl = typeof input === 'string' ? input : input?.url || '';
   let path = 'unknown';
   try { path = new URL(rawUrl, location.origin).pathname; } catch {}
-  const protectedLegacyPaths=['/api/status','/api/usage','/api/billing','/api/cancel','/api/create-subscription','/api/support/tickets'];
+  const protectedLegacyPaths=['/api/status','/api/usage','/api/billing','/api/cancel','/api/create-subscription','/api/support/tickets','/api/mobile-topups'];
   const sessionToken=localStorage.getItem('signal_session_token');
   if(sessionToken&&protectedLegacyPaths.some(prefix=>path===prefix||path.startsWith(`${prefix}/`))){
     const headers=new Headers(init.headers||{});if(!headers.has('x-session-token'))headers.set('x-session-token',sessionToken);init={...init,headers};
@@ -86,7 +86,7 @@ window.fetch = async function(input, init = {}) {
     const response = await signalOriginalFetch(input, init);
     const durationMs=Math.round(performance.now()-started),requestId=response.headers.get('x-request-id');
     if (response.status >= 400) signalReportDiagnostic('api_error',response.status>=500?'error':'warning',`API returned ${response.status}`,{path,method:String(init.method||'GET').toUpperCase(),status:response.status,durationMs,requestId,outcome:'failed'});
-    else if(['/api/travel-packages','/api/travel-packages/checkout','/api/create-subscription','/api/cancel','/api/support/tickets'].some(prefix=>path===prefix||path.startsWith(`${prefix}/`))) signalReportDiagnostic('api_flow','info','API operation completed',{path,method:String(init.method||'GET').toUpperCase(),status:response.status,durationMs,requestId,outcome:'success'});
+    else if(['/api/travel-packages','/api/travel-packages/checkout','/api/mobile-topups','/api/create-subscription','/api/cancel','/api/support/tickets'].some(prefix=>path===prefix||path.startsWith(`${prefix}/`))) signalReportDiagnostic('api_flow','info','API operation completed',{path,method:String(init.method||'GET').toUpperCase(),status:response.status,durationMs,requestId,outcome:'success'});
     return response;
   } catch (error) {
     signalReportDiagnostic('network_error','error','Network request failed',{path,method:String(init.method||'GET').toUpperCase(),durationMs:Math.round(performance.now()-started),online:navigator.onLine});

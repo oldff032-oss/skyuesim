@@ -3,12 +3,12 @@ const defaults = () => ({
   announcements: [], notes: {}, blacklist: { emails: [], iccids: [] }, templates: [],
   emailBroadcasts: [], securityEvents: [], jobs: [], deliveryEvents: [], resolvedAttention: {}, processedEvents: {},
   featureFlags: {
-    registration:true, monthlyPlans:true, travelPackages:true, referrals:true,
+    registration:true, monthlyPlans:true, travelPackages:true, mobileTopups:true, referrals:true,
     autoRenew:true, push:true, deepl:true, photoUploads:true, cardPayments:true,
   },
   featureRules: { disabledCountries:[], disabledPackages:[], paymentMethods:{stripeCard:true} },
   providerBalance: { amount:null, currency:'USD', averageOrderCost:null, updatedAt:null, source:'not_configured' },
-  versionInfo: { frontend:'1.0.0', backend:'1.0.0', serviceWorker:'v39', cache:'signal-shell-v39-control-center', deployedAt:null, changelog:[],criticalRefreshToken:null,criticalAssets:['/i18n.js','/style.css','/pwa.js','/sw.js'] },
+  versionInfo: { frontend:'1.0.0', backend:'1.0.0', serviceWorker:'v57', cache:'signal-shell-v57-mobile-topups', deployedAt:null, changelog:[],criticalRefreshToken:null,criticalAssets:['/i18n.js','/style.css','/pwa.js','/sw.js'] },
   clientVersions: {},
   dailyReports: [], reportSettings: { enabled:true, hour:8, lastSentDate:null },
 });
