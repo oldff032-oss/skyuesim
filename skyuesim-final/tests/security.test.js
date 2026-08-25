@@ -136,10 +136,14 @@ test('all transactional emails share the responsive Signal logo template', () =>
   const templates = read('emailTemplates.js');
   const emailService = read('emailService.js');
   const server = read('server.js');
-  assert.match(templates, /signal-premium-logo\.png/);
+  assert.match(templates, /apple-touch-icon\.png/);
+  assert.match(templates, /https:\/\/esimsignalapp\.com/);
   assert.match(templates, /name="viewport"/);
   for (const name of ['verificationCode','supportReply','ticketAssignment','purchaseReceipt','twoFactorCode','broadcast','adminSecurityAlert','notification','accessRecovery','esimInstructions']) assert.match(templates, new RegExp(`function ${name}\\(`));
   assert.match(emailService, /emailTemplates\.verificationCode/);
+  assert.match(emailService, /plainTextFromHtml/);
+  assert.match(emailService, /html:htmlBody,text:textBody/);
+  assert.doesNotMatch(emailService, /onboarding@resend\.dev/);
   assert.match(server, /emailTemplates\.accessRecovery/);
   assert.match(server, /emailTemplates\.esimInstructions/);
   assert.match(server, /notifyStaffAboutUserReply/);
