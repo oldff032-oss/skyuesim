@@ -9,7 +9,7 @@ const defaults = () => ({
   },
   featureRules: { disabledCountries:[], disabledPackages:[], paymentMethods:{stripeCard:true} },
   providerBalance: { amount:null, currency:'USD', averageOrderCost:null, updatedAt:null, source:'not_configured' },
-  versionInfo: { frontend:'2.0.2', backend:'2.0.2', serviceWorker:'v72', cache:'signal-shell-v72-pin-recovery', deployedAt:null, changelog:['Безпечне відновлення PIN через Super Admin','Мобільний календар подорожі','Світлий віджет з відліком днів','Поповнення встановленої eSIM','Захищена передача близьким'],criticalRefreshToken:null,criticalAssets:['/i18n.js','/style.css','/pwa.js','/sw.js'] },
+  versionInfo: { frontend:'2.0.3', backend:'2.0.3', serviceWorker:'v73', cache:'signal-shell-v73-pin-email-recovery', deployedAt:null, changelog:['Одноразовий email-код для відновлення PIN','Виправлено повторне відкриття відновлення PIN','Безпечне відновлення PIN через Super Admin','Мобільний календар подорожі','Світлий віджет з відліком днів','Поповнення встановленої eSIM','Захищена передача близьким'],criticalRefreshToken:null,criticalAssets:['/i18n.js','/style.css','/pwa.js','/sw.js'] },
   clientVersions: {},
   dailyReports: [], reportSettings: { enabled:true, hour:8, lastSentDate:null },
 });

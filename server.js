@@ -495,10 +495,21 @@ app.post('/api/account/passkeys/register/verify', requireUserSession, async (req
 });
 function pinResetPublicView(item){
   if(!item)return null;
-  return {id:item.id,status:item.status,requestedAt:item.requestedAt,decidedAt:item.decidedAt||null,expiresAt:item.expiresAt||null,completedAt:item.completedAt||null};
+  const [name='',domain='']=String(item.email||'').split('@');
+  const maskedEmail=domain?`${name.slice(0,2)}${'*'.repeat(Math.max(2,Math.min(8,name.length-2)))}@${domain}`:'';
+  return {id:item.id,status:item.status,requestedAt:item.requestedAt,decidedAt:item.decidedAt||null,expiresAt:item.expiresAt||null,completedAt:item.completedAt||null,emailCodeSent:Boolean(item.emailCodeHash&&item.emailCodeExpiresAt&&new Date(item.emailCodeExpiresAt)>new Date()),emailCodeExpiresAt:item.emailCodeExpiresAt||null,maskedEmail};
 }
 function latestPinResetRequest(email){
   return (operationsStore.store().pinResetRequests||[]).find(item=>item.email===email)||null;
+}
+async function issuePinResetEmailCode(item){
+  const code=String(crypto.randomInt(100000,1000000));
+  item.emailCodeHash=await bcrypt.hash(code,10);item.emailCodeAttempts=0;item.emailCodeSentAt=new Date().toISOString();item.emailCodeExpiresAt=new Date(Date.now()+10*60*1000).toISOString();item.updatedAt=item.emailCodeSentAt;
+  try{
+    const delivery=await sendEmail({to:item.email,subject:'Код для відновлення PIN — Signal',html:emailTemplates.verificationCode({code})});
+    if(delivery?.mocked){item.emailCodeHash=null;item.emailCodeExpiresAt=null;return false;}
+    return true;
+  }catch(error){item.emailCodeHash=null;item.emailCodeExpiresAt=null;throw error;}
 }
 app.get('/api/account/lock', requireUserSession, (req,res)=>{const u=getUser(req.userEmail),reset=latestPinResetRequest(req.userEmail);res.json({enabled:Boolean(u?.appLock?.enabled),hasPin:Boolean(u?.appLock?.pinHash),hasPasskey:Boolean(u?.passkeys?.length),resetApproved:Boolean(reset?.status==='approved'&&reset.expiresAt&&new Date(reset.expiresAt)>new Date())});});
 app.put('/api/account/lock', requireUserSession, async (req,res)=>{const pin=String(req.body?.pin||''); if(!/^\d{6}$/.test(pin))return res.status(400).json({error:'PIN має містити рівно 6 цифр'}); saveUser(req.userEmail,{appLock:{enabled:true,pinHash:await bcrypt.hash(pin,10)}});res.json({ok:true});});
@@ -518,9 +529,16 @@ app.post('/api/account/lock/reset-request',requireUserSession,rateLimit('app_pin
   if(!user?.appLock?.enabled||!user?.appLock?.pinHash)return res.status(409).json({error:'PIN-захист для цього акаунта не увімкнений'});
   const state=operationsStore.store();
   const existing=(state.pinResetRequests||[]).find(item=>item.email===req.userEmail&&item.status==='pending');
-  if(existing)return res.json({ok:true,request:pinResetPublicView(existing)});
+  if(existing){
+    if(!existing.emailCodeHash||!existing.emailCodeExpiresAt||new Date(existing.emailCodeExpiresAt)<=new Date()){
+      try{await issuePinResetEmailCode(existing);await operationsStore.saveNow();}catch(error){console.error('[pin reset code email]',error.message);}
+    }
+    return res.json({ok:true,request:pinResetPublicView(existing)});
+  }
   const now=new Date().toISOString(),item={id:`pin_reset_${Date.now().toString(36)}_${crypto.randomBytes(4).toString('hex')}`,email:req.userEmail,status:'pending',requestedAt:now,updatedAt:now};
-  (state.pinResetRequests||=[]).unshift(item);state.pinResetRequests=state.pinResetRequests.slice(0,1000);await operationsStore.saveNow();
+  (state.pinResetRequests||=[]).unshift(item);state.pinResetRequests=state.pinResetRequests.slice(0,1000);
+  try{await issuePinResetEmailCode(item);}catch(error){console.error('[pin reset code email]',error.message);}
+  await operationsStore.saveNow();
   const recipients=adminAuth.listAdmins().filter(admin=>admin.role==='super_admin'&&!admin.blocked);
   for(const admin of recipients){
     sendEmail({to:admin.email,subject:'Запит на відновлення PIN — Signal Admin',html:emailTemplates.notification({title:'Користувач забув PIN',message:`${req.userEmail} надіслав запит на безпечне відновлення PIN. Старий PIN не передається. Перевірте запит і підтвердьте дію лише якщо впевнені, що це власник акаунта.`,actionUrl:'/admin-pin-resets.html',actionLabel:'Перевірити запит'})}).catch(error=>console.error('[pin reset email]',error.message));
@@ -528,6 +546,26 @@ app.post('/api/account/lock/reset-request',requireUserSession,rateLimit('app_pin
   }
   auditStore.log({adminEmail:'system',action:'app_pin_reset_requested',target:req.userEmail,details:{requestId:item.id}});
   res.status(201).json({ok:true,request:pinResetPublicView(item)});
+});
+app.post('/api/account/lock/reset-request/email-code',requireUserSession,rateLimit('app_pin_reset_email_code',60*60*1000,3,req=>req.userEmail),async(req,res)=>{
+  await operationsStore.refresh();
+  const item=latestPinResetRequest(req.userEmail);
+  if(!item||item.status!=='pending')return res.status(409).json({error:'Спочатку надішліть запит на відновлення PIN'});
+  try{const sent=await issuePinResetEmailCode(item);await operationsStore.saveNow();if(!sent)return res.status(503).json({error:'Email-сервіс ще не налаштований. Запит уже бачить адміністратор'});res.json({ok:true,request:pinResetPublicView(item)});}catch(error){console.error('[pin reset resend email]',error.message);res.status(502).json({error:'Не вдалося надіслати код. Запит уже бачить адміністратор'});}
+});
+app.post('/api/account/lock/reset-request/verify-code',requireUserSession,rateLimit('app_pin_reset_verify_code',15*60*1000,10,req=>req.userEmail),async(req,res)=>{
+  await operationsStore.refresh();
+  const item=latestPinResetRequest(req.userEmail),code=String(req.body?.code||'').trim();
+  if(!item||item.status!=='pending')return res.status(409).json({error:'Активного запиту на відновлення немає'});
+  if(!/^\d{6}$/.test(code))return res.status(400).json({error:'Введіть 6 цифр із листа'});
+  if(!item.emailCodeHash||!item.emailCodeExpiresAt||new Date(item.emailCodeExpiresAt)<=new Date())return res.status(410).json({error:'Код прострочено. Надішліть новий'});
+  item.emailCodeAttempts=Number(item.emailCodeAttempts||0)+1;
+  if(item.emailCodeAttempts>5){item.emailCodeHash=null;item.emailCodeExpiresAt=null;await operationsStore.saveNow();return res.status(429).json({error:'Забагато спроб. Надішліть новий код'});}
+  if(!await bcrypt.compare(code,item.emailCodeHash)){await operationsStore.saveNow();recordSecurityFailure(req,'app_pin_reset_code','INVALID_CODE',req.userEmail);return res.status(401).json({error:'Невірний код'});}
+  const decidedAt=new Date(),expiresAt=new Date(decidedAt.getTime()+30*60*1000);
+  Object.assign(item,{status:'approved',decidedAt:decidedAt.toISOString(),decidedBy:'email_verification',expiresAt:expiresAt.toISOString(),emailCodeHash:null,emailCodeExpiresAt:null,updatedAt:decidedAt.toISOString()});
+  await operationsStore.saveNow();auditStore.log({adminEmail:'email_verification',action:'app_pin_reset_email_verified',target:item.email,details:{requestId:item.id,expiresAt:item.expiresAt}});
+  res.json({ok:true,request:pinResetPublicView(item)});
 });
 app.post('/api/account/lock/reset-complete',requireUserSession,rateLimit('app_pin_reset_complete',15*60*1000,10,req=>req.userEmail),async(req,res)=>{
   await operationsStore.refresh();
@@ -539,7 +577,7 @@ app.post('/api/account/lock/reset-complete',requireUserSession,rateLimit('app_pi
   if(!item.expiresAt||new Date(item.expiresAt)<=new Date()){item.status='expired';item.updatedAt=new Date().toISOString();await operationsStore.saveNow();return res.status(410).json({error:'Дозвіл на скидання завершився. Надішліть новий запит'});}
   const completedAt=new Date().toISOString();
   saveUser(req.userEmail,{appLock:{enabled:true,pinHash:await bcrypt.hash(pin,10),resetCompletedAt:completedAt}});
-  item.status='completed';item.completedAt=completedAt;item.updatedAt=completedAt;await operationsStore.saveNow();
+  item.status='completed';item.completedAt=completedAt;item.updatedAt=completedAt;item.emailCodeHash=null;item.emailCodeExpiresAt=null;await operationsStore.saveNow();
   authService.revokeOtherSessions(req.userEmail,req.sessionToken);
   auditStore.log({adminEmail:item.decidedBy||'system',action:'app_pin_reset_completed',target:req.userEmail,details:{requestId:item.id}});
   res.json({ok:true});
@@ -557,7 +595,7 @@ app.post('/api/admin/pin-reset-requests/:id/approve',adminAuth.requireAdmin,admi
   if(item.status!=='pending')return res.status(409).json({error:'Цей запит уже опрацьовано'});
   const user=getUser(item.email);if(!user)return res.status(404).json({error:'Акаунт користувача не знайдено'});
   const decidedAt=new Date(),expiresAt=new Date(decidedAt.getTime()+30*60*1000);
-  Object.assign(item,{status:'approved',decidedAt:decidedAt.toISOString(),decidedBy:req.admin.email,expiresAt:expiresAt.toISOString(),updatedAt:decidedAt.toISOString()});
+  Object.assign(item,{status:'approved',decidedAt:decidedAt.toISOString(),decidedBy:req.admin.email,expiresAt:expiresAt.toISOString(),emailCodeHash:null,emailCodeExpiresAt:null,updatedAt:decidedAt.toISOString()});
   await operationsStore.saveNow();
   auditStore.log({adminEmail:req.admin.email,action:'app_pin_reset_approved',target:item.email,details:{requestId:item.id,expiresAt:item.expiresAt}});
   sendEmail({to:item.email,subject:'Відновлення PIN підтверджено — Signal',html:emailTemplates.notification({title:'Можна створити новий PIN',message:'Адміністратор підтвердив відновлення. Відкрийте Signal протягом 30 хвилин і створіть новий 6-значний PIN на захищеному екрані.',actionUrl:'/dashboard.html',actionLabel:'Відкрити Signal'})}).catch(error=>console.error('[pin reset approved email]',error.message));
@@ -569,7 +607,7 @@ app.post('/api/admin/pin-reset-requests/:id/deny',adminAuth.requireAdmin,adminAu
   const item=(operationsStore.store().pinResetRequests||[]).find(entry=>entry.id===req.params.id);
   if(!item)return res.status(404).json({error:'Запит не знайдено'});
   if(item.status!=='pending')return res.status(409).json({error:'Цей запит уже опрацьовано'});
-  const decidedAt=new Date().toISOString();Object.assign(item,{status:'denied',decidedAt,decidedBy:req.admin.email,updatedAt:decidedAt});await operationsStore.saveNow();
+  const decidedAt=new Date().toISOString();Object.assign(item,{status:'denied',decidedAt,decidedBy:req.admin.email,emailCodeHash:null,emailCodeExpiresAt:null,updatedAt:decidedAt});await operationsStore.saveNow();
   auditStore.log({adminEmail:req.admin.email,action:'app_pin_reset_denied',target:item.email,details:{requestId:item.id}});
   sendEmail({to:item.email,subject:'Запит на відновлення PIN відхилено — Signal',html:emailTemplates.notification({title:'Запит на відновлення відхилено',message:'Адміністратор не зміг підтвердити цей запит. Якщо це були ви, зверніться до підтримки для перевірки власника акаунта.',actionUrl:'/support.html',actionLabel:'Написати в підтримку'})}).catch(()=>{});
   res.json({ok:true,item:pinResetPublicView(item)});
