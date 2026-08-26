@@ -10,6 +10,7 @@
   "theme_color": "#05060d",
   "lang": "uk",
   "shortcuts": [
+    { "name": "Моя подорож", "short_name": "Подорож", "url": "/travel-assistant.html", "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }] },
     { "name": "Офлайн-картки eSIM", "short_name": "Офлайн eSIM", "url": "/offline-esim.html", "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }] },
     { "name": "eSIM для близьких", "short_name": "Для близьких", "url": "/family-esims.html", "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }] }
   ],

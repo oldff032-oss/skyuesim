@@ -20,7 +20,13 @@
   <div class="wrap">
     <div class="brand"><div class="mark">📶</div><span>Сигнал</span></div>
     <h1>Перевірка пристрою</h1>
-    <p class="lead">Не всі телефони підтримують eSIM. Перевіримо твій, перш ніж переходити до оплати.</p>
+    <p class="lead">Не всі телефони підтримують eSIM. Браузер не бачить точну модель, тому обери серію телефона для надійнішої перевірки.</p>
+
+    <div class="glass glass-card" style="margin-top:20px">
+      <select id="deviceFamily" style="width:100%;background:rgba(255,255,255,.04);border:1px solid var(--glass-border);border-radius:13px;padding:13px;color:var(--text)"><option value="auto">Визначити автоматично</option><option value="iphone_modern">iPhone XS/XR або новіший</option><option value="iphone_old">iPhone X/8 або старіший</option><option value="pixel">Google Pixel 3 або новіший</option><option value="samsung">Samsung Galaxy S20/Note20/Z або новіший</option><option value="other">Інша модель Android</option></select>
+      <input id="modelName" maxlength="100" placeholder="Точна модель, наприклад Galaxy S23" style="width:100%;margin-top:9px">
+      <button class="btn ghost" style="margin-top:10px" onclick="manualCheck()">Перевірити модель</button>
+    </div>
 
     <div class="check-ring" id="ring"><div class="icon" id="ringIcon">⏳</div></div>
     <div class="check-result" id="resultText">Перевіряємо...</div>
@@ -61,14 +67,13 @@
       return { supported: null, confidence: 'none', label: 'Невідомий пристрій' };
     }
 
-    setTimeout(() => {
-      const result = checkEsimSupport(navigator.userAgent);
+    function showResult(result) {
       const ring = document.getElementById('ring');
       const icon = document.getElementById('ringIcon');
       const text = document.getElementById('resultText');
       const device = document.getElementById('deviceText');
 
-      device.textContent = result.label;
+      ring.classList.remove('ok','bad');text.classList.remove('ok','bad');document.getElementById('continueBtn').style.display='none';document.getElementById('anywayBtn').style.display='none';device.textContent = result.label;
 
       if (result.supported === true) {
         ring.classList.add('ok');
@@ -94,7 +99,9 @@
         text.textContent = 'Не вдалося визначити пристрій';
         document.getElementById('anywayBtn').style.display = 'block';
       }
-    }, 900);
+    }
+    function manualCheck(){const family=document.getElementById('deviceFamily').value,model=document.getElementById('modelName').value.trim(),labels={iphone_modern:'iPhone XS/XR або новіший',iphone_old:'iPhone X/8 або старіший',pixel:'Google Pixel 3 або новіший',samsung:'Samsung Galaxy S20/Note20/Z або новіший',other:model||'Інша модель Android'};if(family==='auto')return showResult(checkEsimSupport(navigator.userAgent));if(family==='iphone_old')return showResult({supported:false,confidence:'high',label:labels[family]});if(['iphone_modern','pixel','samsung'].includes(family))return showResult({supported:true,confidence:'high',label:model||labels[family]});showResult({supported:null,confidence:'none',label:labels[family]});}
+    setTimeout(() => showResult(checkEsimSupport(navigator.userAgent)), 900);
   </script>
 </body>
 </html>

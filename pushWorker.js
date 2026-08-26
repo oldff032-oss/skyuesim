@@ -16,6 +16,24 @@ async function run() {
   for (const [email, user] of Object.entries(getAllUsers())) {
     if (user.status !== 'active' || !user.esim?.orderNo) continue;
     try {
+      const trip=user.travelMode;
+      if(trip?.enabled&&trip.startDate){
+        const startAt=new Date(`${trip.startDate}T00:00:00Z`).getTime(),hoursUntil=(startAt-Date.now())/3600000,reminders={...(trip.reminders||{})};
+        if(hoursUntil>=24&&hoursUntil<=72&&!reminders.prepare){
+          await sendToEmail(email,{title:`Подорож до ${trip.destination} наближається`,body:'Перевір сумісність телефона, збережи eSIM офлайн і підготуй встановлення.',url:'/travel-assistant.html',tag:`trip-prepare-${trip.startDate}`});
+          reminders.prepare=new Date().toISOString();
+        }
+        if(hoursUntil>=0&&hoursUntil<24&&!reminders.departure){
+          await sendToEmail(email,{title:'Signal готовий до подорожі',body:'Перед виїздом встанови eSIM. Після прибуття увімкни мобільні дані та роумінг даних.',url:'/travel-assistant.html',tag:`trip-departure-${trip.startDate}`});
+          reminders.departure=new Date().toISOString();
+        }
+        if(Object.keys(reminders).length!==Object.keys(trip.reminders||{}).length){saveUser(email,{travelMode:{...trip,reminders}});user.travelMode={...trip,reminders};}
+      }
+      if(user.esim.expiredTime){
+        const expiryAt=new Date(user.esim.expiredTime).getTime(),daysLeft=Math.ceil((expiryAt-Date.now())/86400000),expiryKey=String(user.esim.expiredTime).slice(0,10),sent=user.esim.expiryAlerts?.key===expiryKey?[...(user.esim.expiryAlerts.days||[])]:[];
+        const due=[3,1].find(day=>daysLeft<=day&&daysLeft>=0&&!sent.includes(day));
+        if(due){await sendToEmail(email,{title:due===1?'Останній день пакета eSIM':'Пакет eSIM скоро завершиться',body:due===1?'Додай інтернет зараз, щоб не залишитися без зв’язку.':`До завершення залишилося близько ${daysLeft} днів.`,url:'/esim-topup.html',tag:`expiry-${expiryKey}-${due}`});sent.push(due);saveUser(email,{esim:{...user.esim,expiryAlerts:{key:expiryKey,days:sent}}});user.esim.expiryAlerts={key:expiryKey,days:sent};}
+      }
       // A profile issued over a day ago but not activated often means the
       // customer needs installation instructions, not a new eSIM purchase.
       const issuedAt = new Date(user.esim.createdAt || user.createdAt || 0).getTime();
@@ -38,8 +56,8 @@ async function run() {
       if (previous === reached || previous > reached) continue;
       const delivered = await sendToEmail(email, {
         title: 'Сигнал: трафік закінчується',
-        body: `Використано ${percent}% твого пакета даних.`,
-        url: '/usage.html',
+        body: `Використано ${percent}% твого пакета даних. Додай інтернет, щоб залишатися онлайн.`,
+        url: '/esim-topup.html',
         tag: `traffic-${reached}`,
       });
       saveUser(email, { esim: { ...user.esim, lastPushAlertThreshold: reached } });

@@ -344,7 +344,10 @@ async function requestPasswordReset(email) {
   // Навмисно НЕ повідомляємо, чи існує акаунт з таким email (захист від
   // перебору email-адрес) — завжди повертаємо "sent: true", але лист
   // реально шлемо тільки якщо акаунт справді є.
-  if (store.users[email]) {
+  // Older deployments could leave the customer profile in the application
+  // database while the separate password record was missing. Mailbox
+  // verification is sufficient to repair that split safely.
+  if (store.users[email] || getUser(email)) {
     const code = randomCode();
     store.resetCodes[email] = { codeHash:verificationCodeHash(email,code), sentAt: Date.now(), attempts: 0 };
     writeAll(store);
@@ -390,9 +393,16 @@ async function resetPassword(resetToken, newPassword) {
   if (!entry) throw Object.assign(new Error('Недійсний або вже використаний токен'), { code: 'INVALID_TOKEN' });
   if (Date.now() - entry.createdAt > VERIFY_TOKEN_TTL_MS) throw Object.assign(new Error('Токен прострочено, почни спочатку'), { code: 'TOKEN_EXPIRED' });
   if (newPassword.length < 8) throw Object.assign(new Error('Пароль має бути не менше 8 символів'), { code: 'WEAK_PASSWORD' });
-  if (!store.users[entry.email]) throw Object.assign(new Error('Акаунт не знайдено'), { code: 'NO_USER' });
+  const applicationUser = getUser(entry.email);
+  if (!store.users[entry.email] && !applicationUser) throw Object.assign(new Error('Акаунт не знайдено'), { code: 'NO_USER' });
 
-  store.users[entry.email].passwordHash = await bcrypt.hash(newPassword, 10);
+  const passwordHash = await bcrypt.hash(newPassword, 10);
+  store.users[entry.email] = {
+    ...(store.users[entry.email] || {}),
+    email: entry.email,
+    createdAt: store.users[entry.email]?.createdAt || applicationUser?.createdAt || Date.now(),
+    passwordHash,
+  };
   delete store.resetTokens[resetToken];
   writeAll(store);
 

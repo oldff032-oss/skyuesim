@@ -479,8 +479,12 @@ app.post('/api/account/sessions/revoke-others', requireUserSession, (req, res) =
   res.json({ ok: true, revoked });
 });
 
-const PASSKEY_RP_ID = 'skyesim.netlify.app';
-const PASSKEY_ORIGIN = 'https://skyesim.netlify.app';
+const PASSKEY_ORIGIN = String(process.env.PASSKEY_ORIGIN || process.env.FRONTEND_URL || 'https://esimsignalapp.com').replace(/\/$/,'');
+let PASSKEY_RP_ID = String(process.env.PASSKEY_RP_ID || '').trim();
+if (!PASSKEY_RP_ID) {
+  try { PASSKEY_RP_ID = new URL(PASSKEY_ORIGIN).hostname; }
+  catch { PASSKEY_RP_ID = 'esimsignalapp.com'; }
+}
 app.post('/api/account/passkeys/register/options', requireUserSession, async (req,res) => {
   const user=getUser(req.userEmail); const passkeys=user?.passkeys||[];
   const options=await generateRegistrationOptions({rpName:'Signal eSIM',rpID:PASSKEY_RP_ID,userName:req.userEmail,userID:Buffer.from(req.userEmail),attestationType:'none',excludeCredentials:passkeys.map(p=>({id:p.id,transports:p.transports})),authenticatorSelection:{authenticatorAttachment:'platform',residentKey:'required',userVerification:'required'}});
@@ -545,6 +549,37 @@ app.put('/api/account/preferences', requireUserSession, (req, res) => {
   if(marketingEmails!==undefined&&typeof marketingEmails!=='boolean')return res.status(400).json({error:'Некоректне налаштування email'});
   saveUser(req.userEmail, { ...(language ? { language } : {}), preferences: { ...(user?.preferences || {}), ...(trafficAlertThresholds ? { trafficAlertThresholds } : {}),...(marketingEmails!==undefined?{marketingEmails}:{}) } });
   res.json({ ok: true, trafficAlertThresholds: trafficAlertThresholds || user?.preferences?.trafficAlertThresholds || [50,80,95],marketingEmails:marketingEmails??user?.preferences?.marketingEmails===true, language: language || user?.language || 'uk' });
+});
+
+function safeTravelMode(value={}) {
+  const destination=String(value.destination||'').replace(/[\r\n<>]/g,' ').trim().slice(0,80);
+  const startDate=String(value.startDate||'').slice(0,10);
+  const endDate=String(value.endDate||'').slice(0,10);
+  const deviceModel=String(value.deviceModel||'').replace(/[\r\n<>]/g,' ').trim().slice(0,100);
+  const platform=['iphone','android','other'].includes(value.platform)?value.platform:'other';
+  return {enabled:value.enabled!==false,destination,startDate,endDate,deviceModel,platform,reminders:value.reminders&&typeof value.reminders==='object'?value.reminders:{},updatedAt:new Date().toISOString()};
+}
+
+app.get('/api/account/travel-mode', requireUserSession, (req,res) => {
+  const user=getUser(req.userEmail);
+  res.json({travelMode:user?.travelMode||null,readiness:{hasEsim:Boolean(user?.esim?.orderNo),hasActivation:Boolean(user?.esim?.activationCode||user?.esim?.qrCodeUrl),hasPush:pushStore.subscriptionsFor(req.userEmail).length>0,hasOfflineCard:Boolean(user?.esim?.offlineSavedAt),expiresAt:user?.esim?.expiredTime||null}});
+});
+
+app.put('/api/account/travel-mode', requireUserSession, (req,res) => {
+  const travelMode=safeTravelMode(req.body||{});
+  if(!travelMode.destination||!/^\d{4}-\d{2}-\d{2}$/.test(travelMode.startDate)||!/^\d{4}-\d{2}-\d{2}$/.test(travelMode.endDate))return res.status(400).json({error:'Вкажіть напрямок і коректні дати подорожі'});
+  const start=new Date(`${travelMode.startDate}T00:00:00Z`),end=new Date(`${travelMode.endDate}T23:59:59Z`);
+  if(Number.isNaN(start.getTime())||Number.isNaN(end.getTime())||end<start)return res.status(400).json({error:'Дата повернення має бути після дати початку'});
+  if(start.getTime()<Date.now()-24*3600000||end.getTime()>Date.now()+730*24*3600000)return res.status(400).json({error:'Оберіть майбутню подорож у межах двох років'});
+  const existing=getUser(req.userEmail)?.travelMode||{};
+  travelMode.reminders=existing.startDate===travelMode.startDate?existing.reminders||{}:{};
+  saveUser(req.userEmail,{travelMode});
+  res.json({ok:true,travelMode});
+});
+
+app.delete('/api/account/travel-mode', requireUserSession, (req,res) => {
+  saveUser(req.userEmail,{travelMode:null});
+  res.json({ok:true});
 });
 
 app.post('/api/translations/batch', requireUserSession, rateLimit('ui_translation',60*1000,20,req=>req.userEmail), async (req,res) => {
@@ -836,6 +871,24 @@ function isSafeQrImageUrl(value) {
   } catch { return false; }
 }
 
+function safeTopupPackage(item) {
+  const packageCode = String(item?.packageCode || item?.slug || '').trim();
+  const amountCents = packageRetailCents(item);
+  if (!/^[A-Za-z0-9_-]{3,80}$/.test(packageCode) || !amountCents) return null;
+  const unlimited = Number(item?.dataType) === 4 || /unlimited|безліміт/i.test(`${item?.name || ''} ${item?.description || ''}`);
+  const rawDuration = Number(item?.duration || 30);
+  return {
+    packageCode,
+    name:String(item?.name || item?.description || 'Додатковий пакет').slice(0,120),
+    description:String(item?.description || '').slice(0,240),
+    dataLimitGb:unlimited ? null : packageVolumeGb(item),
+    unlimited,
+    durationDays:Number.isFinite(rawDuration) ? Math.max(1, Math.min(365, rawDuration)) : 30,
+    amountCents,
+    currency:'usd',
+  };
+}
+
 // Same-origin, authenticated QR proxy. The provider image can be displayed by
 // <img>, but often blocks browser fetch/CORS, which prevented encrypted offline
 // storage. Only a QR URL already owned by this authenticated account is fetched.
@@ -867,6 +920,37 @@ app.get('/api/account/esim/qr-image', requireUserSession, rateLimit('esim_qr_ima
   } catch (error) {
     recordDiagnostic(req,{email:req.userEmail,type:'esim_flow',action:'offline_qr_download',outcome:'failed',severity:'warning',message:'Offline QR image download failed',errorCode:error.name==='TimeoutError'?'QR_DOWNLOAD_TIMEOUT':'QR_DOWNLOAD_FAILED'});
     res.status(502).json({ error:error.name==='TimeoutError'?'Оператор не відповів вчасно':'Не вдалося завантажити QR-код оператора' });
+  }
+});
+
+app.get('/api/account/esim/topups', requireUserSession, requireFeature('travelPackages','Додаткові пакети тимчасово недоступні'), rateLimit('esim_topup_catalog',60*1000,20,req=>req.userEmail), async (req,res) => {
+  const user=getUser(req.userEmail);
+  if(!user?.esim?.iccid)return res.status(409).json({error:'Спочатку активуйте eSIM',code:'ESIM_NOT_ISSUED'});
+  try{
+    const packages=(await listPackages({type:'TOPUP',iccid:user.esim.iccid})).map(safeTopupPackage).filter(Boolean).filter(packageAllowed).sort((a,b)=>(a.dataLimitGb||Infinity)-(b.dataLimitGb||Infinity)||a.durationDays-b.durationDays||a.amountCents-b.amountCents).slice(0,100);
+    res.json({packages,iccidEnding:String(user.esim.iccid).slice(-4),current:{plan:user.plan||null,remainingGb:user.esim.remainingGb??null,expiredTime:user.esim.expiredTime||null}});
+  }catch(error){
+    recordDiagnostic(req,{email:req.userEmail,source:'esim_access',type:'topup_flow',action:'catalog',outcome:'failed',severity:'warning',message:error.message,errorCode:error.code||'TOPUP_CATALOG_FAILED'});
+    res.status(502).json({error:'Не вдалося завантажити сумісні пакети для цієї eSIM',code:error.code||'TOPUP_CATALOG_FAILED'});
+  }
+});
+
+app.post('/api/account/esim/topups/checkout', requireUserSession, requireFeature('travelPackages','Додаткові пакети тимчасово недоступні'), requireFeature('cardPayments','Оплати тимчасово призупинено'), requireProviderCapacity, rateLimit('esim_topup_checkout',60*60*1000,8,req=>req.userEmail), async (req,res) => {
+  const user=getUser(req.userEmail);
+  if(!user?.esim?.iccid)return res.status(409).json({error:'Немає активної eSIM для поповнення',code:'ESIM_NOT_ISSUED'});
+  const packageCode=String(req.body?.packageCode||'').trim();
+  if(!/^[A-Za-z0-9_-]{3,80}$/.test(packageCode))return res.status(400).json({error:'Некоректний пакет'});
+  try{
+    const selected=(await listPackages({type:'TOPUP',iccid:user.esim.iccid,packageCode})).map(safeTopupPackage).filter(Boolean).find(item=>item.packageCode===packageCode);
+    if(!selected)return res.status(404).json({error:'Цей пакет більше не сумісний з eSIM. Оновіть список.',code:'TOPUP_NOT_AVAILABLE'});
+    if(!packageAllowed(selected)||!paymentMethodEnabled('stripeCard'))return res.status(503).json({error:'Оплата цього пакета тимчасово недоступна'});
+    const recovered=await recoverStripeProfile(req.userEmail).catch(()=>({customerId:user.stripeCustomerId||null}));
+    const session=await createCustomPackageCheckout({email:req.userEmail,customerId:recovered.customerId||user.stripeCustomerId||null,packageCode:selected.packageCode,packageName:selected.name,amountCents:selected.amountCents,currency:'usd',dataLimitGb:selected.dataLimitGb,durationDays:selected.durationDays,location:'',changeMode:'topup_existing',previousPlan:user.plan||'',previousSubscriptionId:user.stripeSubscriptionId||''});
+    recordDiagnostic(req,{email:req.userEmail,source:'stripe',type:'topup_flow',action:'checkout_created',outcome:'success',severity:'info',message:'Existing eSIM top-up checkout created',purchaseId:session.id,context:{packageCode,amountCents:selected.amountCents,iccidEnding:String(user.esim.iccid).slice(-4)}});
+    res.json({url:session.url});
+  }catch(error){
+    recordDiagnostic(req,{email:req.userEmail,source:error.code?.includes('PACKAGE')?'esim_access':'stripe',type:'topup_flow',action:'checkout',outcome:'failed',severity:'error',message:error.message,errorCode:error.code||'TOPUP_CHECKOUT_FAILED'});
+    res.status(502).json({error:'Не вдалося створити безпечну оплату поповнення',code:error.code||'TOPUP_CHECKOUT_FAILED'});
   }
 });
 
@@ -1405,12 +1489,20 @@ app.get('/api/admin/dashboard', adminAuth.requireAdmin, (req, res) => {
     const esim = user.esim || {};
     return esim.dataLimitGb && (Number(esim.usedGb || 0) / Number(esim.dataLimitGb)) >= 0.8;
   });
+  const trips=users.filter(user=>user.travelMode?.enabled&&user.travelMode?.startDate);
+  const upcomingTrips=trips.filter(user=>{const start=new Date(`${user.travelMode.startDate}T00:00:00Z`).getTime();return start>=Date.now()-86400000&&start<=Date.now()+14*86400000;});
   res.json({
     users: { total: users.length, registeredToday: users.filter((user) => new Date(user.createdAt || 0).getTime() >= since).length, active: active.length, blocked: users.filter((user) => user.status === 'blocked').length },
     esim: { active: active.filter((user) => user.esim?.orderNo).length, failed: users.filter((user) => user.status === 'payment_ok_esim_failed').length, highUsage: highUsage.length, expiringSoon: active.filter((user) => user.esim?.expiredTime && new Date(user.esim.expiredTime).getTime() - Date.now() < 7 * 86400000).length },
     tickets: { total: tickets.length, open: tickets.filter((ticket) => ticket.status === 'open').length, unassigned: tickets.filter((ticket) => !ticket.assignedTo && !['resolved', 'closed'].includes(ticket.status)).length, waitingOver24h: tickets.filter((ticket) => ticket.status === 'waiting_customer' && Date.now() - new Date(ticket.updatedAt).getTime() > 24 * 3600000).length },
+    travel:{planned:trips.length,upcoming14Days:upcomingTrips.length,withoutEsim:upcomingTrips.filter(user=>!user.esim?.orderNo).length,withoutPush:upcomingTrips.filter(user=>!pushStore.subscriptionsFor(user.email).length).length},
     recentTickets: tickets.slice(0, 5),
   });
+});
+
+app.get('/api/admin/travel',adminAuth.requireAdmin,adminAuth.requireRole('super_admin','admin','support','viewer'),(req,res)=>{
+  const now=Date.now(),items=Object.values(getAllUsers()).filter(user=>user.travelMode?.enabled&&user.travelMode?.startDate).map(user=>{const startAt=new Date(`${user.travelMode.startDate}T00:00:00Z`).getTime(),daysUntil=Math.ceil((startAt-now)/86400000),remaining=user.esim?.remainingGb??(user.esim?.dataLimitGb!=null?Math.max(0,Number(user.esim.dataLimitGb)-Number(user.esim.usedGb||0)):null);return {email:user.email,displayName:user.displayName||'',destination:user.travelMode.destination,startDate:user.travelMode.startDate,endDate:user.travelMode.endDate,deviceModel:user.travelMode.deviceModel||'',platform:user.travelMode.platform||'other',daysUntil,hasEsim:Boolean(user.esim?.orderNo),remainingGb:remaining,expiresAt:user.esim?.expiredTime||null,pushDevices:pushStore.subscriptionsFor(user.email).length};}).sort((a,b)=>a.startDate.localeCompare(b.startDate));
+  res.json({items,summary:{planned:items.length,next14Days:items.filter(item=>item.daysUntil>=0&&item.daysUntil<=14).length,withoutEsim:items.filter(item=>item.daysUntil>=0&&item.daysUntil<=14&&!item.hasEsim).length,lowData:items.filter(item=>item.daysUntil>=0&&item.remainingGb!=null&&item.remainingGb<1).length}});
 });
 
 function controlContext(){
@@ -2139,6 +2231,27 @@ app.post('/api/admin/users/:email/purchases/:purchaseId/retry-provision', adminA
     if(!result.ok)return res.status(502).json({error:result.error?.message||'Зміну тарифу не вдалося завершити'});
     return res.json({ok:true,purchaseId,esim:result.esim,cancellationError:result.cancellationError||null});
   }
+  if (purchase.kind === 'esim_topup' || purchase.changeMode === 'topup_existing') {
+    if (!user.esim?.iccid) return res.status(409).json({ error:'Активну eSIM для поповнення не знайдено' });
+    const retryKey = `${email}:${purchaseId}`;
+    if (esimRetriesInProgress.has(retryKey)) return res.status(409).json({ error:'Це поповнення вже виконується' });
+    esimRetriesInProgress.add(retryKey);
+    upsertPurchase(email,purchaseId,{fulfillmentStatus:'provisioning',retryStartedAt:new Date().toISOString(),fulfillmentError:null});
+    try {
+      const topup=await topupEsim({esimTranNo:user.esim.esimTranNo,iccid:user.esim.iccid,packageCode:purchase.packageCode,transactionId:`topup-retry-${String(purchaseId).slice(-34)}`});
+      const esim={...user.esim,...(topup.iccid?{iccid:topup.iccid}:{}),...(topup.totalGb!=null?{dataLimitGb:topup.totalGb}:{}),...(topup.usedGb!=null?{usedGb:topup.usedGb}:{}),...(topup.remainingGb!=null?{remainingGb:topup.remainingGb}:{}),...(topup.expiredTime?{expiredTime:topup.expiredTime}:{}),lastTopupAt:new Date().toISOString(),lastTopupPackageCode:purchase.packageCode,lastPushAlertThreshold:null};
+      saveUser(email,{status:'active',esim});
+      upsertPurchase(email,purchaseId,{fulfillmentStatus:'provisioned',fulfilledAt:new Date().toISOString(),fulfillmentError:null,providerTransactionId:topup.transactionId||null,iccid:esim.iccid||null});
+      auditStore.log({adminEmail:req.admin.email,action:'paid_esim_topup_retried',target:email,details:{purchaseId,packageCode:purchase.packageCode,iccidEnding:String(esim.iccid||'').slice(-4)}});
+      return res.json({ok:true,purchaseId,topup:true,esim:{iccidEnding:String(esim.iccid||'').slice(-4),remainingGb:esim.remainingGb??null,expiredTime:esim.expiredTime||null}});
+    } catch (error) {
+      upsertPurchase(email,purchaseId,{fulfillmentStatus:'failed',failedAt:new Date().toISOString(),fulfillmentError:error.message,fulfillmentErrorCode:error.code||'ESIM_TOPUP_FAILED'});
+      auditStore.log({adminEmail:req.admin.email,action:'paid_esim_topup_retry_failed',target:email,details:{purchaseId,packageCode:purchase.packageCode,error:error.message}});
+      return res.status(502).json({error:`eSIM Access: ${error.message}`});
+    } finally {
+      esimRetriesInProgress.delete(retryKey);
+    }
+  }
   if (user.status === 'canceled') return res.status(409).json({ error:'Підписку/акаунт скасовано. Спочатку перевірте оплату та статус у Stripe.' });
   if (user.esim?.orderNo && user.status === 'active') return res.status(409).json({ error:'В акаунті вже є активна eSIM. Автоматична заміна могла б стерти її дані.' });
   const retryKey = `${email}:${purchaseId}`;
@@ -2356,7 +2469,7 @@ app.post('/api/webhook', async (req, res) => {
     const recipientName = String(session.metadata.recipientName || '').slice(0,60);
     const familyPurchase = plan === 'custom' && recipientMode === 'family';
     const purchaseDefaults = {
-      kind: familyPurchase ? 'family_esim' : plan === 'custom' ? 'custom_package' : 'subscription',
+      kind: familyPurchase ? 'family_esim' : changeMode === 'topup_existing' ? 'esim_topup' : plan === 'custom' ? 'custom_package' : 'subscription',
       plan,
       packageCode: packageCode || null,
       packageName: session.metadata.packageName || plan,
@@ -2400,6 +2513,23 @@ app.post('/api/webhook', async (req, res) => {
       await deliverPurchaseReceipt(email,session.id,purchaseDefaults);
       await storage.finishExternalEvent('stripe',event.id,'completed');
       return res.json({received:true,familyEsim:true});
+    }
+
+    if(changeMode==='topup_existing'){
+      const current=getUser(email);
+      if(!current?.esim?.iccid){upsertPurchase(email,session.id,{fulfillmentStatus:'failed',failedAt:new Date().toISOString(),fulfillmentError:'Активну eSIM не знайдено',fulfillmentErrorCode:'ESIM_NOT_ISSUED'},purchaseDefaults);await storage.finishExternalEvent('stripe',event.id,'failed','esim_not_issued');return res.json({received:true,topup:'failed'});}
+      if(existingPurchase?.fulfillmentStatus!=='provisioned'){
+        upsertPurchase(email,session.id,{fulfillmentStatus:'provisioning',fulfillmentError:null},purchaseDefaults);
+        try{
+          const topup=await topupEsim({esimTranNo:current.esim.esimTranNo,iccid:current.esim.iccid,packageCode,transactionId:`topup-${String(session.id).slice(-40)}`});
+          const esim={...current.esim,...(topup.iccid?{iccid:topup.iccid}:{}),...(topup.totalGb!=null?{dataLimitGb:topup.totalGb}:{}),...(topup.usedGb!=null?{usedGb:topup.usedGb}:{}),...(topup.remainingGb!=null?{remainingGb:topup.remainingGb}:{}),...(topup.expiredTime?{expiredTime:topup.expiredTime}:{}),lastTopupAt:new Date().toISOString(),lastTopupPackageCode:packageCode,lastPushAlertThreshold:null};
+          saveUser(email,{status:'active',esim,stripeCustomerId:typeof session.customer==='string'?session.customer:session.customer?.id||current.stripeCustomerId||null});
+          upsertPurchase(email,session.id,{fulfillmentStatus:'provisioned',fulfilledAt:new Date().toISOString(),providerTransactionId:topup.transactionId||null,iccid:esim.iccid||null},purchaseDefaults);
+          recordDiagnostic(req,{email,source:'esim_access',type:'topup_flow',action:'topup_completed',outcome:'success',severity:'info',message:'Existing eSIM topped up after Stripe payment',purchaseId:session.id,context:{packageCode,iccidEnding:String(esim.iccid||'').slice(-4)}});
+          sendToEmail(email,{title:'Інтернет додано',body:`Пакет ${session.metadata.packageName||'eSIM'} додано до вже встановленої eSIM.`,url:'/usage.html',tag:`topup-${String(session.id).slice(-10)}`}).catch(()=>{});
+        }catch(error){upsertPurchase(email,session.id,{fulfillmentStatus:'failed',failedAt:new Date().toISOString(),fulfillmentError:error.message,fulfillmentErrorCode:error.code||'ESIM_TOPUP_FAILED'},purchaseDefaults);recordDiagnostic(req,{email,source:'esim_access',type:'topup_flow',action:'topup_delivery',outcome:'failed',severity:'critical',message:error.message,errorCode:error.code||'ESIM_TOPUP_FAILED',purchaseId:session.id});}
+      }
+      await deliverPurchaseReceipt(email,session.id,purchaseDefaults);await storage.finishExternalEvent('stripe',event.id,'completed');return res.json({received:true,topup:true});
     }
 
     if(changeMode==='after_expiry'){
@@ -2554,8 +2684,55 @@ app.get('/api/account/order-status',requireUserSession,(req,res)=>{
 
 app.get('/api/account/family-esims',requireUserSession,(req,res)=>{
   const user=getUser(req.userEmail);if(!user)return res.status(404).json({error:'Акаунт не знайдено'});
-  const items=(user.sharedEsims||[]).map(item=>({id:item.id,recipientName:item.recipientName,packageName:item.packageName,location:item.location||null,dataLimitGb:item.dataLimitGb??null,durationDays:item.durationDays??null,purchaseId:item.purchaseId,createdAt:item.createdAt,esim:{iccid:item.esim?.iccid||null,activationCode:item.esim?.activationCode||null,qrCodeUrl:item.esim?.qrCodeUrl||null,apn:item.esim?.apn||null,status:item.esim?.status||null,provider:item.esim?.provider||null,activateTime:item.esim?.activateTime||null,expiredTime:item.esim?.expiredTime||null}}));
+  const items=(user.sharedEsims||[]).map(item=>({id:item.id,recipientName:item.recipientName,packageName:item.packageName,location:item.location||null,dataLimitGb:item.dataLimitGb??null,durationDays:item.durationDays??null,purchaseId:item.purchaseId,createdAt:item.createdAt,share:item.share?{createdAt:item.share.createdAt||null,expiresAt:item.share.expiresAt||null,viewedAt:item.share.viewedAt||null,installedAt:item.share.installedAt||null,active:Boolean(!item.share.revokedAt&&new Date(item.share.expiresAt).getTime()>Date.now())}:null,esim:{iccid:item.esim?.iccid||null,activationCode:item.esim?.activationCode||null,qrCodeUrl:item.esim?.qrCodeUrl||null,apn:item.esim?.apn||null,status:item.esim?.status||null,provider:item.esim?.provider||null,activateTime:item.esim?.activateTime||null,expiredTime:item.esim?.expiredTime||null}}));
   res.json({items});
+});
+
+function familyShareHash(token){return crypto.createHash('sha256').update(String(token)).digest('hex');}
+function findFamilyShare(token){
+  if(!/^[A-Za-z0-9_-]{32,100}$/.test(String(token||'')))return null;
+  const hash=familyShareHash(token);
+  for(const user of Object.values(getAllUsers()))for(const item of user.sharedEsims||[])if(item.share?.tokenHash===hash)return {user,item};
+  return null;
+}
+function publicFamilyShare(item){return {recipientName:item.recipientName,packageName:item.packageName,location:item.location||null,dataLimitGb:item.dataLimitGb??null,durationDays:item.durationDays??null,expiresAt:item.share?.expiresAt||null,viewedAt:item.share?.viewedAt||null,installedAt:item.share?.installedAt||null,esim:{activationCode:item.esim?.activationCode||null,apn:item.esim?.apn||null,expiredTime:item.esim?.expiredTime||null,hasQr:Boolean(item.esim?.qrCodeUrl)}};}
+
+app.post('/api/account/family-esims/:id/share',requireUserSession,rateLimit('family_share_create',60*60*1000,12,req=>req.userEmail),(req,res)=>{
+  const user=getUser(req.userEmail),shared=[...(user?.sharedEsims||[])],index=shared.findIndex(item=>item.id===req.params.id);
+  if(index<0)return res.status(404).json({error:'eSIM для близької людини не знайдено'});
+  if(!shared[index].esim?.activationCode&&!shared[index].esim?.qrCodeUrl)return res.status(409).json({error:'Дані встановлення ще не готові'});
+  const token=crypto.randomBytes(32).toString('base64url'),days=Math.min(14,Math.max(1,Number(req.body?.days||7)));
+  shared[index]={...shared[index],share:{tokenHash:familyShareHash(token),createdAt:new Date().toISOString(),expiresAt:new Date(Date.now()+days*86400000).toISOString(),viewedAt:null,installedAt:null,revokedAt:null}};
+  saveUser(req.userEmail,{sharedEsims:shared});
+  const base=String(process.env.FRONTEND_URL||'').replace(/\/$/,'');
+  res.json({ok:true,url:`${base}/family-share.html?token=${encodeURIComponent(token)}`,expiresAt:shared[index].share.expiresAt});
+});
+
+app.delete('/api/account/family-esims/:id/share',requireUserSession,(req,res)=>{
+  const user=getUser(req.userEmail),shared=[...(user?.sharedEsims||[])],index=shared.findIndex(item=>item.id===req.params.id);
+  if(index<0)return res.status(404).json({error:'eSIM не знайдено'});
+  if(shared[index].share)shared[index]={...shared[index],share:{...shared[index].share,revokedAt:new Date().toISOString()}};
+  saveUser(req.userEmail,{sharedEsims:shared});res.json({ok:true});
+});
+
+app.get('/api/family-share/:token',rateLimit('family_share_open',15*60*1000,60,req=>req.params.token),(req,res)=>{
+  const found=findFamilyShare(req.params.token);
+  if(!found||found.item.share.revokedAt||new Date(found.item.share.expiresAt).getTime()<=Date.now())return res.status(404).json({error:'Посилання недійсне, відкликане або прострочене'});
+  if(!found.item.share.viewedAt){found.item.share.viewedAt=new Date().toISOString();saveUser(found.user.email,{sharedEsims:found.user.sharedEsims});}
+  res.set('Cache-Control','no-store');res.json(publicFamilyShare(found.item));
+});
+
+app.post('/api/family-share/:token/installed',rateLimit('family_share_installed',60*60*1000,10,req=>req.params.token),(req,res)=>{
+  const found=findFamilyShare(req.params.token);
+  if(!found||found.item.share.revokedAt||new Date(found.item.share.expiresAt).getTime()<=Date.now())return res.status(404).json({error:'Посилання недійсне або прострочене'});
+  found.item.share.installedAt=new Date().toISOString();saveUser(found.user.email,{sharedEsims:found.user.sharedEsims});res.json({ok:true});
+});
+
+app.get('/api/family-share/:token/qr',rateLimit('family_share_qr',60*1000,20,req=>req.params.token),async(req,res)=>{
+  const found=findFamilyShare(req.params.token);
+  if(!found||found.item.share.revokedAt||new Date(found.item.share.expiresAt).getTime()<=Date.now())return res.status(404).json({error:'Посилання недійсне або прострочене'});
+  const qrUrl=found.item.esim?.qrCodeUrl;if(!qrUrl)return res.status(404).json({error:'QR-код ще не надано оператором'});if(!isSafeQrImageUrl(qrUrl))return res.status(400).json({error:'Неприпустиме джерело QR'});
+  try{const upstream=await fetch(qrUrl,{headers:{Accept:'image/png,image/jpeg,image/webp,image/gif'},redirect:'error',signal:AbortSignal.timeout(12000)});if(!upstream.ok)throw new Error('QR unavailable');const contentType=String(upstream.headers.get('content-type')||'').split(';')[0].toLowerCase(),allowed=new Set(['image/png','image/jpeg','image/webp','image/gif']);if(!allowed.has(contentType))throw new Error('QR format');const payload=Buffer.from(await upstream.arrayBuffer());if(!payload.length||payload.length>900000)return res.status(413).json({error:'QR-код завеликий'});res.set({'Content-Type':contentType,'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff'});res.send(payload);}catch{return res.status(502).json({error:'Не вдалося завантажити QR-код оператора'});}
 });
 
 // ---------- 3. Статус користувача (для дашборду) ----------

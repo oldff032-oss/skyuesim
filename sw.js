@@ -3,12 +3,15 @@
 // Кешує тільки статичну "оболонку" — самі дані (підписка, тікети) завжди
 // тягнуться наживо з бекенду, ніколи не кешуються.
 
-const CACHE_NAME = 'signal-shell-v61-ticket-flow';
+const CACHE_NAME = 'signal-shell-v70-global-travel';
 const SHELL_FILES = [
   '/dashboard.html',
   '/profile.html',
   '/plans.html',
   '/travel-plans.html',
+  '/travel-assistant.html',
+  '/esim-topup.html',
+  '/family-share.html',
   '/usage.html',
   '/installing.html',
   '/esim-management.html',

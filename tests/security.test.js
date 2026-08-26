@@ -195,7 +195,7 @@ test('maintenance support works without account unlock and remains rate limited'
 test('service worker bypasses stale cache for maintenance and localization assets', () => {
   const worker=read('sw.js');
   const support=read('support.html');
-  assert.match(worker, /signal-shell-v61-ticket-flow/);
+  assert.match(worker, /signal-shell-v70-global-travel/);
   assert.match(worker, /fetch\(event\.request, \{ cache:'no-store' \}\)/);
   assert.match(worker, /'\/i18n\.js'/);
   assert.match(worker, /'\/style\.css'/);
@@ -328,7 +328,7 @@ test('bottom navigation always identifies usage and charts stay visible without 
   assert.match(css, /nav-art/);
   assert.match(css, /clip:rect\(0,0,0,0\)/);
   assert.match(pwa, /setAttribute\('aria-label',label\)/);
-  assert.match(pwa, /\/sw\.js\?v=61/);
+  assert.match(pwa, /\/sw\.js\?v=70/);
   for(const marker of ['nav-home-v2.png','nav-plans-v2.png','nav-usage-v2.png','nav-profile-v2.png']) assert.match(pwa,new RegExp(marker.replace('.', '\\.')));
   assert.doesNotMatch(css, /navBreathe[\s\S]{0,80}infinite/);
   assert.match(headers, /\/pwa\.js[\s\S]*Cache-Control: no-store/);
@@ -413,7 +413,7 @@ test('family purchases provision a separate eSIM without replacing the buyer eSI
   assert.match(page,/purchaseFor:changeMode==='gift'\?'family':'self'/);
   assert.match(family,/Зберегти офлайн/);
   assert.match(family,/Як встановити/);
-  assert.match(family,/Передати одержувачу/);
+  assert.match(family,/Захищене посилання/);
   assert.match(family,/qr-image\?scope=family/);
 });
 

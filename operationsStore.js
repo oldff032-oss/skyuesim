@@ -8,7 +8,7 @@ const defaults = () => ({
   },
   featureRules: { disabledCountries:[], disabledPackages:[], paymentMethods:{stripeCard:true} },
   providerBalance: { amount:null, currency:'USD', averageOrderCost:null, updatedAt:null, source:'not_configured' },
-  versionInfo: { frontend:'1.6.3', backend:'1.0.0', serviceWorker:'v61', cache:'signal-shell-v61-ticket-flow', deployedAt:null, changelog:[],criticalRefreshToken:null,criticalAssets:['/i18n.js','/style.css','/pwa.js','/sw.js'] },
+  versionInfo: { frontend:'2.0.0', backend:'2.0.0', serviceWorker:'v70', cache:'signal-shell-v70-global-travel', deployedAt:null, changelog:['Розумна подорож','Поповнення встановленої eSIM','Захищена передача близьким','Новий контроль подорожей в адмінці'],criticalRefreshToken:null,criticalAssets:['/i18n.js','/style.css','/pwa.js','/sw.js'] },
   clientVersions: {},
   dailyReports: [], reportSettings: { enabled:true, hour:8, lastSentDate:null },
 });
