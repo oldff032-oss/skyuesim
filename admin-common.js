@@ -14,6 +14,7 @@ function requireAdminAuth(){
     ['admin-tickets.html',svg('<path d="M4 13a8 8 0 0 1 16 0v5a2 2 0 0 1-2 2h-3v-7h5M4 13v5a2 2 0 0 0 2 2h3v-7H4"/>')+'Підтримка'],
     ['admin-operations.html',svg('<path d="M4 6h16v12H4zM4 9l8 5 8-5"/><path d="M17.5 3.5 20 6l-2.5 2.5"/>')+'Повідомлення й технічні роботи'],
     ['admin-control-center.html',svg('<path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/>')+'Операційний центр'],
+    ...(role==='super_admin'?[[ 'admin-pin-resets.html',svg('<rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3M12 14v3"/>')+'Відновлення PIN' ]]:[]),
     ...(role==='super_admin'?[[ 'admin-team.html',svg('<rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>')+'Команда й безпека' ]]:[])
   ];
   const tools=[['admin-security.html','Моя 2FA'],...(role==='super_admin'?[['admin-diagnostics.html','Діагностика'],['admin-email-broadcasts.html','Email-розсилки'],['admin-audit.html','Журнал дій'],['admin-backup.html','Резервні копії'],['admin-security-incident.html','Захист системи']]:[])];

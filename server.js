@@ -493,9 +493,87 @@ app.post('/api/account/passkeys/register/options', requireUserSession, async (re
 app.post('/api/account/passkeys/register/verify', requireUserSession, async (req,res) => {
   try { const user=getUser(req.userEmail); const verification=await verifyRegistrationResponse({response:req.body,expectedChallenge:user?.passkeyChallenge,expectedOrigin:PASSKEY_ORIGIN,expectedRPID:PASSKEY_RP_ID,requireUserVerification:true}); if(!verification.verified||!verification.registrationInfo) throw new Error('Face ID не підтверджено'); const c=verification.registrationInfo.credential; saveUser(req.userEmail,{passkeys:[...(user.passkeys||[]),{id:c.id,publicKey:Buffer.from(c.publicKey).toString('base64url'),counter:c.counter,transports:c.transports||[],createdAt:new Date().toISOString()}],passkeyChallenge:null}); res.json({ok:true}); } catch(e){res.status(400).json({error:e.message});}
 });
-app.get('/api/account/lock', requireUserSession, (req,res)=>{const u=getUser(req.userEmail);res.json({enabled:Boolean(u?.appLock?.enabled),hasPin:Boolean(u?.appLock?.pinHash),hasPasskey:Boolean(u?.passkeys?.length)});});
+function pinResetPublicView(item){
+  if(!item)return null;
+  return {id:item.id,status:item.status,requestedAt:item.requestedAt,decidedAt:item.decidedAt||null,expiresAt:item.expiresAt||null,completedAt:item.completedAt||null};
+}
+function latestPinResetRequest(email){
+  return (operationsStore.store().pinResetRequests||[]).find(item=>item.email===email)||null;
+}
+app.get('/api/account/lock', requireUserSession, (req,res)=>{const u=getUser(req.userEmail),reset=latestPinResetRequest(req.userEmail);res.json({enabled:Boolean(u?.appLock?.enabled),hasPin:Boolean(u?.appLock?.pinHash),hasPasskey:Boolean(u?.passkeys?.length),resetApproved:Boolean(reset?.status==='approved'&&reset.expiresAt&&new Date(reset.expiresAt)>new Date())});});
 app.put('/api/account/lock', requireUserSession, async (req,res)=>{const pin=String(req.body?.pin||''); if(!/^\d{6}$/.test(pin))return res.status(400).json({error:'PIN має містити рівно 6 цифр'}); saveUser(req.userEmail,{appLock:{enabled:true,pinHash:await bcrypt.hash(pin,10)}});res.json({ok:true});});
 app.post('/api/account/lock/pin', requireUserSession, async (req,res)=>{const hash=getUser(req.userEmail)?.appLock?.pinHash;if(!hash||!await bcrypt.compare(String(req.body?.pin||''),hash)){recordSecurityFailure(req,'app_pin','INVALID_PIN',req.userEmail);return res.status(401).json({error:'Невірний PIN'});}res.json({ok:true});});
+
+app.get('/api/account/lock/reset-request',requireUserSession,async(req,res)=>{
+  await operationsStore.refresh();
+  const item=latestPinResetRequest(req.userEmail);
+  if(item?.status==='approved'&&item.expiresAt&&new Date(item.expiresAt)<=new Date()){
+    item.status='expired';item.updatedAt=new Date().toISOString();await operationsStore.saveNow();
+  }
+  res.json({request:pinResetPublicView(item)});
+});
+app.post('/api/account/lock/reset-request',requireUserSession,rateLimit('app_pin_reset_request',24*60*60*1000,3,req=>req.userEmail),async(req,res)=>{
+  await operationsStore.refresh();
+  const user=getUser(req.userEmail);
+  if(!user?.appLock?.enabled||!user?.appLock?.pinHash)return res.status(409).json({error:'PIN-захист для цього акаунта не увімкнений'});
+  const state=operationsStore.store();
+  const existing=(state.pinResetRequests||[]).find(item=>item.email===req.userEmail&&item.status==='pending');
+  if(existing)return res.json({ok:true,request:pinResetPublicView(existing)});
+  const now=new Date().toISOString(),item={id:`pin_reset_${Date.now().toString(36)}_${crypto.randomBytes(4).toString('hex')}`,email:req.userEmail,status:'pending',requestedAt:now,updatedAt:now};
+  (state.pinResetRequests||=[]).unshift(item);state.pinResetRequests=state.pinResetRequests.slice(0,1000);await operationsStore.saveNow();
+  const recipients=adminAuth.listAdmins().filter(admin=>admin.role==='super_admin'&&!admin.blocked);
+  for(const admin of recipients){
+    sendEmail({to:admin.email,subject:'Запит на відновлення PIN — Signal Admin',html:emailTemplates.notification({title:'Користувач забув PIN',message:`${req.userEmail} надіслав запит на безпечне відновлення PIN. Старий PIN не передається. Перевірте запит і підтвердьте дію лише якщо впевнені, що це власник акаунта.`,actionUrl:'/admin-pin-resets.html',actionLabel:'Перевірити запит'})}).catch(error=>console.error('[pin reset email]',error.message));
+    sendToEmail(`admin:${admin.email}`,{title:'Запит на відновлення PIN',body:`${req.userEmail} очікує перевірки.`,url:'/admin-pin-resets.html',tag:`pin-reset-${item.id}`}).catch(()=>{});
+  }
+  auditStore.log({adminEmail:'system',action:'app_pin_reset_requested',target:req.userEmail,details:{requestId:item.id}});
+  res.status(201).json({ok:true,request:pinResetPublicView(item)});
+});
+app.post('/api/account/lock/reset-complete',requireUserSession,rateLimit('app_pin_reset_complete',15*60*1000,10,req=>req.userEmail),async(req,res)=>{
+  await operationsStore.refresh();
+  const pin=String(req.body?.pin||''),confirmation=String(req.body?.confirmation||'');
+  if(!/^\d{6}$/.test(pin))return res.status(400).json({error:'Новий PIN має містити рівно 6 цифр'});
+  if(pin!==confirmation)return res.status(400).json({error:'PIN-коди не збігаються'});
+  const item=latestPinResetRequest(req.userEmail);
+  if(!item||item.status!=='approved')return res.status(403).json({error:'Скидання PIN ще не підтверджено адміністратором'});
+  if(!item.expiresAt||new Date(item.expiresAt)<=new Date()){item.status='expired';item.updatedAt=new Date().toISOString();await operationsStore.saveNow();return res.status(410).json({error:'Дозвіл на скидання завершився. Надішліть новий запит'});}
+  const completedAt=new Date().toISOString();
+  saveUser(req.userEmail,{appLock:{enabled:true,pinHash:await bcrypt.hash(pin,10),resetCompletedAt:completedAt}});
+  item.status='completed';item.completedAt=completedAt;item.updatedAt=completedAt;await operationsStore.saveNow();
+  authService.revokeOtherSessions(req.userEmail,req.sessionToken);
+  auditStore.log({adminEmail:item.decidedBy||'system',action:'app_pin_reset_completed',target:req.userEmail,details:{requestId:item.id}});
+  res.json({ok:true});
+});
+
+app.get('/api/admin/pin-reset-requests',adminAuth.requireAdmin,adminAuth.requireRole('super_admin'),adminAuth.requirePermission('security.manage'),async(req,res)=>{
+  await operationsStore.refresh();
+  const items=(operationsStore.store().pinResetRequests||[]).map(item=>({id:item.id,email:item.email,status:item.status,requestedAt:item.requestedAt,decidedAt:item.decidedAt||null,decidedBy:item.decidedBy||null,expiresAt:item.expiresAt||null,completedAt:item.completedAt||null}));
+  res.json({items,summary:{pending:items.filter(item=>item.status==='pending').length,approved:items.filter(item=>item.status==='approved').length,completed:items.filter(item=>item.status==='completed').length}});
+});
+app.post('/api/admin/pin-reset-requests/:id/approve',adminAuth.requireAdmin,adminAuth.requireRole('super_admin'),adminAuth.requirePermission('security.manage',{requireTwoFactor:true}),async(req,res)=>{
+  await operationsStore.refresh();
+  const state=operationsStore.store(),item=(state.pinResetRequests||[]).find(entry=>entry.id===req.params.id);
+  if(!item)return res.status(404).json({error:'Запит не знайдено'});
+  if(item.status!=='pending')return res.status(409).json({error:'Цей запит уже опрацьовано'});
+  const user=getUser(item.email);if(!user)return res.status(404).json({error:'Акаунт користувача не знайдено'});
+  const decidedAt=new Date(),expiresAt=new Date(decidedAt.getTime()+30*60*1000);
+  Object.assign(item,{status:'approved',decidedAt:decidedAt.toISOString(),decidedBy:req.admin.email,expiresAt:expiresAt.toISOString(),updatedAt:decidedAt.toISOString()});
+  await operationsStore.saveNow();
+  auditStore.log({adminEmail:req.admin.email,action:'app_pin_reset_approved',target:item.email,details:{requestId:item.id,expiresAt:item.expiresAt}});
+  sendEmail({to:item.email,subject:'Відновлення PIN підтверджено — Signal',html:emailTemplates.notification({title:'Можна створити новий PIN',message:'Адміністратор підтвердив відновлення. Відкрийте Signal протягом 30 хвилин і створіть новий 6-значний PIN на захищеному екрані.',actionUrl:'/dashboard.html',actionLabel:'Відкрити Signal'})}).catch(error=>console.error('[pin reset approved email]',error.message));
+  sendToEmail(item.email,{title:'Відновлення PIN підтверджено',body:'Відкрийте Signal протягом 30 хвилин і створіть новий PIN.',url:'/dashboard.html',tag:`pin-reset-approved-${item.id}`}).catch(()=>{});
+  res.json({ok:true,item:pinResetPublicView(item)});
+});
+app.post('/api/admin/pin-reset-requests/:id/deny',adminAuth.requireAdmin,adminAuth.requireRole('super_admin'),adminAuth.requirePermission('security.manage',{requireTwoFactor:true}),async(req,res)=>{
+  await operationsStore.refresh();
+  const item=(operationsStore.store().pinResetRequests||[]).find(entry=>entry.id===req.params.id);
+  if(!item)return res.status(404).json({error:'Запит не знайдено'});
+  if(item.status!=='pending')return res.status(409).json({error:'Цей запит уже опрацьовано'});
+  const decidedAt=new Date().toISOString();Object.assign(item,{status:'denied',decidedAt,decidedBy:req.admin.email,updatedAt:decidedAt});await operationsStore.saveNow();
+  auditStore.log({adminEmail:req.admin.email,action:'app_pin_reset_denied',target:item.email,details:{requestId:item.id}});
+  sendEmail({to:item.email,subject:'Запит на відновлення PIN відхилено — Signal',html:emailTemplates.notification({title:'Запит на відновлення відхилено',message:'Адміністратор не зміг підтвердити цей запит. Якщо це були ви, зверніться до підтримки для перевірки власника акаунта.',actionUrl:'/support.html',actionLabel:'Написати в підтримку'})}).catch(()=>{});
+  res.json({ok:true,item:pinResetPublicView(item)});
+});
 
 app.put('/api/account/profile', requireUserSession, async (req, res) => {
   try {

@@ -55,7 +55,40 @@ test('global update assets use one coherent cache and app version', () => {
   const worker = read('sw.js');
   const pwa = read('pwa.js');
   for (const page of ['/travel-assistant.html','/esim-topup.html','/family-share.html']) assert.match(worker, new RegExp(page.replace('.', '\\.')));
-  assert.match(worker, /signal-shell-v70-global-travel/);
-  assert.match(pwa, /SIGNAL_FRONTEND_VERSION='2\.0\.0'/);
-  assert.match(pwa, /SIGNAL_SW_VERSION='v70'/);
+  assert.match(worker, /signal-shell-v72-pin-recovery/);
+  assert.match(pwa, /SIGNAL_FRONTEND_VERSION='2\.0\.2'/);
+  assert.match(pwa, /SIGNAL_SW_VERSION='v72'/);
+});
+
+test('travel planner dates fit mobile cards and home uses a compact day badge', () => {
+  const planner = read('travel-assistant.html');
+  const dashboard = read('dashboard.html');
+  const css = read('style.css');
+  assert.match(planner, /box-sizing:border-box/);
+  assert.match(planner, /date-control input::-webkit-date-and-time-value/);
+  assert.match(planner, /id="startHint"/);
+  assert.match(planner, /endDate\.min=startDate\.value\|\|today/);
+  assert.match(dashboard, /class="trip-days"/);
+  assert.match(dashboard, /days===1\?'\u0434ень':days>=2&&days<=4\?'\u0434ні'/);
+  assert.match(css, /\.home \.trip-days/);
+});
+
+test('forgotten app PIN uses an audited admin approval instead of exposing the old PIN', () => {
+  const server = read('server.js');
+  const pwa = read('pwa.js');
+  const operations = read('operationsStore.js');
+  const nav = read('admin-common.js');
+  const admin = read('admin-pin-resets.html');
+  assert.match(server, /app\.post\('\/api\/account\/lock\/reset-request',requireUserSession,rateLimit/);
+  assert.match(server, /app\.post\('\/api\/account\/lock\/reset-complete',requireUserSession,rateLimit/);
+  assert.match(server, /app\.post\('\/api\/admin\/pin-reset-requests\/:id\/approve',[^\n]*requireRole\('super_admin'\)[^\n]*requirePermission\('security\.manage',\{requireTwoFactor:true\}\)/);
+  assert.match(server, /app\.post\('\/api\/admin\/pin-reset-requests\/:id\/deny',[^\n]*requireRole\('super_admin'\)[^\n]*requirePermission\('security\.manage',\{requireTwoFactor:true\}\)/);
+  assert.match(server, /pinHash:await bcrypt\.hash\(pin,10\)/);
+  assert.doesNotMatch(server, /oldPin|plainPin|pinValue/);
+  assert.match(operations, /pinResetRequests:\s*\[\]/);
+  assert.match(pwa, /Забули PIN\?/);
+  assert.match(pwa, /reset-complete/);
+  assert.match(nav, /admin-pin-resets\.html/);
+  assert.match(admin, /Схвалення діє лише 30 хвилин/);
+  assert.match(admin, /підтвердженою 2FA/);
 });

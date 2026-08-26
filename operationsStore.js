@@ -2,13 +2,14 @@ const storage = require('./persistentState');
 const defaults = () => ({
   announcements: [], notes: {}, blacklist: { emails: [], iccids: [] }, templates: [],
   emailBroadcasts: [], securityEvents: [], jobs: [], deliveryEvents: [], resolvedAttention: {}, processedEvents: {},
+  pinResetRequests: [],
   featureFlags: {
     registration:true, monthlyPlans:true, travelPackages:true, mobileTopups:true, referrals:true,
     autoRenew:true, push:true, deepl:true, photoUploads:true, cardPayments:true,
   },
   featureRules: { disabledCountries:[], disabledPackages:[], paymentMethods:{stripeCard:true} },
   providerBalance: { amount:null, currency:'USD', averageOrderCost:null, updatedAt:null, source:'not_configured' },
-  versionInfo: { frontend:'2.0.0', backend:'2.0.0', serviceWorker:'v70', cache:'signal-shell-v70-global-travel', deployedAt:null, changelog:['Розумна подорож','Поповнення встановленої eSIM','Захищена передача близьким','Новий контроль подорожей в адмінці'],criticalRefreshToken:null,criticalAssets:['/i18n.js','/style.css','/pwa.js','/sw.js'] },
+  versionInfo: { frontend:'2.0.2', backend:'2.0.2', serviceWorker:'v72', cache:'signal-shell-v72-pin-recovery', deployedAt:null, changelog:['Безпечне відновлення PIN через Super Admin','Мобільний календар подорожі','Світлий віджет з відліком днів','Поповнення встановленої eSIM','Захищена передача близьким'],criticalRefreshToken:null,criticalAssets:['/i18n.js','/style.css','/pwa.js','/sw.js'] },
   clientVersions: {},
   dailyReports: [], reportSettings: { enabled:true, hour:8, lastSentDate:null },
 });
@@ -20,7 +21,7 @@ async function bootstrap(){
   store.featureFlags = {...defaults().featureFlags, ...(loaded.featureFlags||{})};
   store.featureRules = {...defaults().featureRules, ...(loaded.featureRules||{}),paymentMethods:{...defaults().featureRules.paymentMethods,...(loaded.featureRules?.paymentMethods||{})}};
   store.providerBalance = {...defaults().providerBalance, ...(loaded.providerBalance||{})};
-  store.versionInfo = {...defaults().versionInfo, ...(loaded.versionInfo||{})};
+  store.versionInfo = {...defaults().versionInfo, ...(loaded.versionInfo||{}), frontend:defaults().versionInfo.frontend, backend:defaults().versionInfo.backend, serviceWorker:defaults().versionInfo.serviceWorker, cache:defaults().versionInfo.cache, changelog:defaults().versionInfo.changelog};
   store.reportSettings = {...defaults().reportSettings, ...(loaded.reportSettings||{})};
 }
 function save(){ storage.save('operations.json', store); }
@@ -30,6 +31,7 @@ async function refresh(){
   store={...defaults(),...loaded};
   store.blacklist={...defaults().blacklist,...(loaded.blacklist||{})};
   store.featureFlags={...defaults().featureFlags,...(loaded.featureFlags||{})};
+  store.versionInfo={...defaults().versionInfo,...(loaded.versionInfo||{}),frontend:defaults().versionInfo.frontend,backend:defaults().versionInfo.backend,serviceWorker:defaults().versionInfo.serviceWorker,cache:defaults().versionInfo.cache,changelog:defaults().versionInfo.changelog};
   return store;
 }
 function activeAnnouncements(email){ const now=Date.now(); return store.announcements.filter(a => (!a.startsAt || new Date(a.startsAt)<=now) && (!a.expiresAt || new Date(a.expiresAt)>now) && (a.audience==='all'||a.audience===email)); }

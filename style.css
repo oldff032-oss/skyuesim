@@ -447,3 +447,12 @@ code.qr{ display:block; background:#000; color:var(--success); font-family:'Spac
 .install-step span.label-text{ font-size:13.5px; color:var(--text-muted); }
 .install-step.done span.label-text{ color:var(--text); }
 .install-step.active span.label-text{ color:var(--text); font-weight:600; }
+
+/* Bright, compact trip preview on the home screen. */
+.home .trip-promo{position:relative;isolation:isolate;overflow:hidden;min-height:78px;margin-top:15px;padding:14px 15px;background:radial-gradient(circle at 88% 8%,rgba(41,225,255,.31),transparent 34%),linear-gradient(135deg,rgba(27,100,173,.68),rgba(104,48,164,.67));border-color:rgba(117,232,255,.52);box-shadow:0 15px 40px rgba(16,67,140,.24),inset 0 1px rgba(255,255,255,.08)}
+.home .trip-promo:after{content:"";position:absolute;width:120px;height:46px;right:-22px;bottom:-21px;border:1px solid rgba(165,241,255,.24);border-radius:50%;transform:rotate(-12deg);z-index:-1}
+.home .trip-promo .trip-art{width:48px;height:48px;flex:none;display:grid;place-items:center;border-radius:16px;background:linear-gradient(145deg,rgba(51,220,255,.24),rgba(138,80,255,.3));box-shadow:0 0 25px rgba(59,221,255,.25);font-size:27px;font-style:normal;animation:tripFloat 3s ease-in-out infinite}
+.home .trip-promo .trip-copy{min-width:0;flex:1}.home .trip-promo .trip-copy b{font-size:14px;color:#fff}.home .trip-promo .trip-copy span{color:#c3d4f2;font-size:10.5px;line-height:1.35}
+.home .trip-days{flex:none;min-width:58px;margin:0!important;padding:8px 9px;border-radius:13px;background:rgba(7,14,39,.5);border:1px solid rgba(155,236,255,.25);color:#9df3ff!important;text-align:center;font-size:11px!important;font-weight:800;line-height:1.15!important;white-space:nowrap}.home .trip-days small{display:block;margin-top:2px;color:#b7c8e5;font-size:8px;font-weight:600}
+@media(max-width:360px){.home .trip-promo{padding-inline:12px;gap:10px}.home .trip-promo .trip-art{width:43px;height:43px}.home .trip-days{min-width:53px;padding-inline:7px}}
+@media(prefers-reduced-motion:reduce){.home .trip-promo .trip-art{animation:none}}

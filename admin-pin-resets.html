@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="uk">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Відновлення PIN — Signal Admin</title>
+  <link rel="stylesheet" href="style.css">
+  <style>
+    .pin-hero{position:relative;overflow:hidden;padding:24px;border:1px solid rgba(84,139,255,.3);background:linear-gradient(145deg,rgba(16,36,72,.92),rgba(24,16,57,.92))}.pin-hero:after{content:"";position:absolute;width:240px;height:240px;border-radius:50%;right:-110px;top:-130px;background:rgba(41,211,255,.13);filter:blur(8px)}.pin-hero>*{position:relative;z-index:1}.pin-alert{display:flex;gap:13px;align-items:flex-start;margin-top:14px;padding:13px 15px;border-radius:14px;background:rgba(255,188,66,.1);border:1px solid rgba(255,188,66,.24);color:#ffd68a;font-size:13px;line-height:1.5}.pin-list{display:grid;gap:12px;margin-top:18px}.pin-request{display:grid;grid-template-columns:minmax(220px,1.5fr) repeat(2,minmax(130px,.7fr)) auto;gap:14px;align-items:center;padding:17px;border:1px solid var(--glass-border);border-radius:18px;background:rgba(255,255,255,.025)}.pin-email{font-size:14px;overflow-wrap:anywhere}.pin-meta{font-size:12px;color:var(--muted)}.pin-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}.pin-actions button{width:auto;padding:10px 13px}.pin-status{display:inline-flex;align-items:center;gap:6px;padding:6px 9px;border-radius:999px;font-size:11px;font-weight:800}.pin-status.pending{background:rgba(245,166,35,.14);color:#ffd071}.pin-status.approved{background:rgba(55,210,173,.14);color:#62e2c0}.pin-status.completed{background:rgba(74,122,255,.16);color:#9cb7ff}.pin-status.denied,.pin-status.expired{background:rgba(255,97,121,.12);color:#ff97a7}.empty-pin{text-align:center;padding:50px 20px}.empty-pin span{display:grid;place-items:center;width:64px;height:64px;margin:auto;border-radius:20px;background:linear-gradient(135deg,#1c315f,#2b1a5c);font-size:28px;box-shadow:0 0 35px rgba(69,124,255,.25)}@media(max-width:850px){.pin-request{grid-template-columns:1fr 1fr}.pin-request>div:first-child,.pin-actions{grid-column:1/-1}.pin-actions{justify-content:flex-start}}@media(max-width:520px){.pin-request{grid-template-columns:1fr}.pin-request>*{grid-column:1!important}.pin-actions button{flex:1}.pin-hero{padding:20px}}
+  </style>
+</head>
+<body>
+  <div class="admin-shell">
+    <aside class="admin-sidebar"><div class="brand"><div class="mark">⌁</div><span>Signal Admin</span></div><nav class="admin-nav"></nav></aside>
+    <main class="admin-main">
+      <section class="glass pin-hero">
+        <span class="eyebrow">БЕЗПЕКА АКАУНТІВ</span>
+        <h1 style="margin:8px 0 6px">Відновлення PIN</h1>
+        <p class="lead" style="margin:0;max-width:720px">Перевіряйте запити користувачів і надавайте короткий дозвіл на створення нового PIN. Старий PIN не зберігається та не показується.</p>
+        <div class="pin-alert"><b>🛡️</b><span>Схвалення діє лише 30 хвилин. Дія доступна тільки Super Admin із підтвердженою 2FA та повністю записується в журнал аудиту.</span></div>
+      </section>
+      <div id="stats" class="stat-grid" style="margin-top:18px"></div>
+      <section class="glass glass-card" style="margin-top:18px">
+        <div style="display:flex;gap:12px;justify-content:space-between;align-items:center;flex-wrap:wrap"><div><h2 style="margin:0;font-size:18px">Запити користувачів</h2><p class="muted" style="margin:5px 0 0">Нові запити показуються першими.</p></div><button class="btn" style="width:auto" onclick="load()">Оновити</button></div>
+        <div id="message" class="muted" style="min-height:18px;margin-top:12px"></div>
+        <div id="list" class="pin-list"><div class="shimmer" style="height:120px"></div></div>
+      </section>
+    </main>
+  </div>
+  <script src="config.js"></script><script src="admin-common.js"></script>
+  <script>
+    requireAdminAuth();
+    const esc=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+    const labels={pending:'Очікує',approved:'Підтверджено',completed:'Новий PIN створено',denied:'Відхилено',expired:'Час минув'};
+    const formatDate=value=>value?new Date(value).toLocaleString('uk-UA',{dateStyle:'medium',timeStyle:'short'}):'—';
+    function render(items){const list=document.getElementById('list');if(!items.length){list.innerHTML='<div class="empty-pin"><span>✓</span><h3>Запитів поки немає</h3><p class="muted">Коли користувач натисне «Забули PIN?», запит з’явиться тут.</p></div>';return}list.innerHTML=items.map(item=>`<article class="pin-request"><div><span class="pin-status ${esc(item.status)}">● ${esc(labels[item.status]||item.status)}</span><div class="pin-email" style="margin-top:9px"><b>${esc(item.email)}</b></div><div class="pin-meta">ID: ${esc(item.id)}</div></div><div><b style="font-size:12px">Надіслано</b><div class="pin-meta" style="margin-top:5px">${formatDate(item.requestedAt)}</div></div><div><b style="font-size:12px">Рішення</b><div class="pin-meta" style="margin-top:5px">${item.decidedAt?`${formatDate(item.decidedAt)}<br>${esc(item.decidedBy||'')}`:'Ще не прийнято'}</div></div><div class="pin-actions">${item.status==='pending'?`<button class="btn primary" onclick="decide('${encodeURIComponent(item.id)}','approve')">Підтвердити</button><button class="btn ghost" onclick="decide('${encodeURIComponent(item.id)}','deny')">Відхилити</button>`:''}</div></article>`).join('')}
+    async function load(){const message=document.getElementById('message');message.textContent='Завантаження…';try{const response=await adminFetch('/api/admin/pin-reset-requests'),data=await response.json();if(!response.ok)throw Error(data.error);document.getElementById('stats').innerHTML=`<div class="glass stat-card"><div class="num" style="color:#ffd071">${data.summary.pending}</div><div class="lbl">Очікують рішення</div></div><div class="glass stat-card"><div class="num" style="color:#62e2c0">${data.summary.approved}</div><div class="lbl">Можуть змінити PIN</div></div><div class="glass stat-card"><div class="num">${data.summary.completed}</div><div class="lbl">Успішно завершено</div></div>`;render(data.items);message.textContent='';}catch(error){message.textContent=error.message;document.getElementById('list').innerHTML='';}}
+    async function decide(id,action){const approving=action==='approve',warning=approving?'Підтвердити особу користувача й дозволити створити новий PIN протягом 30 хвилин?':'Відхилити цей запит на відновлення PIN?';if(!confirm(warning))return;const message=document.getElementById('message');message.textContent='Зберігаємо рішення…';try{const response=await adminFetch(`/api/admin/pin-reset-requests/${id}/${action}`,{method:'POST',body:'{}'}),data=await response.json();if(!response.ok)throw Error(data.error);message.textContent=approving?'Підтверджено. Користувач може створити новий PIN протягом 30 хвилин.':'Запит відхилено.';await load();}catch(error){message.textContent=error.message+(error.message.includes('2FA')?' Увімкніть 2FA у розділі «Моя 2FA» та увійдіть знову.':'');}}
+    load();setInterval(load,15000);
+  </script>
+</body>
+</html>
