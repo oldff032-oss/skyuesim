@@ -3,7 +3,7 @@
 // Кешує тільки статичну "оболонку" — самі дані (підписка, тікети) завжди
 // тягнуться наживо з бекенду, ніколи не кешуються.
 
-const CACHE_NAME = 'signal-shell-v80-signal-universe';
+const CACHE_NAME = 'signal-shell-v81-google-wallet';
 const SHELL_FILES = [
   '/dashboard.html',
   '/profile.html',
@@ -26,6 +26,7 @@ const SHELL_FILES = [
   '/offline-esim.html',
   '/app-tools.html',
   '/support.html',
+  '/help.html',
   '/style.css',
   '/experience.css',
   '/experience.js',

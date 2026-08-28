@@ -55,9 +55,9 @@ test('global update assets use one coherent cache and app version', () => {
   const worker = read('sw.js');
   const pwa = read('pwa.js');
   for (const page of ['/travel-assistant.html','/esim-topup.html','/family-share.html']) assert.match(worker, new RegExp(page.replace('.', '\\.')));
-  assert.match(worker, /signal-shell-v80-signal-universe/);
-  assert.match(pwa, /SIGNAL_FRONTEND_VERSION='2\.1\.0'/);
-  assert.match(pwa, /SIGNAL_SW_VERSION='v80'/);
+  assert.match(worker, /signal-shell-v81-google-wallet/);
+  assert.match(pwa, /SIGNAL_FRONTEND_VERSION='2\.1\.1'/);
+  assert.match(pwa, /SIGNAL_SW_VERSION='v81'/);
 });
 
 test('travel planner dates fit mobile cards and home uses a compact day badge', () => {

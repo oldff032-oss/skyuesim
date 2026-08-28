@@ -31,6 +31,7 @@ const backupService = require('./backupService');
 const controlCenter = require('./controlCenterService');
 const mobileTopups = require('./mobileTopupService');
 const engagement = require('./engagementService');
+const googleWallet = require('./googleWalletService');
 
 const app = express();
 const esimRetriesInProgress = new Set();
@@ -761,9 +762,10 @@ app.put('/api/account/family-trips/:id',requireUserSession,(req,res)=>{
 });
 app.delete('/api/account/family-trips/:id',requireUserSession,(req,res)=>{const user=getUser(req.userEmail)||{},trips=(user.familyTrips||[]).filter(item=>item.id!==req.params.id);if(trips.length===(user.familyTrips||[]).length)return res.status(404).json({error:'Подорож не знайдено'});saveUser(req.userEmail,{familyTrips:trips});res.json({ok:true});});
 
-app.get('/api/account/wallet-pass',requireUserSession,(req,res)=>{
+app.get('/api/account/wallet-pass',requireUserSession,async(req,res)=>{
   const user=getUser(req.userEmail)||{},card=engagement.walletCard(user),base=String(process.env.FRONTEND_URL||'').replace(/\/$/,'');
-  res.json({card,googleUrl:process.env.GOOGLE_WALLET_SAVE_URL||null,appleUrl:process.env.APPLE_WALLET_PASS_URL||null,offlineUrl:`${base}/offline-esim.html`,privacy:'Wallet-картка не містить QR, ICCID, PIN або коду активації.'});
+  const google=await googleWallet.createPass(card);
+  res.json({card,google:{status:google.status,configured:google.configured,missing:google.missing||[],expiresAt:google.expiresAt||null},googleUrl:google.url,appleUrl:process.env.APPLE_WALLET_PASS_URL||null,offlineUrl:`${base}/offline-esim.html`,privacy:'Wallet-картка не містить email, QR, ICCID, PIN або коду активації.'});
 });
 
 app.get('/api/account/rescue',requireUserSession,(req,res)=>{const user=getUser(req.userEmail)||{};res.json({diagnostics:engagement.safeRescueDiagnostics(user,{}),insights:engagement.usageInsights(user),checks:{hasEsim:Boolean(user.esim?.orderNo),hasApn:Boolean(user.esim?.apn),hasRecentSync:Boolean(user.esim?.lastUpdateTime&&Date.now()-new Date(user.esim.lastUpdateTime)<24*3600000),hasPaidPurchase:Boolean((user.purchases||[]).some(item=>item.paymentStatus==='paid'))}});});

@@ -18,7 +18,7 @@ const defaults = () => ({
   },
   featureRules: { disabledCountries:[], disabledPackages:[], paymentMethods:{stripeCard:true} },
   providerBalance: { amount:null, currency:'USD', averageOrderCost:null, updatedAt:null, source:'not_configured' },
-  versionInfo: { frontend:'2.1.0', backend:'2.1.0', serviceWorker:'v80', cache:'signal-shell-v80-signal-universe', deployedAt:null, changelog:['Signal Passport і країни подорожей','Signal Club та безпечні винагороди','Розумний прогноз залишку даних','Сімейні подорожі','Signal Travel Pass для Wallet','Режим порятунку з діагностикою'],criticalRefreshToken:null,criticalAssets:['/i18n.js','/style.css','/experience.css','/experience.js','/pwa.js','/sw.js'] },
+  versionInfo: { frontend:'2.1.1', backend:'2.1.1', serviceWorker:'v81', cache:'signal-shell-v81-google-wallet', deployedAt:null, changelog:['Персональний Signal Travel Pass для Google Wallet','Короткочасне захищене посилання Google Wallet','Signal Passport і країни подорожей','Signal Club та безпечні винагороди','Розумний прогноз залишку даних','Сімейні подорожі','Режим порятунку з діагностикою'],criticalRefreshToken:null,criticalAssets:['/i18n.js','/style.css','/experience.css','/experience.js','/wallet-pass.html','/pwa.js','/sw.js'] },
   clientVersions: {},
   dailyReports: [], reportSettings: { enabled:true, hour:8, lastSentDate:null },
 });
