@@ -3,13 +3,22 @@ const defaults = () => ({
   announcements: [], notes: {}, blacklist: { emails: [], iccids: [] }, templates: [],
   emailBroadcasts: [], securityEvents: [], jobs: [], deliveryEvents: [], resolvedAttention: {}, processedEvents: {},
   pinResetRequests: [],
+  rescueRequests: [],
+  engagementSettings: {
+    enabled:true, pointsPerDollar:10, stampBonus:50,
+    rewards:[
+      {id:'discount_1',name:'Знижка $1 на наступну eSIM',points:250,kind:'discount',amountCents:100},
+      {id:'discount_2',name:'Знижка $2 на наступну eSIM',points:500,kind:'discount',amountCents:200},
+      {id:'discount_5',name:'Знижка $5 на наступну eSIM',points:1100,kind:'discount',amountCents:500},
+    ],
+  },
   featureFlags: {
     registration:true, monthlyPlans:true, travelPackages:true, mobileTopups:true, referrals:true,
     autoRenew:true, push:true, deepl:true, photoUploads:true, cardPayments:true,
   },
   featureRules: { disabledCountries:[], disabledPackages:[], paymentMethods:{stripeCard:true} },
   providerBalance: { amount:null, currency:'USD', averageOrderCost:null, updatedAt:null, source:'not_configured' },
-  versionInfo: { frontend:'2.0.3', backend:'2.0.3', serviceWorker:'v73', cache:'signal-shell-v73-pin-email-recovery', deployedAt:null, changelog:['Одноразовий email-код для відновлення PIN','Виправлено повторне відкриття відновлення PIN','Безпечне відновлення PIN через Super Admin','Мобільний календар подорожі','Світлий віджет з відліком днів','Поповнення встановленої eSIM','Захищена передача близьким'],criticalRefreshToken:null,criticalAssets:['/i18n.js','/style.css','/pwa.js','/sw.js'] },
+  versionInfo: { frontend:'2.1.0', backend:'2.1.0', serviceWorker:'v80', cache:'signal-shell-v80-signal-universe', deployedAt:null, changelog:['Signal Passport і країни подорожей','Signal Club та безпечні винагороди','Розумний прогноз залишку даних','Сімейні подорожі','Signal Travel Pass для Wallet','Режим порятунку з діагностикою'],criticalRefreshToken:null,criticalAssets:['/i18n.js','/style.css','/experience.css','/experience.js','/pwa.js','/sw.js'] },
   clientVersions: {},
   dailyReports: [], reportSettings: { enabled:true, hour:8, lastSentDate:null },
 });
@@ -21,6 +30,7 @@ async function bootstrap(){
   store.featureFlags = {...defaults().featureFlags, ...(loaded.featureFlags||{})};
   store.featureRules = {...defaults().featureRules, ...(loaded.featureRules||{}),paymentMethods:{...defaults().featureRules.paymentMethods,...(loaded.featureRules?.paymentMethods||{})}};
   store.providerBalance = {...defaults().providerBalance, ...(loaded.providerBalance||{})};
+  store.engagementSettings = {...defaults().engagementSettings, ...(loaded.engagementSettings||{}),rewards:Array.isArray(loaded.engagementSettings?.rewards)?loaded.engagementSettings.rewards:defaults().engagementSettings.rewards};
   store.versionInfo = {...defaults().versionInfo, ...(loaded.versionInfo||{}), frontend:defaults().versionInfo.frontend, backend:defaults().versionInfo.backend, serviceWorker:defaults().versionInfo.serviceWorker, cache:defaults().versionInfo.cache, changelog:defaults().versionInfo.changelog};
   store.reportSettings = {...defaults().reportSettings, ...(loaded.reportSettings||{})};
 }
@@ -31,6 +41,7 @@ async function refresh(){
   store={...defaults(),...loaded};
   store.blacklist={...defaults().blacklist,...(loaded.blacklist||{})};
   store.featureFlags={...defaults().featureFlags,...(loaded.featureFlags||{})};
+  store.engagementSettings={...defaults().engagementSettings,...(loaded.engagementSettings||{}),rewards:Array.isArray(loaded.engagementSettings?.rewards)?loaded.engagementSettings.rewards:defaults().engagementSettings.rewards};
   store.versionInfo={...defaults().versionInfo,...(loaded.versionInfo||{}),frontend:defaults().versionInfo.frontend,backend:defaults().versionInfo.backend,serviceWorker:defaults().versionInfo.serviceWorker,cache:defaults().versionInfo.cache,changelog:defaults().versionInfo.changelog};
   return store;
 }

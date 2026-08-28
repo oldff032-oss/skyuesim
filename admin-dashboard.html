@@ -80,6 +80,8 @@
               <div class="stat-card"><div class="num">${data.esim.expiringSoon}</div><div class="lbl">eSIM завершаться ≤7 днів</div></div>
               <a href="admin-travel.html" class="stat-card" style="color:inherit;text-decoration:none"><div class="num" style="color:#67e8f9">${data.travel?.upcoming14Days||0}</div><div class="lbl">Подорожей ≤14 днів</div></a>
               <a href="admin-travel.html" class="stat-card" style="color:inherit;text-decoration:none"><div class="num" style="color:var(--danger)">${data.travel?.withoutEsim||0}</div><div class="lbl">Подорожей без eSIM</div></a>
+              <a href="admin-engagement.html" class="stat-card" style="color:inherit;text-decoration:none"><div class="num" style="color:#a78bfa">${data.engagement?.members||0}</div><div class="lbl">Учасників Signal Club</div></a>
+              <a href="admin-rescue.html" class="stat-card" style="color:inherit;text-decoration:none"><div class="num" style="color:#ffd071">${data.rescue?.pending||0}</div><div class="lbl">Запитів порятунку</div></a>
             </div>
             ${data.recentTickets.length ? `<div style="margin-top:16px;">${data.recentTickets.map(ticket => `<a href="admin-ticket.html?id=${ticket.id}" style="display:flex;justify-content:space-between;gap:12px;padding:9px 0;border-top:1px solid var(--glass-border);color:var(--text);text-decoration:none;font-size:13px;"><span>#${ticket.id} · ${ticket.subject}</span><span class="muted">${ticket.assignedTo || 'не призначено'}</span></a>`).join('')}</div>` : ''}
           </div>`;

@@ -10,7 +10,7 @@
     "generate:vapid": "node generate-vapid-keys.js",
     "push:check": "node pushWorker.js",
     "test": "node --test tests/*.test.js",
-    "check": "node --check server.js && node --check stripeService.js && node --check ticketStore.js && node --check offline-esim.js && node --check mobileTopupService.js && node --check pushWorker.js && node --check controlCenterService.js && node --check operationsStore.js && node --check adminAuthService.js && node --check translationService.js && node --check authService.js && node --check persistentState.js && npm test"
+    "check": "node --check server.js && node --check engagementService.js && node --check stripeService.js && node --check ticketStore.js && node --check offline-esim.js && node --check mobileTopupService.js && node --check pushWorker.js && node --check controlCenterService.js && node --check operationsStore.js && node --check adminAuthService.js && node --check translationService.js && node --check authService.js && node --check persistentState.js && npm test"
   },
   "dependencies": {
     "@simplewebauthn/browser": "^13.3.0",

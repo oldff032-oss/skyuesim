@@ -140,6 +140,10 @@
         } else if(limitGb) {
           forecastHtml = `<div class="card"><p class="muted">Прогноз з'явиться, коли назбирається трохи даних про використання.</p></div>`;
         }
+        try{
+          const insightRes=await fetch(`${API_URL}/api/account/usage-insights`,{headers:{'x-session-token':sessionToken},cache:'no-store'}),insight=await insightRes.json();
+          if(insightRes.ok)forecastHtml=`<div class="card" style="position:relative;overflow:hidden;border-color:${insight.risk==='high'?'#ff718566':'#55dfff3d'}"><div style="display:flex;align-items:center;gap:12px"><span style="width:44px;height:44px;border-radius:15px;display:grid;place-items:center;background:linear-gradient(145deg,#17467c,#40236e);font-size:22px;animation:usageGlow 2.8s ease-in-out infinite">◉</span><span><b>Розумний прогноз</b><small class="muted" style="display:block;margin-top:3px">${insight.confidence==='high'?'Висока точність':insight.confidence==='medium'?'Середня точність':'Потрібно більше даних'}</small></span></div><p class="muted" style="margin-top:13px;line-height:1.5">${insight.recommendation}</p>${insight.projectedDaysLeft==null?'':`<div style="font:700 28px Space Grotesk;margin-top:10px">≈ ${insight.projectedDaysLeft} дн.</div>`}<a href="smart-assist.html" class="btn ghost" style="margin-top:12px;padding:10px 12px;font-size:12px">Налаштувати Smart Assist</a></div>`;
+        }catch(e){}
 
         let historyHtml = '';
         try{

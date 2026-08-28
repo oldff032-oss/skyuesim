@@ -30,6 +30,7 @@ const emailTemplates = require('./emailTemplates');
 const backupService = require('./backupService');
 const controlCenter = require('./controlCenterService');
 const mobileTopups = require('./mobileTopupService');
+const engagement = require('./engagementService');
 
 const app = express();
 const esimRetriesInProgress = new Set();
@@ -56,6 +57,7 @@ function upsertPurchase(email, purchaseId, patch, defaults = {}) {
   const next = { ...current, ...patch, updatedAt:new Date().toISOString() };
   if (index >= 0) purchases[index] = next; else purchases.unshift(next);
   saveUser(email, { purchases });
+  if(['provisioned','delivered'].includes(next.fulfillmentStatus))awardEngagementForPurchase(email,purchaseId);
   return next;
 }
 
@@ -88,6 +90,26 @@ function buildSupportDiagnostics(user, client = {}) {
     providerStatus:clean(latestPurchase?.fulfillmentStatus || user?.esim?.provider || (user?.esim ? 'issued' : 'not_issued'), 80),
     apn:clean(user?.esim?.apn, 100),
   };
+}
+
+function awardEngagementForPurchase(email, purchaseId) {
+  const user=getUser(email),purchase=(user?.purchases||[]).find(item=>item.id===purchaseId);
+  if(!user||!purchase||!['provisioned','delivered'].includes(purchase.fulfillmentStatus))return {awarded:0};
+  const result=engagement.awardPurchase(user,purchase,operationsStore.store().engagementSettings||{});
+  if(result.awarded)saveUser(email,{loyalty:result.loyalty,passport:{stamps:engagement.passportFor({...user,loyalty:result.loyalty})}});
+  return result;
+}
+
+function syncEngagementForUser(email) {
+  let user=getUser(email)||{},loyalty=engagement.loyaltyFor(user),awarded=0;
+  for(const purchase of user.purchases||[]){
+    if(!['provisioned','delivered'].includes(purchase.fulfillmentStatus))continue;
+    const result=engagement.awardPurchase({...user,loyalty},purchase,operationsStore.store().engagementSettings||{});
+    loyalty=result.loyalty;awarded+=result.awarded;
+  }
+  const stamps=engagement.passportFor({...user,loyalty}),changedStamps=JSON.stringify(stamps)!==JSON.stringify(user.passport?.stamps||[]);
+  if(awarded||changedStamps){saveUser(email,{loyalty,passport:{...(user.passport||{}),stamps,lastSyncedAt:new Date().toISOString()}});user=getUser(email)||user;}
+  return user;
 }
 
 function recordDiagnostic(req,event={}) {
@@ -698,6 +720,58 @@ app.delete('/api/account/travel-mode', requireUserSession, (req,res) => {
   res.json({ok:true});
 });
 
+app.get('/api/account/passport',requireUserSession,(req,res)=>{
+  const user=syncEngagementForUser(req.userEmail);
+  const stamps=engagement.passportFor(user);
+  if(JSON.stringify(stamps)!==JSON.stringify(user.passport?.stamps||[]))saveUser(req.userEmail,{passport:{...(user.passport||{}),stamps,lastSyncedAt:new Date().toISOString()}});
+  res.json({stamps,totalCountries:new Set(stamps.map(item=>item.countryCode)).size,totalTrips:stamps.length,shareCard:{name:user.displayName||'Signal Traveler',level:engagement.publicClub(user,operationsStore.store().engagementSettings||{}).tier.name}});
+});
+
+app.post('/api/account/passport/sync',requireUserSession,rateLimit('passport_sync',15*60*1000,10,req=>req.userEmail),(req,res)=>{
+  const user=getUser(req.userEmail)||{},stamps=engagement.passportFor(user);
+  saveUser(req.userEmail,{passport:{...(user.passport||{}),stamps,lastSyncedAt:new Date().toISOString()}});
+  res.json({ok:true,stamps,totalCountries:new Set(stamps.map(item=>item.countryCode)).size});
+});
+
+app.get('/api/account/club',requireUserSession,(req,res)=>res.json(engagement.publicClub(syncEngagementForUser(req.userEmail),operationsStore.store().engagementSettings||{})));
+
+app.post('/api/account/club/redeem',requireUserSession,rateLimit('club_redeem',60*60*1000,8,req=>req.userEmail),(req,res)=>{
+  try{const user=getUser(req.userEmail)||{},result=engagement.redeem(user,String(req.body?.rewardId||''),operationsStore.store().engagementSettings||{});saveUser(req.userEmail,{loyalty:result.loyalty});res.json({ok:true,reward:result.reward,club:engagement.publicClub({...user,loyalty:result.loyalty},operationsStore.store().engagementSettings||{})});}
+  catch(error){res.status(error.code==='POINTS_INSUFFICIENT'?409:404).json({error:error.message,code:error.code});}
+});
+
+app.get('/api/account/usage-insights',requireUserSession,(req,res)=>res.json(engagement.usageInsights(getUser(req.userEmail)||{})));
+
+app.get('/api/account/smart-assist',requireUserSession,(req,res)=>{
+  const user=getUser(req.userEmail)||{},preference=user.smartAssist||{enabled:false,thresholdGb:1,maxMonthlySpendCents:2000};
+  res.json({preference,insights:engagement.usageInsights(user),requiresConfirmation:true,explanation:'Signal попереджає та відкриває захищену оплату. Картка не списується без підтвердження.'});
+});
+app.put('/api/account/smart-assist',requireUserSession,(req,res)=>{
+  const thresholdGb=Number(req.body?.thresholdGb),maxMonthlySpendCents=Math.trunc(Number(req.body?.maxMonthlySpendCents));
+  if(!Number.isFinite(thresholdGb)||thresholdGb<.1||thresholdGb>10||!Number.isInteger(maxMonthlySpendCents)||maxMonthlySpendCents<500||maxMonthlySpendCents>50000)return res.status(400).json({error:'Вкажіть поріг 0,1–10 ГБ і місячний ліміт від $5 до $500'});
+  const preference={enabled:req.body?.enabled===true,thresholdGb:+thresholdGb.toFixed(2),maxMonthlySpendCents,requiresConfirmation:true,updatedAt:new Date().toISOString()};saveUser(req.userEmail,{smartAssist:preference});res.json({ok:true,preference});
+});
+
+app.get('/api/account/family-trips',requireUserSession,(req,res)=>res.json({trips:getUser(req.userEmail)?.familyTrips||[],availableEsims:(getUser(req.userEmail)?.sharedEsims||[]).map(item=>({id:item.id,recipientName:item.recipientName,packageName:item.packageName,status:item.share?.installedAt?'installed':item.share?.viewedAt?'opened':item.share?'shared':'ready'}))}));
+app.post('/api/account/family-trips',requireUserSession,rateLimit('family_trip_write',60*60*1000,20,req=>req.userEmail),(req,res)=>{
+  try{const user=getUser(req.userEmail)||{},trips=[...(user.familyTrips||[])],trip=engagement.safeFamilyTrip(req.body||{});trips.unshift(trip);saveUser(req.userEmail,{familyTrips:trips.slice(0,20)});res.json({ok:true,trip});}catch(error){res.status(400).json({error:error.message,code:error.code});}
+});
+app.put('/api/account/family-trips/:id',requireUserSession,(req,res)=>{
+  try{const user=getUser(req.userEmail)||{},trips=[...(user.familyTrips||[])],index=trips.findIndex(item=>item.id===req.params.id);if(index<0)return res.status(404).json({error:'Подорож не знайдено'});trips[index]=engagement.safeFamilyTrip(req.body||{},trips[index]);saveUser(req.userEmail,{familyTrips:trips});res.json({ok:true,trip:trips[index]});}catch(error){res.status(400).json({error:error.message,code:error.code});}
+});
+app.delete('/api/account/family-trips/:id',requireUserSession,(req,res)=>{const user=getUser(req.userEmail)||{},trips=(user.familyTrips||[]).filter(item=>item.id!==req.params.id);if(trips.length===(user.familyTrips||[]).length)return res.status(404).json({error:'Подорож не знайдено'});saveUser(req.userEmail,{familyTrips:trips});res.json({ok:true});});
+
+app.get('/api/account/wallet-pass',requireUserSession,(req,res)=>{
+  const user=getUser(req.userEmail)||{},card=engagement.walletCard(user),base=String(process.env.FRONTEND_URL||'').replace(/\/$/,'');
+  res.json({card,googleUrl:process.env.GOOGLE_WALLET_SAVE_URL||null,appleUrl:process.env.APPLE_WALLET_PASS_URL||null,offlineUrl:`${base}/offline-esim.html`,privacy:'Wallet-картка не містить QR, ICCID, PIN або коду активації.'});
+});
+
+app.get('/api/account/rescue',requireUserSession,(req,res)=>{const user=getUser(req.userEmail)||{};res.json({diagnostics:engagement.safeRescueDiagnostics(user,{}),insights:engagement.usageInsights(user),checks:{hasEsim:Boolean(user.esim?.orderNo),hasApn:Boolean(user.esim?.apn),hasRecentSync:Boolean(user.esim?.lastUpdateTime&&Date.now()-new Date(user.esim.lastUpdateTime)<24*3600000),hasPaidPurchase:Boolean((user.purchases||[]).some(item=>item.paymentStatus==='paid'))}});});
+app.post('/api/account/rescue/credit-request',requireUserSession,rateLimit('rescue_credit',24*60*60*1000,2,req=>req.userEmail),(req,res)=>{
+  const user=getUser(req.userEmail)||{},state=operationsStore.store(),existing=(state.rescueRequests||[]).find(item=>item.email===req.userEmail&&item.status==='pending');if(existing)return res.status(409).json({error:'Запит уже передано команді',request:existing});
+  const request={id:engagement.id('rescue'),email:req.userEmail,reason:String(req.body?.reason||'connection_failure').slice(0,60),note:String(req.body?.note||'').replace(/[\r\n<>]/g,' ').trim().slice(0,500),diagnostics:engagement.safeRescueDiagnostics(user,req.body?.diagnostics||{}),status:'pending',createdAt:new Date().toISOString()};(state.rescueRequests||=[]).unshift(request);state.rescueRequests=state.rescueRequests.slice(0,1000);operationsStore.save();auditStore.log({adminEmail:req.userEmail,action:'rescue_credit_requested',target:request.id,details:{purchaseId:request.diagnostics.purchaseId}});res.json({ok:true,request});
+});
+
 app.post('/api/translations/batch', requireUserSession, rateLimit('ui_translation',60*1000,20,req=>req.userEmail), async (req,res) => {
   const language = getUser(req.userEmail)?.language || 'uk';
   if (language !== 'en') return res.json({ translations: {}, enabled:false });
@@ -812,12 +886,15 @@ app.post('/api/travel-packages/checkout', requireUserSession, requireFeature('tr
       if(!scheduledFor||Number.isNaN(new Date(scheduledFor).getTime())||new Date(scheduledFor).getTime()<=Date.now()) return res.status(409).json({error:'Не вдалося визначити дату завершення поточного тарифу. Вибери «Змінити зараз» або звернися в підтримку.',code:'CURRENT_PLAN_END_UNKNOWN'});
     }
     const recoveredProfile=await recoverStripeProfile(req.userEmail).catch(()=>({customerId:currentUser?.stripeCustomerId||null}));
+    const loyalty=engagement.loyaltyFor(currentUser||{}),reward=loyalty.rewards.find(item=>item.kind==='discount'&&(item.status==='available'||(item.status==='reserved'&&Date.now()-new Date(item.reservedAt||0).getTime()>2*3600000))&&(!item.expiresAt||new Date(item.expiresAt)>new Date()))||null;
+    const discountCents=reward?Math.min(Math.max(0,Number(reward.amountCents)||0),Math.max(0,selected.amountCents-50)):0;
+    const checkoutAmountCents=selected.amountCents-discountCents;
     const session=await createCustomPackageCheckout({
       email:req.userEmail,
       customerId:recoveredProfile.customerId||currentUser?.stripeCustomerId||null,
       packageCode:selected.packageCode,
       packageName:selected.name,
-      amountCents:selected.amountCents,
+      amountCents:checkoutAmountCents,
       currency:'usd',
       dataLimitGb:selected.dataLimitGb,
       durationDays:selected.durationDays,
@@ -828,7 +905,12 @@ app.post('/api/travel-packages/checkout', requireUserSession, requireFeature('tr
       scheduledFor,
       recipientMode,
       recipientName,
+      rewardId:reward?.id||'',
+      rewardCode:reward?.code||'',
+      discountCents,
+      originalAmountCents:selected.amountCents,
     });
+    if(reward){const index=loyalty.rewards.findIndex(item=>item.id===reward.id);loyalty.rewards[index]={...loyalty.rewards[index],status:'reserved',reservedAt:new Date().toISOString(),stripeSessionId:session.id};saveUser(req.userEmail,{loyalty});}
     recordDiagnostic(req,{email:req.userEmail,type:changeMode?'plan_change':'payment_flow',action:'stripe_checkout_created',outcome:'success',severity:'info',message:recipientMode==='family'?'Stripe Checkout created for family eSIM':changeMode?'Stripe Checkout created for plan change':'Stripe Checkout created for travel package',purchaseId:session.id,durationMs:Date.now()-started,context:{packageCode:selected.packageCode,amountCents:selected.amountCents,currency:'usd',dataLimitGb:selected.dataLimitGb,durationDays:selected.durationDays,location:selected.location,changeMode:recipientMode==='family'?'family':changeMode||'new',scheduledFor:scheduledFor||null,previousPlan:currentUser?.plan||null,recipientMode}});
     res.json({url:session.url});
   } catch(error) {
@@ -1063,7 +1145,7 @@ app.post('/api/account/esim/topups/checkout', requireUserSession, requireFeature
     const recovered=await recoverStripeProfile(req.userEmail).catch(()=>({customerId:user.stripeCustomerId||null}));
     const session=await createCustomPackageCheckout({email:req.userEmail,customerId:recovered.customerId||user.stripeCustomerId||null,packageCode:selected.packageCode,packageName:selected.name,amountCents:selected.amountCents,currency:'usd',dataLimitGb:selected.dataLimitGb,durationDays:selected.durationDays,location:'',changeMode:'topup_existing',previousPlan:user.plan||'',previousSubscriptionId:user.stripeSubscriptionId||''});
     recordDiagnostic(req,{email:req.userEmail,source:'stripe',type:'topup_flow',action:'checkout_created',outcome:'success',severity:'info',message:'Existing eSIM top-up checkout created',purchaseId:session.id,context:{packageCode,amountCents:selected.amountCents,iccidEnding:String(user.esim.iccid).slice(-4)}});
-    res.json({url:session.url});
+    res.json({url:session.url,rewardApplied:reward?{name:reward.name,code:reward.code,discountCents}:null});
   }catch(error){
     recordDiagnostic(req,{email:req.userEmail,source:error.code?.includes('PACKAGE')?'esim_access':'stripe',type:'topup_flow',action:'checkout',outcome:'failed',severity:'error',message:error.message,errorCode:error.code||'TOPUP_CHECKOUT_FAILED'});
     res.status(502).json({error:'Не вдалося створити безпечну оплату поповнення',code:error.code||'TOPUP_CHECKOUT_FAILED'});
@@ -1607,11 +1689,15 @@ app.get('/api/admin/dashboard', adminAuth.requireAdmin, (req, res) => {
   });
   const trips=users.filter(user=>user.travelMode?.enabled&&user.travelMode?.startDate);
   const upcomingTrips=trips.filter(user=>{const start=new Date(`${user.travelMode.startDate}T00:00:00Z`).getTime();return start>=Date.now()-86400000&&start<=Date.now()+14*86400000;});
+  const clubMembers=users.map(user=>engagement.publicClub(user,operationsStore.store().engagementSettings||{})).filter(club=>club.lifetimePoints>0);
+  const rescueRequests=operationsStore.store().rescueRequests||[];
   res.json({
     users: { total: users.length, registeredToday: users.filter((user) => new Date(user.createdAt || 0).getTime() >= since).length, active: active.length, blocked: users.filter((user) => user.status === 'blocked').length },
     esim: { active: active.filter((user) => user.esim?.orderNo).length, failed: users.filter((user) => user.status === 'payment_ok_esim_failed').length, highUsage: highUsage.length, expiringSoon: active.filter((user) => user.esim?.expiredTime && new Date(user.esim.expiredTime).getTime() - Date.now() < 7 * 86400000).length },
     tickets: { total: tickets.length, open: tickets.filter((ticket) => ticket.status === 'open').length, unassigned: tickets.filter((ticket) => !ticket.assignedTo && !['resolved', 'closed'].includes(ticket.status)).length, waitingOver24h: tickets.filter((ticket) => ticket.status === 'waiting_customer' && Date.now() - new Date(ticket.updatedAt).getTime() > 24 * 3600000).length },
     travel:{planned:trips.length,upcoming14Days:upcomingTrips.length,withoutEsim:upcomingTrips.filter(user=>!user.esim?.orderNo).length,withoutPush:upcomingTrips.filter(user=>!pushStore.subscriptionsFor(user.email).length).length},
+    engagement:{members:clubMembers.length,pointsInCirculation:clubMembers.reduce((sum,club)=>sum+club.points,0)},
+    rescue:{pending:rescueRequests.filter(item=>item.status==='pending').length},
     recentTickets: tickets.slice(0, 5),
   });
 });
@@ -1619,6 +1705,27 @@ app.get('/api/admin/dashboard', adminAuth.requireAdmin, (req, res) => {
 app.get('/api/admin/travel',adminAuth.requireAdmin,adminAuth.requireRole('super_admin','admin','support','viewer'),(req,res)=>{
   const now=Date.now(),items=Object.values(getAllUsers()).filter(user=>user.travelMode?.enabled&&user.travelMode?.startDate).map(user=>{const startAt=new Date(`${user.travelMode.startDate}T00:00:00Z`).getTime(),daysUntil=Math.ceil((startAt-now)/86400000),remaining=user.esim?.remainingGb??(user.esim?.dataLimitGb!=null?Math.max(0,Number(user.esim.dataLimitGb)-Number(user.esim.usedGb||0)):null);return {email:user.email,displayName:user.displayName||'',destination:user.travelMode.destination,startDate:user.travelMode.startDate,endDate:user.travelMode.endDate,deviceModel:user.travelMode.deviceModel||'',platform:user.travelMode.platform||'other',daysUntil,hasEsim:Boolean(user.esim?.orderNo),remainingGb:remaining,expiresAt:user.esim?.expiredTime||null,pushDevices:pushStore.subscriptionsFor(user.email).length};}).sort((a,b)=>a.startDate.localeCompare(b.startDate));
   res.json({items,summary:{planned:items.length,next14Days:items.filter(item=>item.daysUntil>=0&&item.daysUntil<=14).length,withoutEsim:items.filter(item=>item.daysUntil>=0&&item.daysUntil<=14&&!item.hasEsim).length,lowData:items.filter(item=>item.daysUntil>=0&&item.remainingGb!=null&&item.remainingGb<1).length}});
+});
+
+app.get('/api/admin/engagement',adminAuth.requireAdmin,adminAuth.requireRole('super_admin','admin','support','viewer'),(req,res)=>{
+  const users=Object.values(getAllUsers()),settings=operationsStore.store().engagementSettings||{};
+  const items=users.map(user=>{const club=engagement.publicClub(user,settings),stamps=engagement.passportFor(user);return {email:user.email,displayName:user.displayName||'',points:club.points,lifetimePoints:club.lifetimePoints,tier:club.tier.name,stamps:stamps.length,countries:new Set(stamps.map(item=>item.countryCode)).size,rewards:club.rewards.length};}).filter(item=>item.points||item.stamps||item.rewards).sort((a,b)=>b.lifetimePoints-a.lifetimePoints);
+  res.json({settings,items,summary:{members:items.length,pointsInCirculation:items.reduce((sum,item)=>sum+item.points,0),stamps:items.reduce((sum,item)=>sum+item.stamps,0),rewards:items.reduce((sum,item)=>sum+item.rewards,0)}});
+});
+app.patch('/api/admin/engagement/settings',adminAuth.requireAdmin,adminAuth.requireRole('super_admin'),adminAuth.requirePermission('settings.manage',{requireTwoFactor:true}),(req,res)=>{
+  const state=operationsStore.store(),current=state.engagementSettings||{},pointsPerDollar=Math.trunc(Number(req.body?.pointsPerDollar)),stampBonus=Math.trunc(Number(req.body?.stampBonus));
+  if(!Number.isInteger(pointsPerDollar)||pointsPerDollar<1||pointsPerDollar>100||!Number.isInteger(stampBonus)||stampBonus<0||stampBonus>1000)return res.status(400).json({error:'Некоректні правила нарахування'});
+  state.engagementSettings={...current,enabled:req.body?.enabled!==false,pointsPerDollar,stampBonus};operationsStore.save();auditStore.log({adminEmail:req.admin.email,action:'engagement_settings_updated',target:'signal_club',details:state.engagementSettings});res.json(state.engagementSettings);
+});
+app.post('/api/admin/engagement/:email/points',adminAuth.requireAdmin,adminAuth.requireRole('super_admin'),adminAuth.requirePermission('refunds.manage',{requireTwoFactor:true}),(req,res)=>{
+  const email=String(req.params.email||'').toLowerCase(),user=getUser(email);if(!user)return res.status(404).json({error:'Користувача не знайдено'});const points=Math.trunc(Number(req.body?.points));if(!Number.isInteger(points)||points===0||Math.abs(points)>10000)return res.status(400).json({error:'Вкажіть від −10000 до 10000 points'});
+  const loyalty=engagement.loyaltyFor(user);if(loyalty.points+points<0)return res.status(409).json({error:'Не можна створити від’ємний баланс'});loyalty.points+=points;if(points>0)loyalty.lifetimePoints+=points;loyalty.ledger.unshift({id:engagement.id('points'),key:`admin:${crypto.randomUUID()}`,type:'admin_adjustment',points,reason:String(req.body?.reason||'Коригування Super Admin').replace(/[\r\n<>]/g,' ').slice(0,180),createdAt:new Date().toISOString(),by:req.admin.email});saveUser(email,{loyalty});auditStore.log({adminEmail:req.admin.email,action:'signal_points_adjusted',target:email,details:{points,reason:req.body?.reason||null}});res.json(engagement.publicClub({...user,loyalty},operationsStore.store().engagementSettings||{}));
+});
+
+app.get('/api/admin/rescue-requests',adminAuth.requireAdmin,adminAuth.requireRole('super_admin','admin','support','viewer'),(req,res)=>{const items=operationsStore.store().rescueRequests||[];res.json({items,summary:{pending:items.filter(item=>item.status==='pending').length,approved:items.filter(item=>item.status==='approved').length,declined:items.filter(item=>item.status==='declined').length}});});
+app.post('/api/admin/rescue-requests/:id/resolve',adminAuth.requireAdmin,adminAuth.requireRole('super_admin'),adminAuth.requirePermission('refunds.manage',{requireTwoFactor:true}),(req,res)=>{
+  const state=operationsStore.store(),request=(state.rescueRequests||[]).find(item=>item.id===req.params.id);if(!request)return res.status(404).json({error:'Запит не знайдено'});if(request.status!=='pending')return res.status(409).json({error:'Запит уже опрацьовано'});const approved=req.body?.approved===true;request.status=approved?'approved':'declined';request.resolvedAt=new Date().toISOString();request.resolvedBy=req.admin.email;request.noteAdmin=String(req.body?.note||'').replace(/[\r\n<>]/g,' ').slice(0,500);
+  if(approved){const user=getUser(request.email)||{},loyalty=engagement.loyaltyFor(user),points=Math.max(50,Math.min(1000,Math.trunc(Number(req.body?.points)||250)));loyalty.points+=points;loyalty.lifetimePoints+=points;loyalty.ledger.unshift({id:engagement.id('points'),key:`rescue:${request.id}`,type:'rescue_courtesy',points,reason:'Бонус турботи Signal',createdAt:new Date().toISOString(),by:req.admin.email});saveUser(request.email,{loyalty});request.points=points;sendToEmail(request.email,{title:'Signal допоміг',body:`Ми перевірили звернення та додали ${points} Signal Points.`,url:'/signal-club.html',tag:`rescue-${request.id}`}).catch(()=>{});}operationsStore.save();auditStore.log({adminEmail:req.admin.email,action:approved?'rescue_credit_approved':'rescue_credit_declined',target:request.email,details:{requestId:request.id,points:request.points||0}});res.json({ok:true,request});
 });
 
 function controlContext(){
@@ -1647,7 +1754,7 @@ app.get('/api/app-version',(req,res)=>{const v=operationsStore.store().versionIn
 app.post('/api/account/client-version',requireUserSession,(req,res)=>{const state=operationsStore.store(),safe={frontend:String(req.body?.frontend||'unknown').slice(0,40),serviceWorker:String(req.body?.serviceWorker||'unknown').slice(0,40),cache:String(req.body?.cache||'unknown').slice(0,80),platform:String(req.body?.platform||'web').slice(0,40),lastSeenAt:new Date().toISOString()};state.clientVersions[req.userEmail]=safe;operationsStore.save();res.status(202).json({ok:true});});
 app.get('/api/admin/versions',adminAuth.requireAdmin,(req,res)=>{const state=operationsStore.store(),current=state.versionInfo,clients=Object.entries(state.clientVersions||{}).map(([email,item])=>({email,...item,old:item.frontend!==current.frontend||item.serviceWorker!==current.serviceWorker}));res.json({current,clients,summary:{tracked:clients.length,old:clients.filter(x=>x.old).length,current:clients.filter(x=>!x.old).length,untracked:Math.max(0,Object.keys(getAllUsers()).length-clients.length)}});});
 app.post('/api/admin/versions/request-update',adminAuth.requireAdmin,adminAuth.requirePermission('settings.manage'),async(req,res)=>{const state=operationsStore.store(),clients=state.clientVersions||{},targets=Object.entries(clients).filter(([,item])=>item.frontend!==state.versionInfo.frontend||item.serviceWorker!==state.versionInfo.serviceWorker).map(([email])=>email);let delivered=0;for(const email of targets)try{delivered+=await sendToEmail(email,{title:'Доступне оновлення Signal',body:'Відкрийте застосунок, щоб отримати останні виправлення та покращення.',url:'/dashboard.html',tag:`app-update-${state.versionInfo.frontend}`});}catch{}state.versionInfo.updateRequestedAt=new Date().toISOString();operationsStore.save();auditStore.log({adminEmail:req.admin.email,action:'app_update_requested',target:`${targets.length} users`,details:{delivered,frontend:state.versionInfo.frontend}});res.json({ok:true,targets:targets.length,delivered});});
-app.post('/api/admin/versions/critical-refresh',adminAuth.requireAdmin,adminAuth.requirePermission('settings.manage',{requireTwoFactor:true}),(req,res)=>{const state=operationsStore.store(),allowed=['/i18n.js','/style.css','/pwa.js','/sw.js','/config.js','/admin-common.js'],assets=[...new Set((req.body?.assets||[]).filter(item=>allowed.includes(item)))];if(!assets.length)return res.status(400).json({error:'Оберіть хоча б один критичний файл'});state.versionInfo.criticalAssets=assets;state.versionInfo.criticalRefreshToken=`refresh_${Date.now().toString(36)}`;state.versionInfo.criticalRefreshAt=new Date().toISOString();operationsStore.save();auditStore.log({adminEmail:req.admin.email,action:'critical_assets_refresh_requested',target:assets.join(', '),details:{token:state.versionInfo.criticalRefreshToken}});res.json({ok:true,token:state.versionInfo.criticalRefreshToken,assets});});
+app.post('/api/admin/versions/critical-refresh',adminAuth.requireAdmin,adminAuth.requirePermission('settings.manage',{requireTwoFactor:true}),(req,res)=>{const state=operationsStore.store(),allowed=['/i18n.js','/style.css','/experience.css','/experience.js','/pwa.js','/sw.js','/config.js','/admin-common.js'],assets=[...new Set((req.body?.assets||[]).filter(item=>allowed.includes(item)))];if(!assets.length)return res.status(400).json({error:'Оберіть хоча б один критичний файл'});state.versionInfo.criticalAssets=assets;state.versionInfo.criticalRefreshToken=`refresh_${Date.now().toString(36)}`;state.versionInfo.criticalRefreshAt=new Date().toISOString();operationsStore.save();auditStore.log({adminEmail:req.admin.email,action:'critical_assets_refresh_requested',target:assets.join(', '),details:{token:state.versionInfo.criticalRefreshToken}});res.json({ok:true,token:state.versionInfo.criticalRefreshToken,assets});});
 app.post('/api/admin/attention/:id/resolve',adminAuth.requireAdmin,adminAuth.requirePermission('operations.manage'),(req,res)=>{const state=operationsStore.store();state.resolvedAttention[req.params.id]={by:req.admin.email,at:new Date().toISOString(),note:String(req.body?.note||'').slice(0,500)};operationsStore.save();auditStore.log({adminEmail:req.admin.email,action:'attention_resolved',target:req.params.id});res.json({ok:true});});
 app.post('/api/admin/jobs',adminAuth.requireAdmin,adminAuth.requirePermission('operations.manage'),(req,res)=>{const job=operationsStore.addJob({type:req.body?.type,email:req.body?.email,purchaseId:req.body?.purchaseId,payload:req.body?.payload,retryable:req.body?.retryable!==false});auditStore.log({adminEmail:req.admin.email,action:'job_created',target:job.id,details:{type:job.type}});res.json(job);});
 app.post('/api/admin/jobs/:id/retry',adminAuth.requireAdmin,adminAuth.requirePermission('operations.manage'),(req,res)=>{const current=operationsStore.store().jobs.find(j=>j.id===req.params.id);if(!current)return res.status(404).json({error:'Завдання не знайдено'});if(!current.retryable)return res.status(409).json({error:'Ця помилка не допускає автоматичного повтору'});const job=operationsStore.updateJob(current.id,{status:'pending',attempts:Number(current.attempts||0)+1,error:null,nextAttemptAt:new Date().toISOString()});auditStore.log({adminEmail:req.admin.email,action:'job_retried',target:job.id});res.json(job);});
@@ -2584,6 +2691,8 @@ app.post('/api/webhook', async (req, res) => {
     const recipientMode = String(session.metadata.recipientMode || '');
     const recipientName = String(session.metadata.recipientName || '').slice(0,60);
     const familyPurchase = plan === 'custom' && recipientMode === 'family';
+    const rewardId=String(session.metadata.rewardId||''),discountCents=Math.max(0,Math.trunc(Number(session.metadata.discountCents)||0)),originalAmountCents=Math.max(0,Math.trunc(Number(session.metadata.originalAmountCents)||0));
+    if(rewardId){const rewardUser=getUser(email)||{},loyalty=engagement.loyaltyFor(rewardUser),rewardIndex=loyalty.rewards.findIndex(item=>item.id===rewardId&&item.stripeSessionId===session.id);if(rewardIndex>=0){loyalty.rewards[rewardIndex]={...loyalty.rewards[rewardIndex],status:'used',usedAt:new Date().toISOString(),purchaseId:session.id};saveUser(email,{loyalty});}}
     const purchaseDefaults = {
       kind: familyPurchase ? 'family_esim' : changeMode === 'topup_existing' ? 'esim_topup' : plan === 'custom' ? 'custom_package' : 'subscription',
       plan,
@@ -2593,6 +2702,9 @@ app.post('/api/webhook', async (req, res) => {
       durationDays,
       location: session.metadata.location || null,
       amountCents: session.amount_total ?? null,
+      originalAmountCents:originalAmountCents||session.amount_total||null,
+      discountCents,
+      rewardId:rewardId||null,
       currency: session.currency || null,
       stripeSessionId: session.id,
       stripeCustomerId: typeof session.customer === 'string' ? session.customer : session.customer?.id || null,

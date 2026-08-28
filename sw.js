@@ -3,13 +3,20 @@
 // Кешує тільки статичну "оболонку" — самі дані (підписка, тікети) завжди
 // тягнуться наживо з бекенду, ніколи не кешуються.
 
-const CACHE_NAME = 'signal-shell-v73-pin-email-recovery';
+const CACHE_NAME = 'signal-shell-v80-signal-universe';
 const SHELL_FILES = [
   '/dashboard.html',
   '/profile.html',
   '/plans.html',
   '/travel-plans.html',
   '/travel-assistant.html',
+  '/signal-universe.html',
+  '/signal-passport.html',
+  '/signal-club.html',
+  '/smart-assist.html',
+  '/family-trip.html',
+  '/wallet-pass.html',
+  '/rescue-mode.html',
   '/esim-topup.html',
   '/family-share.html',
   '/usage.html',
@@ -20,6 +27,8 @@ const SHELL_FILES = [
   '/app-tools.html',
   '/support.html',
   '/style.css',
+  '/experience.css',
+  '/experience.js',
   '/pwa.js',
   '/config.js',
   '/i18n.js',
@@ -49,7 +58,7 @@ self.addEventListener('activate', (event) => {
   );
   self.clients.claim();
 });
-self.addEventListener('message',event=>{if(event.data?.type!=='REFRESH_CRITICAL')return;const allowed=new Set(['/i18n.js','/style.css','/pwa.js','/sw.js','/config.js','/admin-common.js']),assets=(event.data.assets||[]).filter(item=>allowed.has(item));event.waitUntil(caches.open(CACHE_NAME).then(cache=>Promise.all(assets.map(path=>cache.delete(path)))));});
+self.addEventListener('message',event=>{if(event.data?.type!=='REFRESH_CRITICAL')return;const allowed=new Set(['/i18n.js','/style.css','/experience.css','/experience.js','/pwa.js','/sw.js','/config.js','/admin-common.js']),assets=(event.data.assets||[]).filter(item=>allowed.has(item));event.waitUntil(caches.open(CACHE_NAME).then(cache=>Promise.all(assets.map(path=>cache.delete(path)))));});
 
 self.addEventListener('fetch', (event) => {
   // Ніколи не кешуємо запити до API — там завжди мають бути свіжі дані
@@ -58,7 +67,7 @@ self.addEventListener('fetch', (event) => {
   // HTML and critical scripts are network-first so a newly deployed auth,
   // push or payment fix is not hidden behind an old PWA cache.
   const url = new URL(event.request.url);
-  const neverCache = ['/pwa.js','/config.js','/sw.js','/i18n.js','/style.css'].includes(url.pathname);
+  const neverCache = ['/pwa.js','/config.js','/sw.js','/i18n.js','/style.css','/experience.css','/experience.js'].includes(url.pathname);
   if (neverCache) {
     event.respondWith(fetch(event.request, { cache:'no-store' }).then(response=>{
       const copy=response.clone();caches.open(CACHE_NAME).then(cache=>cache.put(event.request,copy));return response;
