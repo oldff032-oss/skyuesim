@@ -18,7 +18,7 @@ const defaults = () => ({
   },
   featureRules: { disabledCountries:[], disabledPackages:[], paymentMethods:{stripeCard:true} },
   providerBalance: { amount:null, currency:'USD', averageOrderCost:null, updatedAt:null, source:'not_configured' },
-  versionInfo: { frontend:'2.1.1', backend:'2.1.1', serviceWorker:'v81', cache:'signal-shell-v81-google-wallet', deployedAt:null, changelog:['Персональний Signal Travel Pass для Google Wallet','Короткочасне захищене посилання Google Wallet','Signal Passport і країни подорожей','Signal Club та безпечні винагороди','Розумний прогноз залишку даних','Сімейні подорожі','Режим порятунку з діагностикою'],criticalRefreshToken:null,criticalAssets:['/i18n.js','/style.css','/experience.css','/experience.js','/wallet-pass.html','/pwa.js','/sw.js'] },
+  versionInfo: { frontend:'2.2.0', backend:'2.2.0', serviceWorker:'v82', cache:'signal-shell-v82-wallet-live-status', deployedAt:null, changelog:['Живий залишок трафіку в Google Wallet','Готовність eSIM і подорожі','Нагадування про завершення пакета','Сімейна готовність у Travel Pass','Персональний Signal Travel Pass для Google Wallet','Signal Passport і країни подорожей','Signal Club та безпечні винагороди'],criticalRefreshToken:null,criticalAssets:['/i18n.js','/style.css','/experience.css','/experience.js','/wallet-pass.html','/pwa.js','/sw.js'] },
   clientVersions: {},
   dailyReports: [], reportSettings: { enabled:true, hour:8, lastSentDate:null },
 });

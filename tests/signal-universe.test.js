@@ -59,7 +59,12 @@ test('admin rewards and rescue decisions require Super Admin two-factor gates',(
 });
 
 test('Wallet public card contains no eSIM activation credential fields',()=>{
-  const card=engagement.walletCard({email:'x@example.com',displayName:'Traveler',esim:{activationCode:'LPA:SECRET',iccid:'123',pin:'0000'},purchases:[{fulfillmentStatus:'provisioned',packageName:'Global'}]});
-  assert.deepEqual(Object.keys(card).sort(),['destination','holder','plan','serial','status','validUntil'].sort());
-  assert.doesNotMatch(JSON.stringify(card),/LPA:SECRET|123|0000/);
+  const card=engagement.walletCard({email:'x@example.com',displayName:'Traveler',esim:{activationCode:'LPA:SECRET',qrCodeUrl:'https://secret.invalid/qr',iccid:'89420000123',pin:'0000',usedBytes:5*1024**3,totalBytes:20*1024**3,lastUpdateTime:'2026-08-29T10:00:00.000Z'},travelMode:{destination:'Italy',startDate:'2026-09-10',endDate:'2026-09-17'},purchases:[{fulfillmentStatus:'provisioned',packageName:'Global'}]});
+  for(const key of ['serial','holder','plan','destination','validUntil','status','usedGb','totalGb','remainingGb','usagePercent','dataStatus','esimReadiness','tripStartDate','tripEndDate','daysUntilTrip','tripStatus','daysUntilExpiry','lastSyncAt','familyReady','familyTotal'])assert.ok(key in card,key);
+  assert.equal(card.usedGb,5);
+  assert.equal(card.totalGb,20);
+  assert.equal(card.remainingGb,15);
+  assert.equal(card.usagePercent,25);
+  for(const secret of ['activationCode','qrCodeUrl','iccid','pin','email'])assert.equal(secret in card,false);
+  assert.doesNotMatch(JSON.stringify(card),/LPA:SECRET|secret\.invalid|89420000123|0000|x@example\.com/);
 });

@@ -40,6 +40,22 @@ function localized(value) {
   return {defaultValue:{language:'uk-UA',value:String(value||'')}};
 }
 
+function formatGb(value) {
+  return value==null?'∞':Number(value).toLocaleString('uk-UA',{maximumFractionDigits:2});
+}
+
+function formatDate(value) {
+  return value&&!Number.isNaN(new Date(value).getTime())?new Date(value).toLocaleDateString('uk-UA',{day:'numeric',month:'short',year:'numeric'}):'Без дати';
+}
+
+function readinessLabel(card) {
+  if(card?.status==='expired')return 'Пакет завершився';
+  if(card?.status==='blocked')return 'Потрібна перевірка акаунта';
+  if(card?.esimReadiness==='ready')return 'eSIM готова до поїздки';
+  if(card?.esimReadiness==='attention')return 'Перевір eSIM до поїздки';
+  return 'eSIM ще не підготовлена';
+}
+
 function safeHttpsBase(value) {
   try{const url=new URL(String(value||''));return url.protocol==='https:'?url.origin:null;}catch{return null;}
 }
@@ -54,28 +70,50 @@ function passResources(card, env = process.env) {
     id:config.classId,
     issuerName:'Signal',
     reviewStatus:'UNDER_REVIEW',
+    multipleDevicesAndHoldersAllowedStatus:'ONE_USER_ALL_DEVICES',
   };
+  const dataHeadline=card?.remainingGb==null?'Безлімітний інтернет':`${formatGb(card.remainingGb)} GB залишилось`;
+  const usedLine=card?.totalGb==null?`${formatGb(card?.usedGb||0)} GB використано`:`${formatGb(card?.usedGb||0)} із ${formatGb(card.totalGb)} GB`;
+  const tripLine=card?.tripStartDate?`${formatDate(card.tripStartDate)}${card.tripEndDate?` — ${formatDate(card.tripEndDate)}`:''}`:'Не запланована';
+  const tripState=card?.tripStatus==='in_progress'?'Подорож триває':card?.tripStatus==='completed'?'Подорож завершена':card?.daysUntilTrip===0?'Виїзд сьогодні':card?.daysUntilTrip===1?'До виїзду 1 день':card?.daysUntilTrip>1?`До виїзду ${card.daysUntilTrip} дн.`:'Додайте дати у Signal';
+  const dataState={empty:'Дані закінчилися',critical:'Даних залишилось критично мало',low:'Невеликий залишок даних',healthy:'Запас даних достатній',unlimited:'Безлімітний пакет'}[card?.dataStatus]||'Очікуємо синхронізацію';
+  const textModules=[
+    {id:'readiness',header:'ГОТОВНІСТЬ',body:readinessLabel(card)},
+    {id:'usage',header:'ВИКОРИСТАННЯ',body:usedLine},
+    {id:'data_state',header:'СТАН ДАНИХ',body:dataState},
+    {id:'plan',header:'ПАКЕТ',body:String(card?.plan||'eSIM').slice(0,100)},
+    {id:'destination',header:'НАПРЯМОК',body:String(card?.destination||'Global').slice(0,80)},
+    {id:'trip',header:'ПОДОРОЖ',body:`${tripState} · ${tripLine}`.slice(0,200)},
+    {id:'validity',header:'ДІЄ ДО',body:formatDate(card?.validUntil)},
+    {id:'sync',header:'ОСТАННЄ ОНОВЛЕННЯ',body:card?.lastSyncAt?new Date(card.lastSyncAt).toLocaleString('uk-UA'):'Ще не синхронізовано'},
+  ];
+  if(card?.familyTotal>0)textModules.push({id:'family',header:'СІМЕЙНА ГОТОВНІСТЬ',body:`Готові ${card.familyReady} із ${card.familyTotal}`});
   const genericObject={
     id:objectId,
     classId:config.classId,
     state:'ACTIVE',
     genericType:'GENERIC_OTHER',
     cardTitle:localized('Signal Travel Pass'),
-    header:localized(card?.holder||'Signal Traveler'),
-    subheader:localized(card?.status==='active'?'eSIM активна':'Подорож запланована'),
+    header:localized(dataHeadline),
+    subheader:localized(readinessLabel(card)),
     logo:{sourceUri:{uri:`${base}/signal-premium-logo.png`},contentDescription:localized('Signal')},
     hexBackgroundColor:'#111a42',
-    textModulesData:[
-      {id:'destination',header:'НАПРЯМОК',body:String(card?.destination||'Global').slice(0,80)},
-      {id:'plan',header:'ПАКЕТ',body:String(card?.plan||'eSIM').slice(0,100)},
-      {id:'validity',header:'ДІЄ ДО',body:card?.validUntil?new Date(card.validUntil).toLocaleDateString('uk-UA'):'Без дати'},
-    ],
+    textModulesData:textModules,
+    messages:[{id:'signal_status',header:'Signal Travel Pass',body:`${readinessLabel(card)}. ${dataHeadline}.`,messageType:'TEXT'}],
     linksModuleData:{uris:[
       {id:'open_signal',uri:`${base}/dashboard.html`,description:'Відкрити Signal'},
+      {id:'usage',uri:`${base}/usage.html`,description:'Перевірити витрати даних'},
+      {id:'trip',uri:`${base}/travel-assistant.html`,description:'Підготовка до подорожі'},
       {id:'support',uri:`${base}/help.html`,description:'Підтримка Signal'},
     ]},
   };
-  if(card?.validUntil&&!Number.isNaN(new Date(card.validUntil).getTime()))genericObject.validTimeInterval={end:{date:new Date(card.validUntil).toISOString()}};
+  const interval={};
+  if(card?.tripStartDate&&!Number.isNaN(new Date(`${card.tripStartDate}T00:00:00Z`).getTime()))interval.start={date:new Date(`${card.tripStartDate}T00:00:00Z`).toISOString()};
+  if(card?.validUntil&&!Number.isNaN(new Date(card.validUntil).getTime()))interval.end={date:new Date(card.validUntil).toISOString()};
+  if(interval.start&&interval.end&&new Date(interval.start.date).getTime()>new Date(interval.end.date).getTime())delete interval.start;
+  if(interval.start||interval.end)genericObject.validTimeInterval=interval;
+  if(interval.end&&new Date(interval.end.date).getTime()>Date.now())genericObject.notifications={expiryNotification:{enableNotification:true}};
+  else if(interval.start&&new Date(interval.start.date).getTime()>Date.now())genericObject.notifications={upcomingNotification:{enableNotification:true}};
   return {config,genericClass,genericObject,base,objectId};
 }
 
@@ -133,7 +171,10 @@ async function syncPass(resources, fetchImpl=global.fetch) {
   if(existingClass.response.status===404){
     const created=await walletRequest('/genericClass',token,fetchImpl,{method:'POST',body:JSON.stringify(resources.genericClass)});
     if(!created.response.ok&&created.response.status!==409)throw new Error(`wallet_class_${created.response.status}`);
-  }else if(!existingClass.response.ok)throw new Error(`wallet_class_${existingClass.response.status}`);
+  }else if(existingClass.response.ok){
+    const updated=await walletRequest(classPath,token,fetchImpl,{method:'PUT',body:JSON.stringify(resources.genericClass)});
+    if(!updated.response.ok)throw new Error(`wallet_class_${updated.response.status}`);
+  }else throw new Error(`wallet_class_${existingClass.response.status}`);
 
   const objectPath=`/genericObject/${encodeURIComponent(resources.objectId)}`;
   const existingObject=await walletRequest(objectPath,token,fetchImpl);

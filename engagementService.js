@@ -126,7 +126,19 @@ function safeRescueDiagnostics(user = {}, client = {}) {
 
 function walletCard(user = {}) {
   const latest=(user.purchases||[]).find(item=>['provisioned','delivered'].includes(item.fulfillmentStatus))||{};
-  return {serial:`signal-${crypto.createHash('sha256').update(user.email||'guest').digest('hex').slice(0,16)}`,holder:text(user.displayName,80)||'Signal Traveler',plan:text(latest.packageName||user.plan||'eSIM',100),destination:text(user.travelMode?.destination||latest.location||'Global',80),validUntil:user.esim?.expiredTime||latest.expiresAt||null,status:user.esim?.orderNo?'active':'planned'};
+  const esim=user.esim||{},nowMs=Date.now(),toNumber=value=>value==null?null:Number(value),fromBytes=value=>value==null?null:Number(value)/(1024**3);
+  const usedGb=fromBytes(esim.usedBytes)??toNumber(esim.usedGb)??0,totalGb=fromBytes(esim.totalBytes)??toNumber(esim.dataLimitGb),remainingGb=fromBytes(esim.remainingBytes)??toNumber(esim.remainingGb)??(totalGb==null?null:Math.max(0,totalGb-usedGb));
+  const validUntil=esim.expiredTime||latest.expiresAt||null,validMs=validUntil?new Date(validUntil).getTime():null,daysUntilExpiry=Number.isFinite(validMs)?Math.max(0,Math.ceil((validMs-nowMs)/86400000)):null;
+  const trip=user.travelMode?.enabled===false?null:user.travelMode||null,tripStartDate=trip?.startDate||null,tripEndDate=trip?.endDate||null,startMs=tripStartDate?new Date(`${tripStartDate}T00:00:00Z`).getTime():null,endMs=tripEndDate?new Date(`${tripEndDate}T23:59:59Z`).getTime():null;
+  const daysUntilTrip=Number.isFinite(startMs)?Math.ceil((startMs-nowMs)/86400000):null,tripStatus=!Number.isFinite(startMs)?'not_planned':nowMs<startMs?'upcoming':Number.isFinite(endMs)&&nowMs>endMs?'completed':'in_progress';
+  const hasEsim=Boolean(esim.orderNo),hasActivation=Boolean(esim.activationCode||esim.qrCodeUrl),expiresBeforeTrip=Number.isFinite(validMs)&&Number.isFinite(endMs)&&validMs<endMs;
+  const status=user.status==='blocked'?'blocked':Number.isFinite(validMs)&&validMs<nowMs?'expired':hasEsim?'active':'planned';
+  const esimReadiness=!hasEsim?'not_ready':expiresBeforeTrip?'attention':hasActivation||status==='active'?'ready':'attention';
+  const usagePercent=totalGb!=null&&totalGb>0?Math.min(100,Math.max(0,usedGb/totalGb*100)):null;
+  const dataStatus=remainingGb==null?'unlimited':remainingGb<=0?'empty':remainingGb<1?'critical':remainingGb<3?'low':'healthy';
+  const familyTrip=(user.familyTrips||[]).find(item=>!item.endDate||new Date(`${item.endDate}T23:59:59Z`).getTime()>=nowMs)||(user.familyTrips||[])[0]||null,familyMembers=familyTrip?.members||[],familyReady=familyMembers.filter(item=>['ready','installed'].includes(item.status)).length;
+  const cleanNumber=value=>value==null||!Number.isFinite(Number(value))?null:+Number(value).toFixed(3);
+  return {serial:`signal-${crypto.createHash('sha256').update(user.email||'guest').digest('hex').slice(0,16)}`,holder:text(user.displayName,80)||'Signal Traveler',plan:text(latest.packageName||user.plan||'eSIM',100),destination:text(trip?.destination||latest.location||'Global',80),validUntil,status,usedGb:cleanNumber(usedGb),totalGb:cleanNumber(totalGb),remainingGb:cleanNumber(remainingGb),usagePercent:cleanNumber(usagePercent),dataStatus,esimReadiness,tripStartDate,tripEndDate,daysUntilTrip,tripStatus,daysUntilExpiry,lastSyncAt:esim.lastUpdateTime||user.updatedAt||null,familyReady,familyTotal:familyMembers.length};
 }
 
 module.exports={ id, passportFor, loyaltyFor, publicClub, awardPurchase, redeem, usageInsights, safeFamilyTrip, safeRescueDiagnostics, walletCard };

@@ -1,11 +1,69 @@
-<!doctype html><html lang="uk"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Travel Pass — Signal</title><link rel="stylesheet" href="style.css"><link rel="stylesheet" href="experience.css"><script src="pwa.js"></script></head><body class="xp-page"><main class="xp-wrap"><header class="xp-head"><a class="xp-back" href="signal-universe.html">‹</a><img class="xp-logo" src="signal-premium-logo.png" alt="Signal"><b>Signal Travel Pass</b></header><div id="pass"><div class="xp-skeleton"></div></div><div id="actions" class="xp-form" style="margin-top:16px"></div><div class="xp-note" style="margin-top:14px">Travel Pass не містить email, QR-код eSIM, ICCID, PIN або код активації. Повна офлайн-картка залишається тільки у захищеному розділі Signal.</div></main><script src="config.js"></script><script src="experience.js"></script><script>
-document.body.insertAdjacentHTML('beforeend',xpNav());
-xpFetch('/api/account/wallet-pass').then(data=>{
-  const c=data.card;
-  pass.innerHTML=`<section class="xp-pass"><div style="display:flex;align-items:center;justify-content:space-between"><img src="signal-premium-logo.png" width="48" height="48" style="border-radius:14px" alt="Signal"><span class="xp-badge">${c.status==='active'?'ACTIVE':'PLANNED'}</span></div><h2>${xpEsc(c.holder)}</h2><small>SIGNAL TRAVEL PASS</small><div class="xp-pass-grid"><span>НАПРЯМОК<b>${xpEsc(c.destination)}</b></span><span>ПАКЕТ<b>${xpEsc(c.plan)}</b></span><span>ДІЄ ДО<b>${xpDate(c.validUntil)}</b></span><span>КАРТКА<b>${xpEsc(c.serial.slice(-8).toUpperCase())}</b></span></div></section>`;
-  const googleButton=data.googleUrl
-    ?`<a class="xp-google-btn" href="${xpEsc(data.googleUrl)}" rel="external" aria-label="Додати в Google Wallet"><img src="https://developers.google.com/static/wallet/images/branding/add-to-wallet-button-primary.png" alt="Add to Google Wallet"></a>`
-    :`<div class="xp-wallet-setup"><b>Google Wallet налаштовується</b><span>${data.google?.status==='invalid_private_key'?'Потрібно перевірити захищений ключ сервісного акаунта.':'Після підтвердження Google кнопка активується автоматично.'}</span></div>`;
-  actions.innerHTML=`${googleButton}${data.appleUrl?`<a class="xp-btn secondary" href="${xpEsc(data.appleUrl)}"> Додати в Apple Wallet</a>`:'<button class="xp-btn secondary" disabled>Apple Wallet · очікує сертифікат</button>'}<a class="xp-btn secondary" href="offline-esim.html">Відкрити захищену офлайн-картку</a>`;
-}).catch(error=>pass.innerHTML=`<div class="xp-note">${xpEsc(error.message)}</div>`);
-</script></body></html>
+<!doctype html>
+<html lang="uk">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>Travel Pass — Signal</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="experience.css">
+  <script src="pwa.js"></script>
+</head>
+<body class="xp-page">
+  <main class="xp-wrap">
+    <header class="xp-head">
+      <a class="xp-back" href="signal-universe.html" aria-label="Назад">‹</a>
+      <img class="xp-logo" src="signal-premium-logo.png" alt="Signal">
+      <b>Signal Travel Pass</b>
+    </header>
+    <div id="pass"><div class="xp-skeleton"></div></div>
+    <div id="actions" class="xp-form" style="margin-top:16px"></div>
+    <div class="xp-note" style="margin-top:14px">Travel Pass не містить email, QR-код eSIM, ICCID, PIN або код активації. Повна офлайн-картка залишається тільки у захищеному розділі Signal.</div>
+  </main>
+  <script src="config.js"></script>
+  <script src="experience.js"></script>
+  <script>
+    document.body.insertAdjacentHTML('beforeend',xpNav());
+    const pass=document.getElementById('pass'),actions=document.getElementById('actions');
+    const gb=value=>value==null?'∞':Number(value).toLocaleString('uk-UA',{maximumFractionDigits:2});
+    const readiness=card=>card.status==='expired'?'Пакет завершився':card.status==='blocked'?'Потрібна перевірка акаунта':card.esimReadiness==='ready'?'eSIM готова до поїздки':card.esimReadiness==='attention'?'Перевір eSIM до поїздки':'eSIM ще не підготовлена';
+    const tripLabel=card=>card.tripStatus==='in_progress'?'Подорож триває':card.tripStatus==='completed'?'Подорож завершена':card.daysUntilTrip===0?'Виїзд сьогодні':card.daysUntilTrip===1?'До виїзду 1 день':card.daysUntilTrip>1?`До виїзду ${card.daysUntilTrip} дн.`:'Додайте дати подорожі';
+    const expiryLabel=card=>card.status==='expired'?'Завершився':card.daysUntilExpiry===0?'Завершується сьогодні':card.daysUntilExpiry===1?'Ще 1 день':card.daysUntilExpiry>1?`Ще ${card.daysUntilExpiry} дн.`:xpDate(card.validUntil);
+    const statusClass=card=>card.status==='expired'||card.dataStatus==='empty'?'danger':card.esimReadiness==='attention'||['critical','low'].includes(card.dataStatus)?'warning':'ready';
+
+    function render(data){
+      const c=data.card||{},percent=c.usagePercent==null?0:Math.min(100,Math.max(0,Number(c.usagePercent))),remaining=c.remainingGb==null?'Безлімітний інтернет':`${gb(c.remainingGb)} GB залишилось`;
+      pass.innerHTML=`
+        <section class="xp-pass xp-wallet-card ${statusClass(c)}">
+          <div class="xp-wallet-top"><img src="signal-premium-logo.png" width="44" height="44" alt="Signal"><span class="xp-badge">${xpEsc(readiness(c))}</span></div>
+          <small>SIGNAL TRAVEL PASS</small>
+          <h2>${xpEsc(remaining)}</h2>
+          <div class="xp-wallet-progress" role="progressbar" aria-label="Використано трафіку" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(percent)}"><i style="width:${percent}%"></i></div>
+          <div class="xp-wallet-usage"><span>${c.totalGb==null?`${gb(c.usedGb||0)} GB використано`:`${gb(c.usedGb||0)} із ${gb(c.totalGb)} GB використано`}</span><b>${c.usagePercent==null?'—':`${Math.round(percent)}%`}</b></div>
+          <div class="xp-pass-grid">
+            <span>ГОТОВНІСТЬ<b>${xpEsc(readiness(c))}</b></span>
+            <span>ПОДОРОЖ<b>${xpEsc(tripLabel(c))}</b></span>
+            <span>НАПРЯМОК<b>${xpEsc(c.destination||'Global')}</b></span>
+            <span>ПАКЕТ<b>${xpEsc(c.plan||'eSIM')}</b></span>
+            <span>ДІЄ ДО<b>${xpEsc(expiryLabel(c))}</b></span>
+            <span>КАРТКА<b>${xpEsc(String(c.serial||'').slice(-8).toUpperCase())}</b></span>
+          </div>
+          ${c.familyTotal>0?`<div class="xp-wallet-family"><span>Сімейна готовність</span><b>${Number(c.familyReady)||0} із ${Number(c.familyTotal)||0}</b></div>`:''}
+        </section>
+        <div class="xp-wallet-sync"><i></i><span>Оновлено ${c.lastSyncAt?xpDate(c.lastSyncAt):'щойно'}. Дані в Google Wallet синхронізовано.</span></div>`;
+      const googleButton=data.googleUrl
+        ?`<a class="xp-google-btn" href="${xpEsc(data.googleUrl)}" rel="external" aria-label="Додати в Google Wallet"><img src="https://developers.google.com/static/wallet/images/branding/add-to-wallet-button-primary.png" alt="Add to Google Wallet"></a>`
+        :`<div class="xp-wallet-setup"><b>Google Wallet налаштовується</b><span>${data.google?.status==='invalid_private_key'?'Потрібно перевірити захищений ключ сервісного акаунта.':data.google?.status==='google_api_error'?'Google тимчасово не прийняв оновлення. Спробуйте ще раз.':'Після підтвердження Google кнопка активується автоматично.'}</span></div>`;
+      actions.innerHTML=`${googleButton}<button id="refreshWallet" class="xp-btn secondary" type="button">↻ Оновити статус картки</button>${data.appleUrl?`<a class="xp-btn secondary" href="${xpEsc(data.appleUrl)}"> Додати в Apple Wallet</a>`:'<button class="xp-btn secondary" disabled>Apple Wallet · очікує сертифікат</button>'}<a class="xp-btn secondary" href="offline-esim.html">Відкрити захищену офлайн-картку</a>`;
+      document.getElementById('refreshWallet').addEventListener('click',load);
+    }
+
+    async function load(){
+      const button=document.getElementById('refreshWallet');
+      if(button){button.disabled=true;button.textContent='Оновлюємо…';}
+      try{render(await xpFetch('/api/account/wallet-pass'));}
+      catch(error){pass.innerHTML=`<div class="xp-note">${xpEsc(error.message)}</div>`;}
+    }
+    load();
+  </script>
+</body>
+</html>

@@ -33,6 +33,12 @@ const mobileTopups = require('./mobileTopupService');
 const engagement = require('./engagementService');
 const googleWallet = require('./googleWalletService');
 
+function refreshGoogleWallet(email) {
+  const user=getUser(email);
+  if(!user)return;
+  googleWallet.createPass(engagement.walletCard(user)).catch(()=>{});
+}
+
 const app = express();
 const esimRetriesInProgress = new Set();
 const renewalInvoicesInProgress = new Set();
@@ -713,11 +719,13 @@ app.put('/api/account/travel-mode', requireUserSession, (req,res) => {
   const existing=getUser(req.userEmail)?.travelMode||{};
   travelMode.reminders=existing.startDate===travelMode.startDate?existing.reminders||{}:{};
   saveUser(req.userEmail,{travelMode});
+  refreshGoogleWallet(req.userEmail);
   res.json({ok:true,travelMode});
 });
 
 app.delete('/api/account/travel-mode', requireUserSession, (req,res) => {
   saveUser(req.userEmail,{travelMode:null});
+  refreshGoogleWallet(req.userEmail);
   res.json({ok:true});
 });
 
@@ -2374,6 +2382,7 @@ app.post('/api/admin/users/:email/resync-esim', adminAuth.requireAdmin, adminAut
     const totalGb = totalBytes == null ? null : totalBytes / (1024 ** 3);
     const remainingGb = remainingBytes == null ? null : remainingBytes / (1024 ** 3);
     saveUser(email, { esim: { ...user.esim, usedBytes, totalBytes, remainingBytes, usedGb, dataLimitGb: totalGb, remainingGb, lastUpdateTime: usage.lastUpdateTime || new Date().toISOString() } });
+    refreshGoogleWallet(email);
     auditStore.log({ adminEmail: req.admin.email, action: 'esim_usage_resynced', target: email });
     res.json({ ok: true, usedGb, totalGb, remainingGb });
   } catch (error) { res.status(502).json({ error: error.message }); }
@@ -2466,6 +2475,7 @@ app.post('/api/admin/users/:email/purchases/:purchaseId/retry-provision', adminA
       const topup=await topupEsim({esimTranNo:user.esim.esimTranNo,iccid:user.esim.iccid,packageCode:purchase.packageCode,transactionId:`topup-retry-${String(purchaseId).slice(-34)}`});
       const esim={...user.esim,...(topup.iccid?{iccid:topup.iccid}:{}),...(topup.totalGb!=null?{dataLimitGb:topup.totalGb}:{}),...(topup.usedGb!=null?{usedGb:topup.usedGb}:{}),...(topup.remainingGb!=null?{remainingGb:topup.remainingGb}:{}),...(topup.expiredTime?{expiredTime:topup.expiredTime}:{}),lastTopupAt:new Date().toISOString(),lastTopupPackageCode:purchase.packageCode,lastPushAlertThreshold:null};
       saveUser(email,{status:'active',esim});
+      refreshGoogleWallet(email);
       upsertPurchase(email,purchaseId,{fulfillmentStatus:'provisioned',fulfilledAt:new Date().toISOString(),fulfillmentError:null,providerTransactionId:topup.transactionId||null,iccid:esim.iccid||null});
       auditStore.log({adminEmail:req.admin.email,action:'paid_esim_topup_retried',target:email,details:{purchaseId,packageCode:purchase.packageCode,iccidEnding:String(esim.iccid||'').slice(-4)}});
       return res.json({ok:true,purchaseId,topup:true,esim:{iccidEnding:String(esim.iccid||'').slice(-4),remainingGb:esim.remainingGb??null,expiredTime:esim.expiredTime||null}});
@@ -2754,6 +2764,7 @@ app.post('/api/webhook', async (req, res) => {
           const topup=await topupEsim({esimTranNo:current.esim.esimTranNo,iccid:current.esim.iccid,packageCode,transactionId:`topup-${String(session.id).slice(-40)}`});
           const esim={...current.esim,...(topup.iccid?{iccid:topup.iccid}:{}),...(topup.totalGb!=null?{dataLimitGb:topup.totalGb}:{}),...(topup.usedGb!=null?{usedGb:topup.usedGb}:{}),...(topup.remainingGb!=null?{remainingGb:topup.remainingGb}:{}),...(topup.expiredTime?{expiredTime:topup.expiredTime}:{}),lastTopupAt:new Date().toISOString(),lastTopupPackageCode:packageCode,lastPushAlertThreshold:null};
           saveUser(email,{status:'active',esim,stripeCustomerId:typeof session.customer==='string'?session.customer:session.customer?.id||current.stripeCustomerId||null});
+          refreshGoogleWallet(email);
           upsertPurchase(email,session.id,{fulfillmentStatus:'provisioned',fulfilledAt:new Date().toISOString(),providerTransactionId:topup.transactionId||null,iccid:esim.iccid||null},purchaseDefaults);
           recordDiagnostic(req,{email,source:'esim_access',type:'topup_flow',action:'topup_completed',outcome:'success',severity:'info',message:'Existing eSIM topped up after Stripe payment',purchaseId:session.id,context:{packageCode,iccidEnding:String(esim.iccid||'').slice(-4)}});
           sendToEmail(email,{title:'Інтернет додано',body:`Пакет ${session.metadata.packageName||'eSIM'} додано до вже встановленої eSIM.`,url:'/usage.html',tag:`topup-${String(session.id).slice(-10)}`}).catch(()=>{});
@@ -3027,6 +3038,7 @@ app.get('/api/usage', requireUserSession, async (req, res) => {
         usageHistory,
       },
     });
+    refreshGoogleWallet(email);
 
     res.json({ usedBytes, totalBytes, remainingBytes, usedGb, totalGb, remainingGb, source:'esim_access_operator', esimStatus: usage.esimStatus, apn: usage.apn, expiredTime: usage.expiredTime, activateTime: usage.activateTime, lastUpdateTime: usage.lastUpdateTime });
   } catch (err) {
