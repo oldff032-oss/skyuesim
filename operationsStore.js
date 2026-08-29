@@ -18,7 +18,7 @@ const defaults = () => ({
   },
   featureRules: { disabledCountries:[], disabledPackages:[], paymentMethods:{stripeCard:true} },
   providerBalance: { amount:null, currency:'USD', averageOrderCost:null, updatedAt:null, source:'not_configured' },
-  versionInfo: { frontend:'2.2.0', backend:'2.2.0', serviceWorker:'v82', cache:'signal-shell-v82-wallet-live-status', deployedAt:null, changelog:['Живий залишок трафіку в Google Wallet','Готовність eSIM і подорожі','Нагадування про завершення пакета','Сімейна готовність у Travel Pass','Персональний Signal Travel Pass для Google Wallet','Signal Passport і країни подорожей','Signal Club та безпечні винагороди'],criticalRefreshToken:null,criticalAssets:['/i18n.js','/style.css','/experience.css','/experience.js','/wallet-pass.html','/pwa.js','/sw.js'] },
+  versionInfo: { frontend:'2.3.0', backend:'2.3.0', serviceWorker:'v83', cache:'signal-shell-v83-signal-home', deployedAt:null, changelog:['Новий компактний Signal Space на головній','Безпечна синхронізація Google Wallet','Passport, Points, сімейні поїздки, Travel Pass і порятунок','Планування подорожі перенесено в Signal Space','Поповнення звичайної SIM перенесено в тарифи','Живий залишок трафіку в Google Wallet'],criticalRefreshToken:null,criticalAssets:['/dashboard.html','/signal-universe.html','/plans.html','/i18n.js','/style.css','/experience.css','/experience.js','/wallet-pass.html','/pwa.js','/sw.js'] },
   clientVersions: {},
   dailyReports: [], reportSettings: { enabled:true, hour:8, lastSentDate:null },
 });

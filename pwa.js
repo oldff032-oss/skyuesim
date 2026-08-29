@@ -3,8 +3,8 @@
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('/sw.js?v=81', { updateViaCache: 'none' }).then(registration => registration.update()).catch(() => {});
   navigator.serviceWorker.addEventListener('controllerchange',()=>{
-    if(sessionStorage.getItem('signal_sw_reloaded_v82')==='1')return;
-    sessionStorage.setItem('signal_sw_reloaded_v82','1');
+    if(sessionStorage.getItem('signal_sw_reloaded_v83')==='1')return;
+    sessionStorage.setItem('signal_sw_reloaded_v83','1');
     location.reload();
   });
 }
@@ -47,7 +47,7 @@ if (window.location.pathname.endsWith('/app-tools.html')) {
 // auth headers, PINs, tokens, QR data or full URLs/query strings.
 const signalOriginalFetch = window.fetch.bind(window);
 let signalDiagnosticCount = 0;
-const SIGNAL_FRONTEND_VERSION='2.2.0',SIGNAL_SW_VERSION='v82',SIGNAL_CACHE_VERSION='signal-shell-v82-wallet-live-status';
+const SIGNAL_FRONTEND_VERSION='2.3.0',SIGNAL_SW_VERSION='v83',SIGNAL_CACHE_VERSION='signal-shell-v83-signal-home';
 window.SIGNAL_APP_VERSION=SIGNAL_FRONTEND_VERSION;
 window.addEventListener('load',async()=>{
   if(typeof API_URL==='undefined')return;

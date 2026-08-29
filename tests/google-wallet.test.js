@@ -79,6 +79,24 @@ test('Google Wallet pre-creates the class and personal object through the protec
   assert.equal(calls[4].options.headers.Authorization,'Bearer test-token');
 });
 
+test('Google Wallet never replaces an existing shared class while refreshing one user object',async()=>{
+  const {privateKey}=crypto.generateKeyPairSync('rsa',{modulusLength:2048});
+  const env={FRONTEND_URL:'https://esimsignalapp.com',GOOGLE_WALLET_ISSUER_ID:'987654321',GOOGLE_WALLET_SERVICE_ACCOUNT_EMAIL:'wallet@signal-test.iam.gserviceaccount.com',GOOGLE_WALLET_PRIVATE_KEY:privateKey.export({type:'pkcs8',format:'pem'})};
+  const resources=wallet.passResources({serial:'signal-existing',remainingGb:9,esimReadiness:'ready'},env),calls=[];
+  const responses=[
+    {ok:true,status:200,json:async()=>({access_token:'test-token',expires_in:3600})},
+    {ok:true,status:200,json:async()=>({id:resources.config.classId})},
+    {ok:true,status:200,json:async()=>({id:resources.objectId})},
+    {ok:true,status:200,json:async()=>({id:resources.objectId})},
+  ];
+  const fakeFetch=async(url,options={})=>{calls.push({url:String(url),options});return responses.shift();};
+  await wallet.syncPass(resources,fakeFetch);
+  assert.equal(calls.filter(call=>call.url.includes('/genericClass/')).length,1);
+  assert.equal(calls.some(call=>call.url.includes('/genericClass/')&&call.options.method==='PUT'),false);
+  assert.equal(calls.at(-1).options.method,'PUT');
+  assert.match(calls.at(-1).url,/genericObject\/987654321\.signal-existing$/);
+});
+
 test('Wallet endpoint generates Google links on the server and frontend shows a setup state safely',()=>{
   const server=read('server.js'),page=read('wallet-pass.html'),service=read('googleWalletService.js');
   assert.match(server,/googleWallet\.createPass\(card\)/);
@@ -94,6 +112,6 @@ test('Wallet endpoint generates Google links on the server and frontend shows a 
   assert.match(page,/class="xp-google-btn"/);
   assert.match(page,/Оновити статус картки/);
   assert.match(page,/GB залишилось/);
-  assert.match(page,/Google Wallet налаштовується/);
+  assert.match(page,/Google Wallet ще не синхронізовано/);
   assert.doesNotMatch(page,/GOOGLE_WALLET_PRIVATE_KEY|GOOGLE_WALLET_SERVICE_ACCOUNT_EMAIL/);
 });

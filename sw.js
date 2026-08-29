@@ -3,7 +3,7 @@
 // Кешує тільки статичну "оболонку" — самі дані (підписка, тікети) завжди
 // тягнуться наживо з бекенду, ніколи не кешуються.
 
-const CACHE_NAME = 'signal-shell-v82-wallet-live-status';
+const CACHE_NAME = 'signal-shell-v83-signal-home';
 const SHELL_FILES = [
   '/dashboard.html',
   '/profile.html',

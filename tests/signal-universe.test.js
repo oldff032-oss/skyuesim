@@ -50,6 +50,14 @@ test('new customer experiences are authenticated and cached as one mobile shell'
   assert.match(css,/overflow-x:hidden/);
 });
 
+test('home exposes a compact direct Signal Space without secondary operational cards',()=>{
+  const dashboard=read('dashboard.html');
+  for(const page of ['signal-universe.html','signal-passport.html','signal-club.html','family-trip.html','wallet-pass.html','rescue-mode.html'])assert.match(dashboard,new RegExp(page.replace('.','\\.')));
+  assert.match(dashboard,/class="signal-hub"/);
+  assert.match(dashboard,/class="signal-tools"/);
+  assert.doesNotMatch(dashboard,/topup-promo|trip-promo|smart-card|Стан підключення|Поповнити звичайну SIM|Запланувати подорож/);
+});
+
 test('admin rewards and rescue decisions require Super Admin two-factor gates',()=>{
   const server=read('server.js'),nav=read('admin-common.js');
   assert.match(server,/\/api\/admin\/engagement\/:email\/points'.*requireRole\('super_admin'\).*requirePermission\('refunds\.manage',\{requireTwoFactor:true\}\)/);

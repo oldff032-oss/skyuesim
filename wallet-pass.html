@@ -52,7 +52,7 @@
         <div class="xp-wallet-sync"><i></i><span>Оновлено ${c.lastSyncAt?xpDate(c.lastSyncAt):'щойно'}. Дані в Google Wallet синхронізовано.</span></div>`;
       const googleButton=data.googleUrl
         ?`<a class="xp-google-btn" href="${xpEsc(data.googleUrl)}" rel="external" aria-label="Додати в Google Wallet"><img src="https://developers.google.com/static/wallet/images/branding/add-to-wallet-button-primary.png" alt="Add to Google Wallet"></a>`
-        :`<div class="xp-wallet-setup"><b>Google Wallet налаштовується</b><span>${data.google?.status==='invalid_private_key'?'Потрібно перевірити захищений ключ сервісного акаунта.':data.google?.status==='google_api_error'?'Google тимчасово не прийняв оновлення. Спробуйте ще раз.':'Після підтвердження Google кнопка активується автоматично.'}</span></div>`;
+        :`<div class="xp-wallet-setup"><b>Google Wallet ще не синхронізовано</b><span>${data.google?.status==='invalid_private_key'?'Потрібно перевірити захищений ключ сервісного акаунта.':data.google?.status==='google_api_error'?'Ми зберегли дані в Signal. У тестовому режимі перевірте, що ваш Gmail доданий до тестових акаунтів Google Wallet, і повторіть оновлення.':'Після налаштування Google кнопка активується автоматично.'}</span></div>`;
       actions.innerHTML=`${googleButton}<button id="refreshWallet" class="xp-btn secondary" type="button">↻ Оновити статус картки</button>${data.appleUrl?`<a class="xp-btn secondary" href="${xpEsc(data.appleUrl)}"> Додати в Apple Wallet</a>`:'<button class="xp-btn secondary" disabled>Apple Wallet · очікує сертифікат</button>'}<a class="xp-btn secondary" href="offline-esim.html">Відкрити захищену офлайн-картку</a>`;
       document.getElementById('refreshWallet').addEventListener('click',load);
     }

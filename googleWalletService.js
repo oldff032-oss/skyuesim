@@ -171,10 +171,7 @@ async function syncPass(resources, fetchImpl=global.fetch) {
   if(existingClass.response.status===404){
     const created=await walletRequest('/genericClass',token,fetchImpl,{method:'POST',body:JSON.stringify(resources.genericClass)});
     if(!created.response.ok&&created.response.status!==409)throw new Error(`wallet_class_${created.response.status}`);
-  }else if(existingClass.response.ok){
-    const updated=await walletRequest(classPath,token,fetchImpl,{method:'PUT',body:JSON.stringify(resources.genericClass)});
-    if(!updated.response.ok)throw new Error(`wallet_class_${updated.response.status}`);
-  }else throw new Error(`wallet_class_${existingClass.response.status}`);
+  }else if(!existingClass.response.ok)throw new Error(`wallet_class_${existingClass.response.status}`);
 
   const objectPath=`/genericObject/${encodeURIComponent(resources.objectId)}`;
   const existingObject=await walletRequest(objectPath,token,fetchImpl);
@@ -194,8 +191,10 @@ async function createPass(card, env=process.env, fetchImpl=global.fetch) {
   try{
     await syncPass(resources,fetchImpl);
     return createSaveLink(card,env);
-  }catch{
-    return {configured:true,status:'google_api_error',missing:[],url:null};
+  }catch(error){
+    const errorCode=/^wallet_(?:oauth|class|object)_\d{3}$/.test(String(error?.message||''))?error.message:'wallet_sync_failed';
+    console.error(`[google-wallet] ${errorCode}`);
+    return {configured:true,status:'google_api_error',errorCode,missing:[],url:null};
   }
 }
 
