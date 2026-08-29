@@ -52,9 +52,10 @@ test('new customer experiences are authenticated and cached as one mobile shell'
 
 test('home exposes a compact direct Signal Space without secondary operational cards',()=>{
   const dashboard=read('dashboard.html');
-  for(const page of ['signal-universe.html','signal-passport.html','signal-club.html','family-trip.html','wallet-pass.html','rescue-mode.html'])assert.match(dashboard,new RegExp(page.replace('.','\\.')));
-  assert.match(dashboard,/class="signal-hub"/);
-  assert.match(dashboard,/class="signal-tools"/);
+  assert.match(dashboard,/href="signal-universe\.html"/);
+  assert.match(dashboard,/href="signal-club\.html"/);
+  assert.match(dashboard,/class="space-launch"/);
+  assert.match(dashboard,/class="reward-card"/);
   assert.doesNotMatch(dashboard,/topup-promo|trip-promo|smart-card|Стан підключення|Поповнити звичайну SIM|Запланувати подорож/);
 });
 

@@ -75,6 +75,11 @@
       selectedPlan = el.dataset.plan;
       if(typeof signalReportDiagnostic==='function')signalReportDiagnostic('user_action','info','Monthly plan selected',{action:'monthly_plan_selected',plan:selectedPlan});
     }
+    const requestedPlan = new URLSearchParams(location.search).get('plan');
+    if(['basic','standard','unlimited'].includes(requestedPlan)){
+      const requestedTier = document.querySelector(`.tier[data-plan="${requestedPlan}"]`);
+      if(requestedTier) selectTier(requestedTier);
+    }
 
     async function startCheckout(){
       const err = document.getElementById('err');

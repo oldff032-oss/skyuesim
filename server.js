@@ -694,6 +694,10 @@ app.get('/api/account/profile-overview',requireUserSession,(req,res)=>{
   const user=syncEngagementForUser(req.userEmail);
   res.json(engagement.profileOverview(user,operationsStore.store().engagementSettings||{}));
 });
+app.get('/api/account/home-deck',requireUserSession,(req,res)=>{
+  const user=syncEngagementForUser(req.userEmail);
+  res.json(engagement.homeDeck(user,operationsStore.store().engagementSettings||{}));
+});
 app.get('/api/account/smart-trip-status',requireUserSession,(req,res)=>res.json(engagement.smartTripStatus(getUser(req.userEmail)||{})));
 app.get('/api/account/activity',requireUserSession,(req,res)=>res.json({items:engagement.activityFeed(getUser(req.userEmail)||{},accountTickets(req.userEmail))}));
 app.get('/api/account/savings',requireUserSession,(req,res)=>res.json(engagement.savingsSummary(getUser(req.userEmail)||{},operationsStore.store().engagementSettings||{})));

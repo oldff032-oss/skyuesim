@@ -55,9 +55,9 @@ test('global update assets use one coherent cache and app version', () => {
   const worker = read('sw.js');
   const pwa = read('pwa.js');
   for (const page of ['/travel-assistant.html','/esim-topup.html','/family-share.html','/notifications.html','/activity.html','/savings.html','/family-center.html']) assert.match(worker, new RegExp(page.replace('.', '\\.')));
-  assert.match(worker, /signal-shell-v84-profile-experience/);
-  assert.match(pwa, /SIGNAL_FRONTEND_VERSION='2\.4\.0'/);
-  assert.match(pwa, /SIGNAL_SW_VERSION='v84'/);
+  assert.match(worker, /signal-shell-v85-premium-cards/);
+  assert.match(pwa, /SIGNAL_FRONTEND_VERSION='2\.5\.0'/);
+  assert.match(pwa, /SIGNAL_SW_VERSION='v85'/);
 });
 
 test('travel planner dates fit mobile cards and secondary tools stay off the home screen', () => {
