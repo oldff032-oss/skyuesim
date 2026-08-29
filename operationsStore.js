@@ -5,7 +5,7 @@ const defaults = () => ({
   pinResetRequests: [],
   rescueRequests: [],
   engagementSettings: {
-    enabled:true, pointsPerDollar:10, stampBonus:50,
+    enabled:true, pointsPerDollar:10, stampBonus:50, roamingReferenceCentsPerGb:1000,
     rewards:[
       {id:'discount_1',name:'Знижка $1 на наступну eSIM',points:250,kind:'discount',amountCents:100},
       {id:'discount_2',name:'Знижка $2 на наступну eSIM',points:500,kind:'discount',amountCents:200},
@@ -18,7 +18,7 @@ const defaults = () => ({
   },
   featureRules: { disabledCountries:[], disabledPackages:[], paymentMethods:{stripeCard:true} },
   providerBalance: { amount:null, currency:'USD', averageOrderCost:null, updatedAt:null, source:'not_configured' },
-  versionInfo: { frontend:'2.3.0', backend:'2.3.0', serviceWorker:'v83', cache:'signal-shell-v83-signal-home', deployedAt:null, changelog:['Новий компактний Signal Space на головній','Безпечна синхронізація Google Wallet','Passport, Points, сімейні поїздки, Travel Pass і порятунок','Планування подорожі перенесено в Signal Space','Поповнення звичайної SIM перенесено в тарифи','Живий залишок трафіку в Google Wallet'],criticalRefreshToken:null,criticalAssets:['/dashboard.html','/signal-universe.html','/plans.html','/i18n.js','/style.css','/experience.css','/experience.js','/wallet-pass.html','/pwa.js','/sw.js'] },
+  versionInfo: { frontend:'2.4.0', backend:'2.4.0', serviceWorker:'v84', cache:'signal-shell-v84-profile-experience', deployedAt:null, changelog:['Профіль 2.0 з живими даними акаунта','Центр сповіщень зі станом прочитання','Історія покупок, eSIM, підтримки та Points','Розумний статус подорожі з одним наступним кроком','Єдиний сімейний центр із керуванням готовністю','Прозорий екран орієнтовної економії','Розширений Signal Space і Travel Pass'],criticalRefreshToken:null,criticalAssets:['/dashboard.html','/profile.html','/notifications.html','/activity.html','/savings.html','/family-center.html','/family-trip.html','/signal-universe.html','/i18n.js','/style.css','/experience.css','/experience.js','/wallet-pass.html','/pwa.js','/sw.js'] },
   clientVersions: {},
   dailyReports: [], reportSettings: { enabled:true, hour:8, lastSentDate:null },
 });

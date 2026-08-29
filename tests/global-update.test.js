@@ -54,10 +54,10 @@ test('passkeys follow the configured production domain instead of an obsolete ho
 test('global update assets use one coherent cache and app version', () => {
   const worker = read('sw.js');
   const pwa = read('pwa.js');
-  for (const page of ['/travel-assistant.html','/esim-topup.html','/family-share.html']) assert.match(worker, new RegExp(page.replace('.', '\\.')));
-  assert.match(worker, /signal-shell-v83-signal-home/);
-  assert.match(pwa, /SIGNAL_FRONTEND_VERSION='2\.3\.0'/);
-  assert.match(pwa, /SIGNAL_SW_VERSION='v83'/);
+  for (const page of ['/travel-assistant.html','/esim-topup.html','/family-share.html','/notifications.html','/activity.html','/savings.html','/family-center.html']) assert.match(worker, new RegExp(page.replace('.', '\\.')));
+  assert.match(worker, /signal-shell-v84-profile-experience/);
+  assert.match(pwa, /SIGNAL_FRONTEND_VERSION='2\.4\.0'/);
+  assert.match(pwa, /SIGNAL_SW_VERSION='v84'/);
 });
 
 test('travel planner dates fit mobile cards and secondary tools stay off the home screen', () => {

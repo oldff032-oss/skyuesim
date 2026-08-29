@@ -681,6 +681,34 @@ app.get('/api/account/announcements', requireUserSession, async (req, res) => re
 // notices before a saved login session has been restored.
 app.get('/api/announcements', async (req, res) => res.json({ announcements: await localizedAnnouncements(req.query.email || null) }));
 
+function accountTickets(email) {
+  return ticketStore.getTicketsByEmail(email).map(ticketStore.stripNotesForUser);
+}
+
+async function accountNotificationCenter(email) {
+  const user=getUser(email)||{};
+  return engagement.notificationCenter(user,accountTickets(email),await localizedAnnouncements(email));
+}
+
+app.get('/api/account/profile-overview',requireUserSession,(req,res)=>{
+  const user=syncEngagementForUser(req.userEmail);
+  res.json(engagement.profileOverview(user,operationsStore.store().engagementSettings||{}));
+});
+app.get('/api/account/smart-trip-status',requireUserSession,(req,res)=>res.json(engagement.smartTripStatus(getUser(req.userEmail)||{})));
+app.get('/api/account/activity',requireUserSession,(req,res)=>res.json({items:engagement.activityFeed(getUser(req.userEmail)||{},accountTickets(req.userEmail))}));
+app.get('/api/account/savings',requireUserSession,(req,res)=>res.json(engagement.savingsSummary(getUser(req.userEmail)||{},operationsStore.store().engagementSettings||{})));
+app.get('/api/account/family-center',requireUserSession,(req,res)=>res.json(engagement.familyCenter(getUser(req.userEmail)||{})));
+app.get('/api/account/notifications',requireUserSession,async(req,res)=>res.json(await accountNotificationCenter(req.userEmail)));
+app.post('/api/account/notifications/read-all',requireUserSession,rateLimit('notification_read',60*1000,30,req=>req.userEmail),async(req,res)=>{
+  const center=await accountNotificationCenter(req.userEmail),user=getUser(req.userEmail)||{},readIds=[...new Set([...(user.notificationCenter?.readIds||[]),...center.items.map(item=>item.id)])].slice(-300),updatedAt=new Date().toISOString();
+  saveUser(req.userEmail,{notificationCenter:{readIds,updatedAt}});res.json({ok:true,unread:0});
+});
+app.post('/api/account/notifications/:id/read',requireUserSession,rateLimit('notification_read',60*1000,30,req=>req.userEmail),async(req,res)=>{
+  const notificationId=String(req.params.id||'');if(!notificationId||notificationId.length>220)return res.status(400).json({error:'Некоректне повідомлення'});
+  const center=await accountNotificationCenter(req.userEmail);if(!center.items.some(item=>item.id===notificationId))return res.status(404).json({error:'Повідомлення вже неактуальне'});
+  const user=getUser(req.userEmail)||{},readIds=[...new Set([...(user.notificationCenter?.readIds||[]),notificationId])].slice(-300),updatedAt=new Date().toISOString();saveUser(req.userEmail,{notificationCenter:{readIds,updatedAt}});res.json({ok:true});
+});
+
 app.put('/api/account/preferences', requireUserSession, (req, res) => {
   const raw = req.body?.trafficAlertThresholds;
   const language = req.body?.language;

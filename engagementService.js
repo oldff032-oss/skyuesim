@@ -141,4 +141,67 @@ function walletCard(user = {}) {
   return {serial:`signal-${crypto.createHash('sha256').update(user.email||'guest').digest('hex').slice(0,16)}`,holder:text(user.displayName,80)||'Signal Traveler',plan:text(latest.packageName||user.plan||'eSIM',100),destination:text(trip?.destination||latest.location||'Global',80),validUntil,status,usedGb:cleanNumber(usedGb),totalGb:cleanNumber(totalGb),remainingGb:cleanNumber(remainingGb),usagePercent:cleanNumber(usagePercent),dataStatus,esimReadiness,tripStartDate,tripEndDate,daysUntilTrip,tripStatus,daysUntilExpiry,lastSyncAt:esim.lastUpdateTime||user.updatedAt||null,familyReady,familyTotal:familyMembers.length};
 }
 
-module.exports={ id, passportFor, loyaltyFor, publicClub, awardPurchase, redeem, usageInsights, safeFamilyTrip, safeRescueDiagnostics, walletCard };
+function smartTripStatus(user = {}) {
+  const card=walletCard(user),insights=usageInsights(user),trip=user.travelMode?.enabled===false?null:user.travelMode||null;
+  let state='idle',eyebrow='SIGNAL ГОТОВИЙ',title='Куди далі?',message='Заплануй напрямок і дати — Signal підготує eSIM та нагадування.',action={label:'Запланувати подорож',url:'/travel-assistant.html'};
+  if(card.tripStatus==='upcoming'){
+    state='upcoming';eyebrow=card.daysUntilTrip<=1?'ВИЇЗД УЖЕ ЗАВТРА':`ДО ПОЇЗДКИ ${Math.max(0,card.daysUntilTrip)} ДН.`;
+    if(card.esimReadiness==='not_ready'){title='Потрібна eSIM';message=`Для поїздки до ${card.destination} ще не обрано пакет.`;action={label:'Обрати пакет',url:'/travel-plans.html'};}
+    else if(card.esimReadiness==='attention'){title='Перевір термін eSIM';message='Поточна eSIM може не покрити всю поїздку. Перевір пакет до виїзду.';action={label:'Перевірити eSIM',url:'/esim-management.html'};}
+    else if(card.daysUntilTrip<=3){title='Все готово до подорожі';message='eSIM готова. Збережи Travel Pass та офлайн-картку перед виїздом.';action={label:'Відкрити Travel Pass',url:'/wallet-pass.html'};}
+    else {title=`${card.destination} уже близько`;message='eSIM готова. Signal продовжить стежити за датою та терміном пакета.';action={label:'Переглянути готовність',url:'/travel-assistant.html'};}
+  } else if(card.tripStatus==='in_progress'){
+    state=insights.risk==='high'?'attention':'active';eyebrow='ПОДОРОЖ ТРИВАЄ';title=insights.risk==='high'?'Інтернет може закінчитися':'Зв’язок під контролем';message=insights.recommendation;action={label:insights.risk==='high'?'Додати пакет':'Переглянути витрати',url:insights.risk==='high'?'/esim-topup.html':'/usage.html'};
+  } else if(card.status==='active'){
+    state=insights.risk==='high'?'attention':'ready';eyebrow='ESIM АКТИВНА';title=insights.risk==='high'?'Залишилося мало даних':'Інтернет готовий';message=insights.recommendation;action={label:insights.risk==='high'?'Додати пакет':'Відкрити Travel Pass',url:insights.risk==='high'?'/esim-topup.html':'/wallet-pass.html'};
+  } else if(card.status==='expired'){
+    state='attention';eyebrow='ПАКЕТ ЗАВЕРШЕНО';title='Час обрати новий пакет';message='Попередня eSIM залишилася в історії, а новий пакет можна придбати окремо.';action={label:'Переглянути тарифи',url:'/plans.html'};
+  }
+  return {state,eyebrow,title,message,action,destination:trip?.destination||null,startDate:trip?.startDate||null,endDate:trip?.endDate||null,daysUntilTrip:card.daysUntilTrip,tripStatus:card.tripStatus,readiness:{esim:card.esimReadiness,wallet:card.status==='active'?'ready':'available',offline:Boolean(user.esim?.activationCode||user.esim?.qrCodeUrl)},updatedAt:card.lastSyncAt||user.updatedAt||null};
+}
+
+function activityFeed(user = {}, tickets = []) {
+  const items=[];
+  const add=(value)=>{if(value.date&&value.id)items.push(value);};
+  for(const purchase of (user.purchases||[]).slice(0,80)) add({id:`purchase:${purchase.id}`,type:'purchase',title:purchase.fulfillmentStatus==='failed'?'Потрібна увага до замовлення':purchase.fulfillmentStatus==='provisioned'||purchase.fulfillmentStatus==='delivered'?'eSIM підготовлено':purchase.paymentStatus==='paid'?'Оплату підтверджено':'Створено замовлення',detail:text(purchase.packageName||purchase.plan||'Пакет Signal',120),status:purchase.fulfillmentStatus||purchase.paymentStatus||'created',date:purchase.fulfilledAt||purchase.paidAt||purchase.updatedAt||purchase.createdAt,url:'/payments.html'});
+  for(const entry of loyaltyFor(user).ledger.slice(0,80)) add({id:`points:${entry.id}`,type:'points',title:Number(entry.points)>=0?`+${entry.points} Signal Points`:`${entry.points} Signal Points`,detail:text(entry.reason,140)||'Зміна балансу',status:Number(entry.points)>=0?'earned':'used',date:entry.createdAt,url:'/signal-club.html'});
+  for(const ticket of tickets.slice(0,50)) add({id:`ticket:${ticket.id}:${ticket.updatedAt}`,type:'support',title:`Звернення #${ticket.id}`,detail:text(ticket.subject,140),status:ticket.status,date:ticket.updatedAt||ticket.createdAt,url:`/ticket.html?id=${encodeURIComponent(ticket.id)}`});
+  for(const item of (user.sharedEsims||[]).slice(0,40)){
+    add({id:`family:${item.id}`,type:'family',title:`eSIM для ${text(item.recipientName,60)||'близької людини'}`,detail:text(item.packageName,120)||'Сімейна eSIM',status:item.share?.installedAt?'installed':item.share?.viewedAt?'opened':item.share?'shared':'ready',date:item.share?.installedAt||item.share?.viewedAt||item.share?.createdAt||item.createdAt,url:'/family-esims.html'});
+  }
+  for(const trip of (user.familyTrips||[]).slice(0,30)) add({id:`trip:${trip.id}`,type:'trip',title:text(trip.name,100)||'Сімейна подорож',detail:text(trip.destination,100),status:new Date(`${trip.endDate}T23:59:59Z`)<new Date()?'completed':'planned',date:trip.updatedAt||trip.createdAt,url:'/family-trip.html'});
+  return items.sort((a,b)=>new Date(b.date)-new Date(a.date)).slice(0,120);
+}
+
+function notificationCenter(user = {}, tickets = [], announcements = []) {
+  const items=[],readIds=new Set(Array.isArray(user.notificationCenter?.readIds)?user.notificationCenter.readIds:[]),card=walletCard(user),insights=usageInsights(user),nowMs=Date.now();
+  const add=value=>{if(!value?.id)return;items.push({...value,read:readIds.has(value.id)});};
+  for(const notice of announcements) add({id:`announcement:${notice.id}`,type:'announcement',priority:notice.type==='security'?'critical':notice.type==='maintenance'?'high':'normal',title:text(notice.title,100)||'Повідомлення Signal',message:text(notice.message,260),date:notice.startsAt||notice.createdAt||now(),url:'/dashboard.html'});
+  for(const ticket of tickets){const reply=[...(ticket.messages||[])].reverse().find(message=>message.from==='admin');if(reply)add({id:`support:${ticket.id}:${reply.createdAt}`,type:'support',priority:'normal',title:`Нова відповідь у зверненні #${ticket.id}`,message:text(ticket.subject,180),date:reply.createdAt,url:`/ticket.html?id=${encodeURIComponent(ticket.id)}`});}
+  if(insights.risk==='high')add({id:`usage:${String(insights.lastSyncAt||'current').slice(0,10)}:high`,type:'usage',priority:'high',title:'Інтернет може закінчитися скоро',message:insights.recommendation,date:insights.lastSyncAt||now(),url:'/usage.html'});
+  if(card.daysUntilExpiry!=null&&card.daysUntilExpiry<=5)add({id:`expiry:${String(card.validUntil).slice(0,10)}`,type:'expiry',priority:card.daysUntilExpiry<=1?'high':'normal',title:card.daysUntilExpiry===0?'Термін eSIM завершується сьогодні':`До завершення eSIM ${card.daysUntilExpiry} дн.`,message:'Перевір залишок і підготуй наступний пакет без поспіху.',date:user.esim?.lastUpdateTime||user.updatedAt||now(),url:'/esim-management.html'});
+  const smart=smartTripStatus(user);if(smart.tripStatus==='upcoming'&&smart.daysUntilTrip!=null&&smart.daysUntilTrip<=7)add({id:`trip-reminder:${user.travelMode?.startDate}:${smart.daysUntilTrip}`,type:'trip',priority:smart.daysUntilTrip<=1?'high':'normal',title:smart.title,message:smart.message,date:user.travelMode?.updatedAt||user.updatedAt||now(),url:smart.action.url});
+  for(const purchase of (user.purchases||[]).filter(item=>item.fulfillmentStatus==='failed').slice(0,10))add({id:`purchase-failed:${purchase.id}`,type:'purchase',priority:'high',title:'Не вдалося підготувати eSIM',message:text(purchase.packageName||'Замовлення Signal',120),date:purchase.updatedAt||purchase.createdAt,url:'/payments.html'});
+  for(const item of (user.sharedEsims||[]).filter(item=>item.share?.installedAt||item.share?.viewedAt).slice(0,20)){const installed=Boolean(item.share.installedAt),date=installed?item.share.installedAt:item.share.viewedAt;add({id:`family-${installed?'installed':'opened'}:${item.id}:${date}`,type:'family',priority:'normal',title:installed?'Близька людина встановила eSIM':'Посилання на eSIM відкрито',message:text(item.recipientName||item.packageName,100),date,url:'/family-esims.html'});}
+  items.sort((a,b)=>(a.read===b.read?new Date(b.date)-new Date(a.date):a.read?1:-1));
+  return {items:items.slice(0,80),unread:items.filter(item=>!item.read).length,generatedAt:new Date(nowMs).toISOString()};
+}
+
+function savingsSummary(user = {}, settings = {}) {
+  const purchases=(user.purchases||[]).filter(item=>item.paymentStatus==='paid'||item.paidAt),referenceCentsPerGb=Math.max(100,Math.min(10000,Number(settings.roamingReferenceCentsPerGb)||1000));
+  const paidCents=purchases.reduce((sum,item)=>sum+Math.max(0,Number(item.amountCents)||0),0),dataGb=purchases.reduce((sum,item)=>sum+Math.max(0,Number(item.dataLimitGb)||0),0),tripDays=purchases.reduce((sum,item)=>sum+Math.max(0,Number(item.durationDays)||0),0);
+  const comparable=dataGb>0&&paidCents>0,referenceCents=comparable?Math.round(dataGb*referenceCentsPerGb):0,estimatedSavingsCents=comparable?Math.max(0,referenceCents-paidCents):0;
+  return {currency:'USD',paidCents,referenceCents,estimatedSavingsCents,dataGb:+dataGb.toFixed(2),tripDays,purchaseCount:purchases.length,averageCentsPerGb:comparable?Math.round(paidCents/dataGb):null,referenceCentsPerGb,comparable,method:'Орієнтовне порівняння з умовною вартістю роумінгу за 1 ГБ. Фактична економія залежить від тарифу домашнього оператора.',updatedAt:purchases.map(item=>item.updatedAt||item.paidAt||item.createdAt).filter(Boolean).sort().at(-1)||user.updatedAt||null};
+}
+
+function profileOverview(user = {}, settings = {}) {
+  const club=publicClub(user,settings),passport=passportFor(user),card=walletCard(user),smart=smartTripStatus(user),shared=user.sharedEsims||[],trips=user.familyTrips||[];
+  return {identity:{displayName:text(user.displayName,80)||'Signal Traveler',email:text(user.email,254),avatarDataUrl:typeof user.avatarDataUrl==='string'&&user.avatarDataUrl.startsWith('data:image/')?user.avatarDataUrl:null,memberSince:user.createdAt||null},plan:{name:card.plan,status:card.status,validUntil:card.validUntil,remainingGb:card.remainingGb,dataStatus:card.dataStatus},stats:{points:club.points,tier:club.tier.name,countries:passport.length,familyEsims:shared.length,activeFamilyTrips:trips.filter(item=>!item.endDate||new Date(`${item.endDate}T23:59:59Z`).getTime()>=Date.now()).length},smart};
+}
+
+function familyCenter(user = {}) {
+  const trips=user.familyTrips||[],esims=user.sharedEsims||[],nowMs=Date.now(),activeTrips=trips.filter(item=>!item.endDate||new Date(`${item.endDate}T23:59:59Z`).getTime()>=nowMs);
+  return {summary:{totalEsims:esims.length,installed:esims.filter(item=>item.share?.installedAt||item.esim?.activateTime).length,shared:esims.filter(item=>item.share&&!item.share.revokedAt&&new Date(item.share.expiresAt).getTime()>nowMs).length,activeTrips:activeTrips.length},members:esims.map(item=>({id:item.id,name:text(item.recipientName,60)||'Близька людина',packageName:text(item.packageName,100)||'eSIM',destination:text(item.location,80)||null,status:item.share?.installedAt||item.esim?.activateTime?'installed':item.share?.viewedAt?'opened':item.share&&!item.share.revokedAt?'shared':'ready',updatedAt:item.share?.installedAt||item.share?.viewedAt||item.share?.createdAt||item.createdAt||null})),trips:activeTrips.map(item=>({id:item.id,name:item.name,destination:item.destination,startDate:item.startDate,endDate:item.endDate,members:item.members||[]}))};
+}
+
+module.exports={ id, passportFor, loyaltyFor, publicClub, awardPurchase, redeem, usageInsights, safeFamilyTrip, safeRescueDiagnostics, walletCard, smartTripStatus, activityFeed, notificationCenter, savingsSummary, profileOverview, familyCenter };
