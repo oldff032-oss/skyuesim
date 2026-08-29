@@ -24,20 +24,47 @@ test('home deck exposes useful card data without eSIM or payment secrets', () =>
   assert.equal(deck.active.title, 'Стандарт');
   assert.equal(deck.active.scene, 'standard');
   assert.equal(deck.cards[0].dataLabel, '20 GB');
+  assert.equal(deck.active.usedLabel, '7 GB');
+  assert.equal(deck.active.totalLabel, '20 GB');
+  assert.equal(deck.active.remainingPercent, 65);
   assert.equal(deck.tiers.length, 3);
   const serialized = JSON.stringify(deck);
   for (const secret of ['LPA:SECRET','secret.invalid','89420000123','0000','cus_secret','order_secret']) assert.doesNotMatch(serialized, new RegExp(secret.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
 });
 
+test('home corrects stale monthly labels from the active eSIM allowance', () => {
+  const deck = engagement.homeDeck({
+    plan:'basic',
+    esim:{orderNo:'safe-order',usedBytes:2*1024**3,totalBytes:20*1024**3},
+    purchases:[{id:'purchase_1',plan:'basic',fulfillmentStatus:'provisioned',paymentStatus:'paid'}],
+  });
+  assert.equal(deck.active.title, 'Стандарт');
+  assert.equal(deck.active.planKey, 'standard');
+  assert.equal(deck.active.totalLabel, '20 GB');
+});
+
+test('home names regional packages from the fulfilled purchase instead of a stale account plan', () => {
+  const deck = engagement.homeDeck({
+    plan:'basic',
+    esim:{orderNo:'safe-order',usedGb:3,remainingGb:17,dataLimitGb:20,apn:'drei.at'},
+    purchases:[{id:'purchase_2',plan:'custom',kind:'custom_package',packageCode:'eu-20',packageName:'Європа 20 GB',location:'Європа',fulfillmentStatus:'provisioned',paymentStatus:'paid'}],
+  });
+  assert.equal(deck.active.title, 'Європа 20 GB');
+  assert.equal(deck.active.planKey, 'travel');
+  assert.equal(deck.active.networkLabel, 'drei.at');
+});
+
 test('approved visual system and functional gift center are present on mobile home', () => {
   const dashboard = read('dashboard.html');
-  assert.match(dashboard, />SIGNAL</);
-  assert.match(dashboard, /eSIM · TRAVEL/);
+  assert.match(dashboard, />Signal eSIM</);
   assert.match(dashboard, /signal-card-scenes-v1\.png/);
   assert.match(dashboard, /\/api\/account\/home-deck/);
   assert.match(dashboard, /href="signal-club\.html" aria-label="Винагороди"/);
-  for (const plan of ['basic','standard','unlimited']) assert.match(dashboard, new RegExp(`plans\\.html\\?plan=\\$\\{encodeURIComponent\\(item\\.key\\)\\}`));
-  assert.match(dashboard, /grid-template-columns:repeat\(3,minmax\(0,1fr\)\)/);
+  assert.match(dashboard, /hero-used/);
+  assert.match(dashboard, /remainingPercent/);
+  assert.match(dashboard, /networkLabel/);
+  assert.match(dashboard, /grid-template-columns:repeat\(4,minmax\(0,1fr\)\)/);
+  assert.doesNotMatch(dashboard, /Обери свій рівень|Мої картки|tier-grid|owned-strip/);
   assert.match(dashboard, /overflow-x:hidden/);
 });
 
@@ -53,8 +80,8 @@ test('premium atlas is shipped in the offline shell and version is coherent', ()
   const pwa = read('pwa.js');
   const operations = read('operationsStore.js');
   assert.match(worker, /'\/signal-card-scenes-v1\.png'/);
-  assert.match(worker, /signal-shell-v85-premium-cards/);
-  assert.match(pwa, /SIGNAL_FRONTEND_VERSION='2\.5\.0'/);
-  assert.match(operations, /frontend:'2\.5\.0', backend:'2\.5\.0', serviceWorker:'v85'/);
+  assert.match(worker, /signal-shell-v86-home-passport/);
+  assert.match(pwa, /SIGNAL_FRONTEND_VERSION='2\.6\.0'/);
+  assert.match(operations, /frontend:'2\.6\.0', backend:'2\.6\.0', serviceWorker:'v86'/);
   assert.ok(fs.statSync(path.join(root, 'signal-card-scenes-v1.png')).size > 100000);
 });

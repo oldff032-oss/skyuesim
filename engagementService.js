@@ -205,9 +205,20 @@ function familyCenter(user = {}) {
 }
 
 function homeDeck(user = {}, settings = {}) {
-  const card=walletCard(user),club=publicClub(user,settings),latest=(user.purchases||[]).find(item=>['provisioned','delivered'].includes(item.fulfillmentStatus))||(user.purchases||[])[0]||{},planKey=String(user.plan||latest.plan||'').toLowerCase();
-  const monthly={basic:{title:'Базовий',dataLabel:'10 GB',scene:'basic'},standard:{title:'Стандарт',dataLabel:'20 GB',scene:'standard'},unlimited:{title:'Безліміт',dataLabel:'∞ GB',scene:'unlimited'}};
-  const isMonthly=Boolean(monthly[planKey]),destination=text(user.travelMode?.destination||latest.location,80),activeTitle=isMonthly?monthly[planKey].title:destination||text(latest.packageName,80)||'Твоя eSIM',scene=isMonthly?monthly[planKey].scene:destination?'travel':'unlimited';
+  const card=walletCard(user),club=publicClub(user,settings),latest=(user.purchases||[]).find(item=>['provisioned','delivered'].includes(item.fulfillmentStatus))||(user.purchases||[])[0]||{};
+  const monthly={basic:{title:'Базовий',dataLabel:'10 GB',totalGb:10,scene:'basic'},standard:{title:'Стандарт',dataLabel:'20 GB',totalGb:20,scene:'standard'},unlimited:{title:'Безліміт',dataLabel:'∞ GB',totalGb:null,scene:'unlimited'}};
+  const rawPurchasePlan=String(latest.plan||'').toLowerCase(),rawUserPlan=String(user.plan||'').toLowerCase(),packageName=text(latest.packageName,100),purchaseLocation=text(latest.location,80),tripDestination=text(user.travelMode?.destination,80);
+  const customPackage=rawPurchasePlan==='custom'||latest.kind==='custom_package'||latest.kind==='family_esim'||Boolean(latest.packageCode)||Boolean(purchaseLocation);
+  let planKey=monthly[rawPurchasePlan]?rawPurchasePlan:monthly[rawUserPlan]?rawUserPlan:'';
+  if(customPackage)planKey='';
+  if(!customPackage&&card.totalGb!=null){
+    if(Math.abs(card.totalGb-10)<.05)planKey='basic';
+    else if(Math.abs(card.totalGb-20)<.05)planKey='standard';
+    else if(planKey&&monthly[planKey].totalGb!==card.totalGb)planKey='';
+  }
+  if(!customPackage&&card.totalGb==null&&planKey!=='unlimited')planKey='unlimited';
+  const isMonthly=Boolean(monthly[planKey]),destination=purchaseLocation||tripDestination,volumeLabel=card.totalGb==null?'Безліміт':`${Number(card.totalGb).toLocaleString('uk-UA',{maximumFractionDigits:2})} GB`;
+  const activeTitle=isMonthly?monthly[planKey].title:packageName||[destination,volumeLabel].filter(Boolean).join(' · ')||text(card.plan,100)||'Твоя eSIM',scene=isMonthly?monthly[planKey].scene:destination?'travel':'unlimited';
   const daysLabel=card.daysUntilExpiry==null?'Без обмеження строку':card.daysUntilExpiry===0?'Завершується сьогодні':card.daysUntilExpiry===1?'1 день залишився':`${card.daysUntilExpiry} дн. залишилось`;
   const cards=[],seen=new Set();
   for(const purchase of (user.purchases||[])){
@@ -217,7 +228,8 @@ function homeDeck(user = {}, settings = {}) {
     if(cards.length>=6)break;
   }
   const availableRewards=club.rewards.filter(item=>item.status==='available'&&(!item.expiresAt||new Date(item.expiresAt)>new Date())),nextReward=club.rewardsCatalog.filter(item=>item.points>club.points).sort((a,b)=>a.points-b.points)[0]||null,redeemable=club.rewardsCatalog.filter(item=>item.points<=club.points).sort((a,b)=>b.points-a.points)[0]||null;
-  return {identity:{displayName:text(user.displayName,80)||'Signal Traveler'},active:{title:activeTitle,planKey:isMonthly?planKey:'travel',scene,dataLabel:card.remainingGb==null?'∞ GB':`${Number(card.remainingGb).toLocaleString('uk-UA',{maximumFractionDigits:2})} GB`,totalLabel:card.totalGb==null?'Безлімітний інтернет':`із ${Number(card.totalGb).toLocaleString('uk-UA',{maximumFractionDigits:2})} GB`,daysLabel,status:card.status,dataStatus:card.dataStatus,usagePercent:card.usagePercent,validUntil:card.validUntil,destination:destination||null},cards,tiers:[{key:'basic',title:'Базовий',dataLabel:'10 GB',priceLabel:'$9.99',scene:'basic',note:'Для легких подорожей'},{key:'standard',title:'Стандарт',dataLabel:'20 GB',priceLabel:'$19.99',scene:'standard',note:'Для активних мандрівників'},{key:'unlimited',title:'Безліміт',dataLabel:'∞ GB',priceLabel:'$34.99',scene:'unlimited',note:'Для безмежних можливостей'}],reward:{points:club.points,tier:club.tier,availableCount:availableRewards.length,redeemable:redeemable?{id:redeemable.id,name:redeemable.name,points:redeemable.points}:null,next:nextReward?{id:nextReward.id,name:nextReward.name,points:nextReward.points,pointsNeeded:Math.max(0,nextReward.points-club.points)}:null}};
+  const remainingPercent=card.totalGb!=null&&card.totalGb>0?Math.min(100,Math.max(0,(card.remainingGb||0)/card.totalGb*100)):100;
+  return {identity:{displayName:text(user.displayName,80)||'Signal Traveler'},active:{title:activeTitle,planKey:isMonthly?planKey:'travel',scene,dataLabel:card.remainingGb==null?'∞ GB':`${Number(card.remainingGb).toLocaleString('uk-UA',{maximumFractionDigits:2})} GB`,usedLabel:card.usedGb==null?'Не визначено':`${Number(card.usedGb).toLocaleString('uk-UA',{maximumFractionDigits:2})} GB`,totalLabel:card.totalGb==null?'Безлімітний інтернет':`${Number(card.totalGb).toLocaleString('uk-UA',{maximumFractionDigits:2})} GB`,daysLabel,status:card.status,dataStatus:card.dataStatus,usagePercent:card.usagePercent,remainingPercent:+remainingPercent.toFixed(1),validUntil:card.validUntil,lastSyncAt:card.lastSyncAt,networkLabel:text(user.esim?.apn||user.esim?.network||user.esim?.operator,80)||'Мобільна мережа',networkType:text(user.esim?.networkType||user.esim?.radioType,20)||'4G/5G',destination:destination||null},cards,tiers:[{key:'basic',title:'Базовий',dataLabel:'10 GB',priceLabel:'$9.99',scene:'basic',note:'Для легких подорожей'},{key:'standard',title:'Стандарт',dataLabel:'20 GB',priceLabel:'$19.99',scene:'standard',note:'Для активних мандрівників'},{key:'unlimited',title:'Безліміт',dataLabel:'∞ GB',priceLabel:'$34.99',scene:'unlimited',note:'Для безмежних можливостей'}],reward:{points:club.points,tier:club.tier,availableCount:availableRewards.length,redeemable:redeemable?{id:redeemable.id,name:redeemable.name,points:redeemable.points}:null,next:nextReward?{id:nextReward.id,name:nextReward.name,points:nextReward.points,pointsNeeded:Math.max(0,nextReward.points-club.points)}:null}};
 }
 
 module.exports={ id, passportFor, loyaltyFor, publicClub, awardPurchase, redeem, usageInsights, safeFamilyTrip, safeRescueDiagnostics, walletCard, smartTripStatus, activityFeed, notificationCenter, savingsSummary, profileOverview, familyCenter, homeDeck };

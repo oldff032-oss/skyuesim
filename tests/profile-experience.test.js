@@ -36,7 +36,7 @@ test('profile, notifications, activity, savings and family endpoints require a c
 test('profile 2.0 and its mobile centers are connected and cacheable offline',()=>{
   const profile=read('profile.html'),worker=read('sw.js'),dashboard=read('dashboard.html');
   for(const page of ['notifications.html','activity.html','savings.html','family-center.html']){assert.match(profile,new RegExp(page.replace('.','\\.')));assert.match(worker,new RegExp(page.replace('.','\\.')));assert.match(read(page),/viewport-fit=cover/);}
-  assert.match(dashboard,/smart-trip-status/);
+  assert.match(dashboard,/\/api\/account\/home-deck/);
   assert.match(dashboard,/href="notifications\.html"/);
   assert.match(read('family-trip.html'),/data-member/);
   assert.match(read('family-trip.html'),/Додати близьку людину/);
