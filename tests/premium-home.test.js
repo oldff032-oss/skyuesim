@@ -64,6 +64,9 @@ test('approved visual system and functional gift center are present on mobile ho
   assert.match(dashboard, /remainingPercent/);
   assert.match(dashboard, /networkLabel/);
   assert.match(dashboard, /grid-template-columns:repeat\(4,minmax\(0,1fr\)\)/);
+  for (const action of ['Встановити','Додати пакет','Для близьких','Підтримка']) assert.match(dashboard, new RegExp(action));
+  assert.doesNotMatch(dashboard, /quick-new[^>]*[\s\S]{0,120}<img/);
+  assert.doesNotMatch(dashboard, /<b>Витрати<\/b>|<b>Моя eSIM<\/b>/);
   assert.doesNotMatch(dashboard, /Обери свій рівень|Мої картки|tier-grid|owned-strip/);
   assert.match(dashboard, /overflow-x:hidden/);
 });
@@ -80,8 +83,8 @@ test('premium atlas is shipped in the offline shell and version is coherent', ()
   const pwa = read('pwa.js');
   const operations = read('operationsStore.js');
   assert.match(worker, /'\/signal-card-scenes-v1\.png'/);
-  assert.match(worker, /signal-shell-v86-home-passport/);
-  assert.match(pwa, /SIGNAL_FRONTEND_VERSION='2\.6\.0'/);
-  assert.match(operations, /frontend:'2\.6\.0', backend:'2\.6\.0', serviceWorker:'v86'/);
+  assert.match(worker, /signal-shell-v87-compact-nav/);
+  assert.match(pwa, /SIGNAL_FRONTEND_VERSION='2\.6\.1'/);
+  assert.match(operations, /frontend:'2\.6\.1', backend:'2\.6\.1', serviceWorker:'v87'/);
   assert.ok(fs.statSync(path.join(root, 'signal-card-scenes-v1.png')).size > 100000);
 });

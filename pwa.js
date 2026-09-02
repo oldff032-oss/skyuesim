@@ -1,10 +1,10 @@
 // Register from every entry page so a fresh "Add to Home Screen" install has
 // a service worker even when it starts directly on dashboard.html.
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('/sw.js?v=86', { updateViaCache: 'none' }).then(registration => registration.update()).catch(() => {});
+  navigator.serviceWorker.register('/sw.js?v=87', { updateViaCache: 'none' }).then(registration => registration.update()).catch(() => {});
   navigator.serviceWorker.addEventListener('controllerchange',()=>{
-    if(sessionStorage.getItem('signal_sw_reloaded_v86')==='1')return;
-    sessionStorage.setItem('signal_sw_reloaded_v86','1');
+    if(sessionStorage.getItem('signal_sw_reloaded_v87')==='1')return;
+    sessionStorage.setItem('signal_sw_reloaded_v87','1');
     location.reload();
   });
 }
@@ -17,8 +17,13 @@ function signalMountAuthExperience(){if(!signalAuthPages.has(signalCurrentPage)|
 window.signalAuthLoading=function(active,title,copy){const loader=document.getElementById('signal-auth-loader');if(!loader)return;if(title)document.getElementById('signal-auth-loader-title').textContent=title;if(copy)document.getElementById('signal-auth-loader-copy').textContent=copy;loader.classList.toggle('visible',Boolean(active));loader.setAttribute('aria-hidden',active?'false':'true');document.body.classList.toggle('auth-busy',Boolean(active));};
 window.signalAuthSuccess=function(title='Готово!'){const loader=document.getElementById('signal-auth-loader');if(!loader)return;document.getElementById('signal-auth-loader-title').textContent=title;document.getElementById('signal-auth-loader-copy').textContent='Відкриваємо твій особистий простір';loader.classList.add('visible','success');loader.setAttribute('aria-hidden','false');document.body.classList.add('auth-busy');};
 document.readyState==='loading'?document.addEventListener('DOMContentLoaded',signalMountAuthExperience):signalMountAuthExperience();
-const signalNavItems={'dashboard.html':{label:'Головна',labelEn:'Home',image:'nav-home-v2.png'},'plans.html':{label:'Тарифи',labelEn:'Plans',image:'nav-plans-v2.png'},'usage.html':{label:'Витрати',labelEn:'Usage',image:'nav-usage-v2.png'},'profile.html':{label:'Профіль',labelEn:'Profile',image:'nav-profile-v2.png'}};
-function enhanceSignalNavigation(){const current=location.pathname.split('/').pop(),isCore=Boolean(signalNavItems[current]),english=localStorage.getItem('signal_language')==='en';document.querySelectorAll('.bottomnav a').forEach(link=>{const page=(link.getAttribute('href')||'').split(/[?#]/)[0].split('/').pop(),item=signalNavItems[page];if(!item)return;const label=english?item.labelEn:item.label;if(isCore)link.classList.toggle('active',page===current);link.dataset.nav=page.replace('.html','');link.setAttribute('aria-label',label);link.setAttribute('title',label);link.innerHTML=`<span class="nav-icon" aria-hidden="true"><img class="nav-art" src="${item.image}" alt=""></span><span class="nav-label" data-no-auto-translate>${label}</span>`;});const dashboardLogo=document.querySelector('.logo-orbit');if(dashboardLogo&&!dashboardLogo.querySelector('img'))dashboardLogo.innerHTML='<img src="signal-premium-logo.png" alt="Signal">';}
+const signalNavItems={
+  'dashboard.html':{label:'Головна',labelEn:'Home',icon:'<svg class="nav-art nav-vector" viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 10.5 12 3l8.5 7.5"/><path d="M5.5 9.3V21h13V9.3M9.5 21v-6h5v6"/></svg>'},
+  'plans.html':{label:'Тарифи',labelEn:'Plans',icon:'<svg class="nav-art nav-vector" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3.5 12h17M12 3c2.5 2.6 3.8 5.6 3.8 9S14.5 18.4 12 21M12 3C9.5 5.6 8.2 8.6 8.2 12s1.3 6.4 3.8 9"/></svg>'},
+  'usage.html':{label:'Витрати',labelEn:'Usage',icon:'<svg class="nav-art nav-vector" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V5M16 20v-8M22 20V3M2 20h21"/></svg>'},
+  'profile.html':{label:'Профіль',labelEn:'Profile',icon:'<svg class="nav-art nav-vector" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="7.5" r="3.5"/><path d="M5 21c.4-4.6 2.8-7 7-7s6.6 2.4 7 7"/></svg>'}
+};
+function enhanceSignalNavigation(){const current=location.pathname.split('/').pop(),isCore=Boolean(signalNavItems[current]),english=localStorage.getItem('signal_language')==='en';document.querySelectorAll('.bottomnav a').forEach(link=>{const page=(link.getAttribute('href')||'').split(/[?#]/)[0].split('/').pop(),item=signalNavItems[page];if(!item)return;const label=english?item.labelEn:item.label;if(isCore)link.classList.toggle('active',page===current);link.dataset.nav=page.replace('.html','');link.setAttribute('aria-label',label);link.setAttribute('title',label);link.innerHTML=`<span class="nav-icon" aria-hidden="true">${item.icon}</span><span class="nav-label" data-no-auto-translate>${label}</span>`;});const dashboardLogo=document.querySelector('.logo-orbit');if(dashboardLogo&&!dashboardLogo.querySelector('img'))dashboardLogo.innerHTML='<img src="signal-premium-logo.png" alt="Signal">';}
 document.readyState==='loading'?document.addEventListener('DOMContentLoaded',enhanceSignalNavigation):enhanceSignalNavigation();
 window.addEventListener('load',()=>{enhanceSignalNavigation();setTimeout(enhanceSignalNavigation,500);});
 const maintenanceGateStyle=document.createElement('style');
@@ -47,7 +52,7 @@ if (window.location.pathname.endsWith('/app-tools.html')) {
 // auth headers, PINs, tokens, QR data or full URLs/query strings.
 const signalOriginalFetch = window.fetch.bind(window);
 let signalDiagnosticCount = 0;
-const SIGNAL_FRONTEND_VERSION='2.6.0',SIGNAL_SW_VERSION='v86',SIGNAL_CACHE_VERSION='signal-shell-v86-home-passport';
+const SIGNAL_FRONTEND_VERSION='2.6.1',SIGNAL_SW_VERSION='v87',SIGNAL_CACHE_VERSION='signal-shell-v87-compact-nav';
 window.SIGNAL_APP_VERSION=SIGNAL_FRONTEND_VERSION;
 window.addEventListener('load',async()=>{
   if(typeof API_URL==='undefined')return;
