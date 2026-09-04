@@ -1892,6 +1892,7 @@ app.get('/api/admin/email-broadcasts',adminAuth.requireAdmin,adminAuth.requireRo
   res.json({
     configured:isEmailConfigured(),
     counts:{staff:uniqueEmails(staff.map(admin=>admin.email)).length,superAdmins:staff.filter(admin=>admin.role==='super_admin').length,customers:uniqueEmails(users.map(user=>user.email)).length,activeCustomers:uniqueEmails(users.filter(user=>user.status==='active').map(user=>user.email)).length},
+    customers:users.map(user=>({email:String(user.email||'').trim().toLowerCase(),displayName:String(user.displayName||'').trim().slice(0,80),status:user.status||'registered',plan:user.plan||null})).filter(user=>/^\S+@\S+\.\S+$/.test(user.email)).sort((a,b)=>(a.displayName||a.email).localeCompare(b.displayName||b.email,'uk')),
     staffByRole:staff.reduce((summary,admin)=>({...summary,[admin.role]:(summary[admin.role]||0)+1}),{}),
     history:(operationsStore.store().emailBroadcasts||[]).slice(0,100),
   });
@@ -1901,6 +1902,7 @@ app.post('/api/admin/email-broadcasts/:audience',adminAuth.requireAdmin,adminAut
   const audience=String(req.params.audience||'');
   const title=String(req.body?.title||'').trim();
   const message=String(req.body?.message||'').trim();
+  const category=['support','service','package'].includes(req.body?.category)?req.body.category:'support';
   if(!['staff','customers'].includes(audience)) return res.status(400).json({error:'Невідома аудиторія розсилки'});
   if(title.length<3||title.length>120) return res.status(400).json({error:'Заголовок має містити від 3 до 120 символів'});
   if(!message||message.length>5000) return res.status(400).json({error:'Текст має містити від 1 до 5000 символів'});
@@ -1917,16 +1919,19 @@ app.post('/api/admin/email-broadcasts/:audience',adminAuth.requireAdmin,adminAut
     if(filter==='active') recipients=uniqueEmails(optedIn.filter(user=>user.status==='active').map(user=>user.email));
     else if(filter==='single'){
       const requested=String(req.body?.email||'').trim().toLowerCase();
-      const found=optedIn.find(user=>String(user.email||'').toLowerCase()===requested);
+      // A one-to-one support/service email is transactional, not a marketing broadcast.
+      // It may be sent to the selected registered customer even without marketing opt-in.
+      const found=users.find(user=>String(user.email||'').toLowerCase()===requested);
       if(!found) return res.status(404).json({error:'Користувача з таким email не знайдено'});
       recipients=[found.email];
     } else recipients=uniqueEmails(optedIn.map(user=>user.email));
   }
   if(!recipients.length) return res.status(400).json({error:'У вибраній аудиторії немає отримувачів'});
 
-  const html=emailTemplates.broadcast({title,message,audience,senderEmail:req.admin.email});
+  const selectedUser=audience==='customers'&&filter==='single'?Object.entries(getAllUsers()).map(([email,user])=>({...user,email:user.email||email})).find(user=>String(user.email||'').toLowerCase()===String(recipients[0]||'').toLowerCase()):null;
+  const html=selectedUser?emailTemplates.personalSupport({title,message,recipientName:selectedUser.displayName||'',category}):emailTemplates.broadcast({title,message,audience,senderEmail:req.admin.email});
   const delivery=await deliverBroadcast({recipients,subject:`${title} — Сигнал`,html});
-  const record={id:`mail_${Date.now().toString(36)}`,audience,filter,title,message,sender:req.admin.email,createdAt:new Date().toISOString(),recipientCount:recipients.length,deliveredCount:delivery.delivered.length,failedCount:delivery.failed.length,failures:delivery.failed.slice(0,20)};
+  const record={id:`mail_${Date.now().toString(36)}`,audience,filter,category,title,message,sender:req.admin.email,createdAt:new Date().toISOString(),recipientCount:recipients.length,deliveredCount:delivery.delivered.length,failedCount:delivery.failed.length,failures:delivery.failed.slice(0,20)};
   const state=operationsStore.store();
   (state.emailBroadcasts||=[]).unshift(record);
   state.emailBroadcasts=state.emailBroadcasts.slice(0,200);

@@ -437,3 +437,10 @@ test('ticket diagnostics use a strict secret-free whitelist',()=>{
   assert.match(customer,/replyBox\.hidden=ticket\.status==='closed'/);
   assert.match(customer,/Відповісти та відкрити знову/);
 });
+
+test('personal admin email uses a registered recipient and branded support template',()=>{
+  const server=read('server.js'),page=read('admin-email-broadcasts.html'),templates=read('emailTemplates.js');
+  assert.match(server,/customers:users\.map/);assert.match(server,/emailTemplates\.personalSupport/);
+  assert.match(page,/Зареєстрований клієнт/);assert.match(page,/Справжні персональні листи на email/);assert.match(page,/Email прийнято поштовим провайдером/);
+  assert.match(templates,/function personalSupport/);assert.match(templates,/Команда підтримки Signal/);
+});
