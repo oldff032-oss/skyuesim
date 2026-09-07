@@ -38,6 +38,10 @@ test('profile 2.0 and its mobile centers are connected and cacheable offline',()
   for(const page of ['notifications.html','activity.html','savings.html','family-center.html']){assert.match(profile,new RegExp(page.replace('.','\\.')));assert.match(worker,new RegExp(page.replace('.','\\.')));assert.match(read(page),/viewport-fit=cover/);}
   assert.match(dashboard,/\/api\/account\/home-deck/);
   assert.match(dashboard,/href="notifications\.html"/);
+  assert.match(profile,/\/api\/account\/home-deck/);
+  assert.match(profile,/АКТИВНИЙ ПАКЕТ/);
+  assert.match(profile,/ПОДОРОЖІ Й ПЕРЕВАГИ/);
+  assert.match(profile,/loadProfile\(\)/);
   assert.match(read('family-trip.html'),/data-member/);
   assert.match(read('family-trip.html'),/Додати близьку людину/);
 });

@@ -1,93 +1,42 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="uk">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Dashboard — E7 Admin</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css">
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>Операційний огляд — Signal Admin</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet"><link rel="stylesheet" href="style.css">
+  <style>
+    .admin-hero{position:relative;overflow:hidden;padding:24px;border:1px solid #67cfff2c;border-radius:26px;background:radial-gradient(circle at 95% 0,#36ddff24,transparent 34%),linear-gradient(145deg,#111a35,#101327 58%,#21133a);box-shadow:0 25px 70px #0005}.admin-hero:after{content:"";position:absolute;right:-65px;top:-75px;width:190px;height:190px;border:1px solid #78e7ff24;border-radius:50%}.admin-hero-top{position:relative;z-index:1;display:flex;align-items:flex-start;justify-content:space-between;gap:18px}.admin-hero h1{font-size:clamp(27px,5vw,38px)}.admin-identity{display:inline-flex;align-items:center;gap:7px;margin-top:10px;padding:7px 10px;border:1px solid #78dfff31;border-radius:99px;background:#08152c8c;color:#9cb2d3;font-size:10px}.admin-identity i{width:7px;height:7px;border-radius:50%;background:#4ce8bd;box-shadow:0 0 12px #4ce8bd}.hero-actions{position:relative;z-index:1;display:flex;gap:8px;flex-wrap:wrap}.hero-actions a{min-height:42px;display:flex;align-items:center;padding:0 15px;border:1px solid #6edfff35;border-radius:13px;background:#0a1831;color:#dffaff;font-size:12px;font-weight:800;text-decoration:none}.hero-actions a.primary{border:0;background:linear-gradient(135deg,#328cff,#8358ff);box-shadow:0 12px 32px #3d6fff42}.admin-metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:11px;margin-top:18px}.admin-metric{min-width:0;padding:17px;border:1px solid var(--glass-border);border-radius:19px;background:linear-gradient(145deg,#121728,#0b0e19)}.admin-metric strong{display:block;font:700 27px 'Space Grotesk',sans-serif}.admin-metric span{display:block;margin-top:4px;color:var(--text-muted);font-size:10px;line-height:1.35}.admin-grid{display:grid;grid-template-columns:1.1fr .9fr;gap:15px;margin-top:16px}.admin-panel{padding:20px}.panel-title{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}.panel-title h2{font-size:17px}.panel-title a{color:#80e8ff;font-size:10px;text-decoration:none}.attention-list{display:grid;gap:8px}.attention-item{display:grid;grid-template-columns:36px 1fr auto;align-items:center;gap:10px;padding:11px;border:1px solid #ffffff0c;border-radius:15px;background:#ffffff04;color:inherit;text-decoration:none}.attention-item i{width:36px;height:36px;display:grid;place-items:center;border-radius:12px;background:#ffb84e15;color:#ffc66b;font-style:normal;font-weight:900}.attention-item b{display:block;font-size:12px}.attention-item small{display:block;margin-top:3px;color:var(--text-muted);font-size:9px}.attention-item strong{font-size:16px}.attention-clear{padding:22px;text-align:center;border:1px solid #4ce8bd2b;border-radius:17px;background:#36d9ae0a;color:#83f0d2;font-size:12px}.hub-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.hub-card{min-height:96px;padding:14px;border:1px solid #ffffff0e;border-radius:17px;background:linear-gradient(145deg,#121a2e,#0c0f1c);color:inherit;text-decoration:none}.hub-card span{width:34px;height:34px;display:grid;place-items:center;border-radius:11px;background:linear-gradient(145deg,#234b78,#38245f);color:#87edff;font-size:15px}.hub-card b{display:block;margin-top:10px;font-size:12px}.hub-card small{display:block;margin-top:3px;color:var(--text-muted);font-size:9px;line-height:1.35}.recent-ticket{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 2px;border-top:1px solid var(--glass-border);color:inherit;text-decoration:none;font-size:11px}.recent-ticket span{min-width:0;overflow-wrap:anywhere}.recent-ticket small{flex:none;color:var(--text-muted)}.admin-error{padding:25px;text-align:center}.admin-error button{width:auto;margin:14px auto 0}@media(max-width:900px){.admin-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.admin-grid{grid-template-columns:1fr}}@media(max-width:520px){.admin-hero{padding:19px}.admin-hero-top{display:block}.hero-actions{margin-top:16px}.hero-actions a{flex:1;justify-content:center}.admin-metrics{gap:8px}.admin-metric{padding:14px}.admin-metric strong{font-size:23px}.admin-panel{padding:15px}.hub-grid{gap:7px}}
+  </style>
 </head>
 <body>
   <div class="admin-shell">
-    <aside class="admin-sidebar">
-      <div class="brand"><div class="mark" style="width:32px;height:32px;font-size:15px;">🛠️</div><span style="font-size:15px;">E7 Admin</span></div>
-      <nav class="admin-nav">
-        <a href="admin-plan-changes.html">🔄 Зміни тарифів</a>
-        <a href="admin-dashboard.html" class="active">📊 Dashboard</a>
-        <a href="admin-tickets.html">🎫 Support</a>
-        <a href="admin-users.html">👥 Users</a>
-        <a href="admin-team.html" id="teamNavLink">🔑 Команда</a>
-        <a href="admin-audit.html" id="auditNavLink">🛡️ Audit Log</a>
-        <a href="#" onclick="logout()">⎋ Вийти</a>
-        <a href="admin-operations.html">⚙️ Операції</a>
-      </nav>
-    </aside>
+    <aside class="admin-sidebar"><div class="brand"><div class="mark">S</div><span>Signal Admin</span></div><nav class="admin-nav"></nav></aside>
     <main class="admin-main">
-      <h1 style="font-size:22px;">Dashboard</h1>
-      <p class="lead" id="whoami"></p>
-      <script>document.getElementById('whoami').textContent = localStorage.getItem('signal_admin_email') + ' · ' + localStorage.getItem('signal_admin_role');</script>
-
-      <div id="loading" class="shimmer" style="height:100px; margin-top:20px;"></div>
-      <div class="stat-grid" id="stats" style="display:none;"></div>
-      <div id="ops" style="margin-top:22px;"></div>
+      <section class="admin-hero">
+        <div class="admin-hero-top"><div><h1>Операційний огляд</h1><p class="lead">Користувачі, eSIM, підтримка й ризики в одному місці.</p><span class="admin-identity"><i></i><span id="whoami">Захищена сесія</span></span></div><div class="hero-actions"><a href="admin-users.html">Знайти клієнта</a><a class="primary" href="admin-esims.html">Керувати eSIM</a></div></div>
+      </section>
+      <div id="loading" class="shimmer" style="height:190px;margin-top:18px;border-radius:22px"></div>
+      <div id="content" hidden aria-live="polite"></div>
     </main>
   </div>
-
-  <script src="config.js"></script>
-  <script src="admin-common.js"></script>
+  <script src="config.js"></script><script src="admin-common.js"></script>
   <script>
     requireAdminAuth();
-
-    async function load(){
+    const esc=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+    const adminEmail=localStorage.getItem('signal_admin_email')||'Адміністратор',adminRole=localStorage.getItem('signal_admin_role')||'';
+    whoami.textContent=`${adminEmail} · ${adminRole}`;
+    const metric=(value,label,color='')=>`<div class="admin-metric"><strong${color?` style="color:${color}"`:''}>${Number(value)||0}</strong><span>${label}</span></div>`;
+    const attention=(href,symbol,title,subtitle,value)=>`<a class="attention-item" href="${href}"><i>${symbol}</i><span><b>${title}</b><small>${subtitle}</small></span><strong>${Number(value)||0}</strong></a>`;
+    async function loadDashboard(){
+      loading.style.display='block';content.hidden=true;
       try{
-        const [ticketsRes, usersRes] = await Promise.all([
-          adminFetch('/api/admin/tickets'),
-          adminFetch('/api/admin/users'),
-        ]);
-        const tickets = await ticketsRes.json();
-        const users = await usersRes.json();
-
-        document.getElementById('loading').style.display = 'none';
-        const statsEl = document.getElementById('stats');
-        statsEl.style.display = 'grid';
-
-        const open = tickets.filter(t => t.status === 'open').length;
-        const inProgress = tickets.filter(t => t.status === 'in_progress').length;
-        const activeSubs = users.filter(u => u.subscription?.status === 'active').length;
-
-        statsEl.innerHTML = `
-          <div class="glass stat-card"><div class="num">${users.length}</div><div class="lbl">Усього користувачів</div></div>
-          <div class="glass stat-card"><div class="num" style="color:var(--success);">${activeSubs}</div><div class="lbl">Активних підписок</div></div>
-          <div class="glass stat-card"><div class="num">${tickets.length}</div><div class="lbl">Усього тікетів</div></div>
-          <div class="glass stat-card"><div class="num" style="color:var(--blue);">${open}</div><div class="lbl">Відкритих</div></div>
-          <div class="glass stat-card"><div class="num" style="color:var(--violet);">${inProgress}</div><div class="lbl">В роботі</div></div>`;
-      }catch(e){
-        document.getElementById('loading').style.display = 'none';
-      }
+        const response=await adminFetch('/api/admin/dashboard'),data=await response.json();if(!response.ok)throw Error(data.error||'Не вдалося завантажити огляд');
+        const attentionTotal=data.esim.failed+data.tickets.unassigned+data.travel.withoutEsim+data.rescue.pending;
+        content.innerHTML=`<section class="admin-metrics">${metric(data.users.total,'Усього клієнтів')}${metric(data.users.active,'Активних акаунтів','var(--success)')}${metric(data.esim.active,'Активних eSIM','var(--cyan)')}${metric(data.tickets.open,'Відкритих звернень','var(--violet)')}</section><div class="admin-grid"><section class="glass admin-panel"><div class="panel-title"><h2>Потребує уваги</h2><a href="admin-control-center.html">Відкрити моніторинг →</a></div>${attentionTotal?`<div class="attention-list">${attention('admin-esims.html','!','Помилки видачі eSIM','Потрібна перевірка провайдера',data.esim.failed)}${attention('admin-tickets.html','?','Звернення без виконавця','Користувач очікує відповіді',data.tickets.unassigned)}${attention('admin-travel.html','↗','Подорожі без eSIM','Виїзд протягом 14 днів',data.travel.withoutEsim)}${attention('admin-rescue.html','+','Запити порятунку','Очікують рішення команди',data.rescue.pending)}</div>`:'<div class="attention-clear">✓ Критичних задач зараз немає</div>'}</section><section class="glass admin-panel"><div class="panel-title"><h2>Робочі центри</h2></div><div class="hub-grid"><a class="hub-card" href="admin-purchases.html"><span>▣</span><b>Замовлення</b><small>Покупки, тарифи, поповнення</small></a><a class="hub-card" href="admin-tickets.html"><span>◌</span><b>Підтримка</b><small>Звернення, відгуки, порятунок</small></a><a class="hub-card" href="admin-operations.html"><span>✦</span><b>Комунікації</b><small>Технічні роботи, push та email</small></a><a class="hub-card" href="admin-control-center.html"><span>⌁</span><b>Моніторинг</b><small>Система, діагностика, версії</small></a></div></section></div><section class="glass admin-panel" style="margin-top:15px"><div class="panel-title"><h2>Останні звернення</h2><a href="admin-tickets.html">Усі звернення →</a></div>${data.recentTickets.length?data.recentTickets.map(ticket=>`<a class="recent-ticket" href="admin-ticket.html?id=${encodeURIComponent(ticket.id)}"><span>#${esc(ticket.id)} · ${esc(ticket.subject||'Без теми')}</span><small>${esc(ticket.assignedTo||'не призначено')}</small></a>`).join(''):'<div class="muted">Нових звернень немає.</div>'}</section>`;
+        loading.style.display='none';content.hidden=false;
+      }catch(error){loading.style.display='none';content.hidden=false;content.innerHTML=`<section class="glass admin-error"><h2>Огляд не завантажився</h2><p class="lead">${esc(error.message)}</p><button class="btn ghost" onclick="loadDashboard()">Спробувати ще раз</button></section>`;}
     }
-    async function loadOps(){
-      try{
-        const res = await adminFetch('/api/admin/dashboard');
-        const data = await res.json(); if(!res.ok) return;
-        document.getElementById('ops').innerHTML = `
-          <div class="glass glass-card"><div style="font-family:'Space Grotesk',sans-serif;font-weight:700;">Операційна увага</div>
-            <div class="stat-grid" style="margin-top:14px;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));">
-              <div class="stat-card"><div class="num">${data.users.registeredToday}</div><div class="lbl">Реєстрацій за 24 год</div></div>
-              <div class="stat-card"><div class="num" style="color:var(--danger);">${data.esim.failed}</div><div class="lbl">Помилок eSIM</div></div>
-              <div class="stat-card"><div class="num" style="color:#f5a623;">${data.esim.highUsage}</div><div class="lbl">Трафік 80%+</div></div>
-              <div class="stat-card"><div class="num" style="color:var(--blue);">${data.tickets.unassigned}</div><div class="lbl">Тікетів без виконавця</div></div>
-              <div class="stat-card"><div class="num">${data.esim.expiringSoon}</div><div class="lbl">eSIM завершаться ≤7 днів</div></div>
-              <a href="admin-travel.html" class="stat-card" style="color:inherit;text-decoration:none"><div class="num" style="color:#67e8f9">${data.travel?.upcoming14Days||0}</div><div class="lbl">Подорожей ≤14 днів</div></a>
-              <a href="admin-travel.html" class="stat-card" style="color:inherit;text-decoration:none"><div class="num" style="color:var(--danger)">${data.travel?.withoutEsim||0}</div><div class="lbl">Подорожей без eSIM</div></a>
-              <a href="admin-engagement.html" class="stat-card" style="color:inherit;text-decoration:none"><div class="num" style="color:#a78bfa">${data.engagement?.members||0}</div><div class="lbl">Учасників Signal Club</div></a>
-              <a href="admin-rescue.html" class="stat-card" style="color:inherit;text-decoration:none"><div class="num" style="color:#ffd071">${data.rescue?.pending||0}</div><div class="lbl">Запитів порятунку</div></a>
-            </div>
-            ${data.recentTickets.length ? `<div style="margin-top:16px;">${data.recentTickets.map(ticket => `<a href="admin-ticket.html?id=${ticket.id}" style="display:flex;justify-content:space-between;gap:12px;padding:9px 0;border-top:1px solid var(--glass-border);color:var(--text);text-decoration:none;font-size:13px;"><span>#${ticket.id} · ${ticket.subject}</span><span class="muted">${ticket.assignedTo || 'не призначено'}</span></a>`).join('')}</div>` : ''}
-          </div>`;
-      }catch(e){}
-    }
-    load(); loadOps();
+    loadDashboard();
   </script>
 </body>
 </html>

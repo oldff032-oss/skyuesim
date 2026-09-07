@@ -1,10 +1,10 @@
 // Register from every entry page so a fresh "Add to Home Screen" install has
 // a service worker even when it starts directly on dashboard.html.
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('/sw.js?v=88', { updateViaCache: 'none' }).then(registration => registration.update()).catch(() => {});
+  navigator.serviceWorker.register('/sw.js?v=89', { updateViaCache: 'none' }).then(registration => registration.update()).catch(() => {});
   navigator.serviceWorker.addEventListener('controllerchange',()=>{
-    if(sessionStorage.getItem('signal_sw_reloaded_v88')==='1')return;
-    sessionStorage.setItem('signal_sw_reloaded_v88','1');
+    if(sessionStorage.getItem('signal_sw_reloaded_v89')==='1')return;
+    sessionStorage.setItem('signal_sw_reloaded_v89','1');
     location.reload();
   });
 }
@@ -26,12 +26,10 @@ const signalNavItems={
 function enhanceSignalNavigation(){const current=location.pathname.split('/').pop(),isCore=Boolean(signalNavItems[current]),english=localStorage.getItem('signal_language')==='en';document.querySelectorAll('.bottomnav a').forEach(link=>{const page=(link.getAttribute('href')||'').split(/[?#]/)[0].split('/').pop(),item=signalNavItems[page];if(!item)return;const label=english?item.labelEn:item.label;if(isCore)link.classList.toggle('active',page===current);link.dataset.nav=page.replace('.html','');link.setAttribute('aria-label',label);link.setAttribute('title',label);link.innerHTML=`<span class="nav-icon" aria-hidden="true">${item.icon}</span><span class="nav-label" data-no-auto-translate>${label}</span>`;});const dashboardLogo=document.querySelector('.logo-orbit');if(dashboardLogo&&!dashboardLogo.querySelector('img'))dashboardLogo.innerHTML='<img src="signal-premium-logo.png" alt="Signal">';}
 document.readyState==='loading'?document.addEventListener('DOMContentLoaded',enhanceSignalNavigation):enhanceSignalNavigation();
 window.addEventListener('load',()=>{enhanceSignalNavigation();setTimeout(enhanceSignalNavigation,500);});
-const maintenanceGateStyle=document.createElement('style');
-maintenanceGateStyle.textContent='html.signal-maintenance-check body{visibility:hidden!important}';
-document.head.appendChild(maintenanceGateStyle);
 const signalOfflineCardPage=/\/offline-esim\.html$/i.test(location.pathname);
-if(!signalOfflineCardPage)document.documentElement.classList.add('signal-maintenance-check');
-window.setTimeout(()=>document.documentElement.classList.remove('signal-maintenance-check'),5000);
+// Render the application immediately. Maintenance and announcement data loads
+// asynchronously and must never leave the customer looking at a blank screen.
+document.documentElement.classList.remove('signal-maintenance-check');
 // All customer pages already load pwa.js, so language support is loaded once
 // and stays consistent across the app.
 if (!document.querySelector('script[data-signal-i18n]')) {
@@ -52,7 +50,7 @@ if (window.location.pathname.endsWith('/app-tools.html')) {
 // auth headers, PINs, tokens, QR data or full URLs/query strings.
 const signalOriginalFetch = window.fetch.bind(window);
 let signalDiagnosticCount = 0;
-const SIGNAL_FRONTEND_VERSION='2.7.0',SIGNAL_SW_VERSION='v88',SIGNAL_CACHE_VERSION='signal-shell-v88-esim-lifecycle';
+const SIGNAL_FRONTEND_VERSION='2.8.0',SIGNAL_SW_VERSION='v89',SIGNAL_CACHE_VERSION='signal-shell-v89-stability';
 window.SIGNAL_APP_VERSION=SIGNAL_FRONTEND_VERSION;
 window.addEventListener('load',async()=>{
   if(typeof API_URL==='undefined')return;

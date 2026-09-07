@@ -55,9 +55,21 @@ test('global update assets use one coherent cache and app version', () => {
   const worker = read('sw.js');
   const pwa = read('pwa.js');
   for (const page of ['/travel-assistant.html','/esim-topup.html','/family-share.html','/notifications.html','/activity.html','/savings.html','/family-center.html']) assert.match(worker, new RegExp(page.replace('.', '\\.')));
-  assert.match(worker, /signal-shell-v88-esim-lifecycle/);
-  assert.match(pwa, /SIGNAL_FRONTEND_VERSION='2\.7\.0'/);
-  assert.match(pwa, /SIGNAL_SW_VERSION='v88'/);
+  assert.match(worker, /signal-shell-v89-stability/);
+  assert.match(pwa, /SIGNAL_FRONTEND_VERSION='2\.8\.0'/);
+  assert.match(pwa, /SIGNAL_SW_VERSION='v89'/);
+});
+
+test('customer pages render immediately and admin navigation stays compact', () => {
+  const pwa = read('pwa.js');
+  const nav = read('admin-common.js');
+  const deviceCheck = read('device-check.html');
+  assert.doesNotMatch(pwa, /visibility:hidden!important/);
+  assert.doesNotMatch(pwa, /classList\.add\('signal-maintenance-check'\)/);
+  assert.equal((nav.match(/\['admin-esims\.html'/g)||[]).length, 1);
+  assert.match(nav, /renderGroup\('Операції'/);
+  assert.match(nav, /renderGroup\('Система'/);
+  assert.match(deviceCheck, /getElementById\('confidenceNote'\)\?\.remove\(\)/);
 });
 
 test('travel planner dates fit mobile cards and secondary tools stay off the home screen', () => {

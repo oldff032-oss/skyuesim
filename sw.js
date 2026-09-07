@@ -3,7 +3,7 @@
 // Кешує тільки статичну "оболонку" — самі дані (підписка, тікети) завжди
 // тягнуться наживо з бекенду, ніколи не кешуються.
 
-const CACHE_NAME = 'signal-shell-v88-esim-lifecycle';
+const CACHE_NAME = 'signal-shell-v89-stability';
 const SHELL_FILES = [
   '/dashboard.html',
   '/profile.html',

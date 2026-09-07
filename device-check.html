@@ -72,6 +72,7 @@
       const icon = document.getElementById('ringIcon');
       const text = document.getElementById('resultText');
       const device = document.getElementById('deviceText');
+      document.getElementById('confidenceNote')?.remove();
 
       ring.classList.remove('ok','bad');text.classList.remove('ok','bad');document.getElementById('continueBtn').style.display='none';document.getElementById('anywayBtn').style.display='none';device.textContent = result.label;
 
@@ -83,6 +84,7 @@
         document.getElementById('continueBtn').style.display = 'block';
         if (result.confidence === 'low') {
           const note = document.createElement('p');
+          note.id = 'confidenceNote';
           note.className = 'muted';
           note.style.marginTop = '10px';
           note.textContent = 'Не можемо перевірити зі 100% точністю через браузер — якщо не впевнений(а), звір модель у Налаштування → Про пристрій.';
