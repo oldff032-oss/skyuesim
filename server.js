@@ -492,7 +492,7 @@ app.use('/api/webhook', express.raw({ type: 'application/json' }));
 app.use('/api/inbound-email', express.raw({ type: 'application/json' }));
 const regularJsonParser=express.json({limit:'1mb'}),supportUploadJsonParser=express.json({limit:'12mb'});
 app.use((req,res,next)=>{
-  const supportUpload=req.method==='POST'&&(/^\/api\/support\/tickets(?:\/[^/]+\/reply)?$/.test(req.path)||/^\/api\/admin\/tickets\/[^/]+\/reply$/.test(req.path));
+  const supportUpload=req.method==='POST'&&(req.path==='/api/maintenance-support'||/^\/api\/support\/tickets(?:\/[^/]+\/reply)?$/.test(req.path)||/^\/api\/admin\/tickets\/[^/]+\/reply$/.test(req.path));
   return (supportUpload?supportUploadJsonParser:regularJsonParser)(req,res,next);
 });
 
@@ -1456,10 +1456,11 @@ app.post('/api/auth/admin-recovery/:token', rateLimit('complete_recovery',15*60*
 app.post('/api/maintenance-support',rateLimit('maintenance_support',60*60*1000,5,req=>req.ip),async(req,res)=>{
   const maintenance=operationsStore.activeAnnouncements(null).find(item=>item.type==='maintenance'&&item.audience==='all');
   if(!maintenance)return res.status(409).json({error:'Технічні роботи вже завершено. Увійдіть у застосунок і скористайтеся звичайною підтримкою.',code:'MAINTENANCE_INACTIVE'});
-  const email=String(req.body?.email||'').trim().toLowerCase(),subject=String(req.body?.subject||'Проблема під час технічних робіт').trim().slice(0,160),message=String(req.body?.message||'').trim().slice(0,5000);
+  const email=String(req.body?.email||'').trim().toLowerCase(),subject=String(req.body?.subject||'Проблема під час технічних робіт').trim().slice(0,160),message=String(req.body?.message||'').trim().slice(0,5000),attachments=req.body?.attachments??req.body?.attachment;
   if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))return res.status(400).json({error:'Вкажіть правильний email.'});
   if(message.length<10)return res.status(400).json({error:'Опишіть проблему щонайменше десятьма символами.'});
-  const ticket=ticketStore.createTicket({email,category:'Технічні роботи',subject,message,recoveryRequest:{contactEmail:email,source:'maintenance_support'}});
+  let safeAttachments;try{safeAttachments=validateSupportAttachments(attachments);}catch(error){return res.status(400).json({error:error.message,code:error.code});}
+  const ticket=ticketStore.createTicket({email,category:'Технічні роботи',subject,message,attachments:safeAttachments,recoveryRequest:{contactEmail:email,source:'maintenance_support'}});
   notifySuperAdminsAboutTicket(ticket);
   sendEmail({to:email,subject:`Звернення #${ticket.id} отримано — Signal`,html:emailTemplates.notification({title:'Ми отримали ваше звернення',message:`Звернення під номером #${ticket.id} зареєстровано під час технічних робіт. Команда підтримки відповість на цей email.`,actionUrl:'/maintenance-support.html',actionLabel:'Перевірити стан сервісу'})}).catch(()=>{});
   recordDiagnostic(req,{email,type:'support_flow',action:'maintenance_ticket_created',outcome:'success',severity:'info',message:'Maintenance support ticket created',context:{ticketId:ticket.id}});

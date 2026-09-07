@@ -195,6 +195,11 @@ test('maintenance support works without account unlock and remains rate limited'
   assert.match(read('admin-operations.html'), /не стало активним для користувачів/);
   assert.doesNotMatch(pwa, /\(support\|new-ticket\|ticket\|maintenance-support\)/);
   assert.match(page, /\/api\/maintenance-support/);
+  assert.match(page, /id="attachments" type="file" multiple/);
+  assert.match(page, /selectedFiles/);
+  assert.match(page, /JSON\.stringify\(\{email,subject,message,attachments\}\)/);
+  assert.match(server, /req\.path==='\/api\/maintenance-support'/);
+  assert.match(server, /category:'Технічні роботи',subject,message,attachments:safeAttachments/);
   assert.match(page, /signal-premium-logo\.png/);
   assert.doesNotMatch(page, /pwa\.js/);
 });
