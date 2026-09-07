@@ -52,8 +52,21 @@ test('Super Admin can grant a provider-confirmed free eSIM without Stripe', () =
   const route=server.slice(server.indexOf("app.post('/api/admin/esims/:id/assign'"),server.indexOf("app.post('/api/admin/esims/:id/detach'"));
   assert.match(page,/Видати eSIM безкоштовно/);
   assert.match(page,/Оплата Stripe і підписка не створюються/);
-  assert.match(route,/grantType:'admin_promo'/);
+  assert.match(route,/grantType=transferred\?'admin_transfer':'admin_promo'/);
   assert.match(route,/priceCents:0/);
   assert.match(route,/Stripe, оплата та підписка не створювалися/);
   assert.doesNotMatch(route,/createCheckout|createCustomPackageCheckout|upsertPurchase/);
+});
+
+test('an unused assigned eSIM can be transferred in one step without moving billing', () => {
+  const page=read('admin-esims.html'),server=read('server.js'),record=inventory.publicRecord({id:'esim_transfer',source:'current',ownerEmail:'from@example.com',ownerHasPaidSubscription:true,profile:{iccid:'89852240810733629810',smdpStatus:'RELEASED',esimStatus:'GOT_RESOURCE',usedGb:0}});
+  assert.equal(record.canTransfer,true);
+  assert.equal(record.ownerHasPaidSubscription,true);
+  assert.match(page,/Передати іншому/);
+  assert.match(page,/Stripe-підписка поточного власника не переноситься/);
+  const route=server.slice(server.indexOf("app.post('/api/admin/esims/:id/assign'"),server.indexOf("app.post('/api/admin/esims/:id/detach'"));
+  assert.match(route,/reason:'admin_transfer'/);
+  assert.match(route,/status:sourceOwner\?\.status==='blocked'\?'blocked':'esim_transferred'/);
+  assert.match(route,/Stripe-підписка попереднього власника не змінювалася/);
+  assert.doesNotMatch(route,/cancelSubscription|stripeSubscriptionId:null/);
 });

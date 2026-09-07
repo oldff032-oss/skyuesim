@@ -50,6 +50,7 @@ function capabilities(state, source) {
   const current = source === 'current';
   return {
     canAssign: source === 'pool' && state === 'available',
+    canTransfer: current && state === 'available',
     canDetach: current && state === 'available',
     canCancel: ['current', 'pool'].includes(source) && state === 'available',
     canSuspend: current && ['active', 'installed'].includes(state),
@@ -68,6 +69,7 @@ function publicRecord(record) {
     stateLabel: labels[state] || labels.unknown,
     ownerEmail: record.ownerEmail || null,
     previousOwnerEmail: record.previousOwnerEmail || null,
+    ownerHasPaidSubscription: Boolean(record.ownerHasPaidSubscription),
     recipientName: record.recipientName || null,
     plan: record.plan || null,
     packageName: record.packageName || null,
@@ -102,7 +104,7 @@ function collectInventory(users = {}, pool = []) {
     const purchaseFor = esim => purchases.find(item => [item.iccid, item.esimOrderNo, item.esimTranNo].filter(Boolean).some(value => [esim?.iccid, esim?.orderNo, esim?.esimTranNo].includes(value))) || null;
     if (user.esim) {
       const purchase = purchaseFor(user.esim);
-      add({ source:'current', ownerEmail:user.email, plan:user.esim.plan || user.plan, packageName:user.esim.packageName || purchase?.packageName || null, purchaseId:purchase?.id || null, profile:user.esim });
+      add({ source:'current', ownerEmail:user.email, ownerHasPaidSubscription:Boolean(user.stripeSubscriptionId), plan:user.esim.plan || user.plan, packageName:user.esim.packageName || purchase?.packageName || null, purchaseId:purchase?.id || null, profile:user.esim });
     }
     for (const shared of user.sharedEsims || []) add({ source:'family', ownerEmail:user.email, recipientName:shared.recipientName || null, plan:shared.plan || user.plan, packageName:shared.packageName || null, purchaseId:shared.purchaseId || null, profile:shared.esim });
     for (const entry of user.esimHistory || []) add({ source:'history', ownerEmail:user.email, plan:entry.plan || null, packageName:entry.packageName || null, purchaseId:entry.purchaseId || null, profile:entry.esim || entry });
