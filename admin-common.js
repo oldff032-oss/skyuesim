@@ -6,6 +6,7 @@ function requireAdminAuth(){
   if(!nav)return;
   const svg=paths=>`<span class="admin-nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${paths}</svg></span>`;
   const links=[
+    ...(role==='super_admin'?[['admin-esims.html','Облік eSIM']]:[]),
     ['admin-dashboard.html',svg('<path d="M3 11.5 12 4l9 7.5M5.5 10.5V20h13v-9.5"/>')+'Огляд'],
     ['admin-users.html',svg('<circle cx="9" cy="8" r="4"/><path d="M2.5 21a6.5 6.5 0 0 1 13 0M16 5.5a3.5 3.5 0 0 1 0 7M17 15a6 6 0 0 1 4.5 6"/>')+'Клієнти'],
     ['admin-purchases.html',svg('<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M3 10h18M7 15h4"/>')+'Замовлення й оплати'],

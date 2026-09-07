@@ -306,7 +306,13 @@ function profileToEsim(profile, orderNo, plan) {
   // dividing by 1e9 incorrectly displayed it as 21 GB.
   const limitGb = volume == null ? DEFAULT_PLAN_LIMITS_GB[plan] ?? null : bytesToGb(volume);
   return {
-    status: 'active',
+    status: ['REVOKED','CANCELED','CANCELLED','EXPIRED','USED_UP','SUSPENDED'].includes(profile.esimStatus) ? profile.esimStatus.toLowerCase() : 'active',
+    providerStatus: profile.esimStatus || 'UNKNOWN',
+    installationStatus: profile.smdpStatus || 'UNKNOWN',
+    installedBefore: Boolean(profile.eid) || ['ENABLED','DISABLED','DELETED','INSTALLED','DOWNLOADED'].includes(profile.smdpStatus),
+    canInstall: profile.smdpStatus === 'RELEASED' && profile.esimStatus === 'GOT_RESOURCE' && !profile.eid && Number(profile.orderUsage) === 0,
+    usedGb: bytesToGb(profile.orderUsage),
+    packageName: packageInfo?.packageName || null,
     orderNo,
     esimTranNo: profile.esimTranNo || null,
     iccid: profile.iccid || null,
@@ -373,7 +379,7 @@ async function recoverEsim({ iccid, plan }) {
   if (!/^\d{15,22}$/.test(String(iccid || '').trim())) {
     throw new EsimAccessError('A valid ICCID is required.', { code: 'ICCID_REQUIRED' });
   }
-  if (!Object.hasOwn(DEFAULT_PLAN_LIMITS_GB, plan)) {
+  if (plan !== 'custom' && !Object.hasOwn(DEFAULT_PLAN_LIMITS_GB, plan)) {
     throw new EsimAccessError('A valid plan is required.', { code: 'PLAN_REQUIRED' });
   }
 
@@ -464,4 +470,17 @@ async function topupEsim({ esimTranNo = '', iccid = '', packageCode, transaction
   };
 }
 
-module.exports = { provisionEsim, checkUsage, recoverEsim, topupEsim, listPackages, findRenewalTopup };
+async function listOwnedProfiles(pageNum = 1) {
+  if (isConfiguredMockMode()) throw new EsimAccessError('Для обліку потрібен реальний eSIM Access', {code:'MOCK_MODE'});
+  const result = await esimAccessRequest('/api/v1/open/esim/query', {orderNo:'',iccid:'',pager:{pageNum,pageSize:50}});
+  return {profiles:result?.obj?.esimList || [],pager:result?.obj?.pager || {pageNum,pageSize:50}};
+}
+async function manageProfile(iccid, action) {
+  if (!['suspend','unsuspend','revoke','cancel'].includes(action)) throw new Error('Невідома дія');
+  const current = await recoverEsim({iccid,plan:'custom'});
+  if (!current.esimTranNo) throw new Error('Відсутній ідентифікатор провайдера');
+  if (action === 'cancel' && !current.canInstall) throw new Error('Повернення доступне лише для невстановленої невикористаної картки');
+  await esimAccessRequest('/api/v1/open/esim/' + action, {esimTranNo:current.esimTranNo});
+  return {accepted:true};
+}
+module.exports = { provisionEsim, checkUsage, recoverEsim, topupEsim, listPackages, findRenewalTopup, listOwnedProfiles, manageProfile, profileToEsim };

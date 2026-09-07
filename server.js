@@ -423,6 +423,7 @@ function rateLimit(name,windowMs,maximum,keyFromRequest=()=> ''){
 app.use('/api/webhook', express.raw({ type: 'application/json' }));
 app.use('/api/inbound-email', express.raw({ type: 'application/json' }));
 app.use(express.json({ limit: '1mb' }));
+require('./esimInventory').register(app);
 
 // =========================================================
 // АВТЕНТИФІКАЦІЯ: email -> код -> пароль -> акаунт, і логін
@@ -1084,6 +1085,11 @@ app.get('/api/account/esim', requireUserSession, (req, res) => {
     status: user.status,
     esim: {
       iccid: esim.iccid || null,
+      status: esim.status || 'unknown',
+      providerStatus: esim.providerStatus || 'UNKNOWN',
+      installationStatus: esim.installationStatus || 'UNKNOWN',
+      canInstall: esim.canInstall === true,
+      installedBefore: esim.installedBefore === true,
       activationCode: esim.activationCode || null,
       qrCodeUrl: esim.qrCodeUrl || null,
       apn: esim.apn || null,
@@ -2558,6 +2564,7 @@ app.post('/api/admin/users/:email/recover-esim', adminAuth.requireAdmin, adminAu
 
   try {
     const esim = await recoverEsim({ iccid, plan });
+    if(user.esim?.iccid!==esim.iccid)return res.status(409).json({error:'Для іншої картки використовуйте розділ «Облік eSIM». Синхронізація не перевидає QR.'});
     const previousOrderNo = user.esim?.orderNo || null;
     // A recovery may also deliberately replace stale local eSIM data. It still
     // only reads the provider profile and never creates a Stripe payment/order.
