@@ -11,10 +11,10 @@ const { readAll, writeAll } = require('./adminStore');
 
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000; // 12 годин
 const TWO_FACTOR_TTL_MS = 10 * 60 * 1000;
-const ALL_PERMISSIONS=['users.read','support.reply','refunds.manage','esim.retry','activation_code.read','broadcasts.manage','users.delete','backups.manage','security.manage','operations.manage','settings.manage'];
+const ALL_PERMISSIONS=['users.read','support.reply','refunds.manage','esim.retry','esim.manage','activation_code.read','broadcasts.manage','users.delete','backups.manage','security.manage','operations.manage','settings.manage'];
 const ROLE_PERMISSIONS={
   super_admin:ALL_PERMISSIONS,
-  admin:['users.read','support.reply','refunds.manage','esim.retry','activation_code.read','operations.manage'],
+  admin:['users.read','support.reply','refunds.manage','esim.retry','esim.manage','activation_code.read','operations.manage'],
   support:['users.read','support.reply'],
   viewer:['users.read'],
 };

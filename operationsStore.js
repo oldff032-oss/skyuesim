@@ -4,6 +4,8 @@ const defaults = () => ({
   emailBroadcasts: [], securityEvents: [], jobs: [], deliveryEvents: [], resolvedAttention: {}, processedEvents: {},
   pinResetRequests: [],
   rescueRequests: [],
+  esimInventory: [],
+  esimAssignmentEvents: [],
   engagementSettings: {
     enabled:true, pointsPerDollar:10, stampBonus:50, roamingReferenceCentsPerGb:1000,
     rewards:[
@@ -18,7 +20,7 @@ const defaults = () => ({
   },
   featureRules: { disabledCountries:[], disabledPackages:[], paymentMethods:{stripeCard:true} },
   providerBalance: { amount:null, currency:'USD', averageOrderCost:null, updatedAt:null, source:'not_configured' },
-  versionInfo: { frontend:'2.6.1', backend:'2.6.1', serviceWorker:'v87', cache:'signal-shell-v87-compact-nav', deployedAt:null, changelog:['Компактна нижня навігація з чотирма унікальними outline-іконками','Швидкі дії більше не дублюють Головну, Тарифи, Витрати та Профіль','Під карткою доступні Встановити, Додати пакет, Для близьких і Підтримка','Фото активної eSIM та фактичні дані пакета залишаються на головній картці'],criticalRefreshToken:null,criticalAssets:['/dashboard.html','/plans.html','/signal-card-scenes-v1.png','/profile.html','/notifications.html','/activity.html','/savings.html','/family-center.html','/family-trip.html','/signal-universe.html','/i18n.js','/style.css','/experience.css','/experience.js','/wallet-pass.html','/pwa.js','/sw.js'] },
+  versionInfo: { frontend:'2.7.0', backend:'2.7.0', serviceWorker:'v88', cache:'signal-shell-v88-esim-lifecycle', deployedAt:null, changelog:['Нова адмін-панель керування всіма eSIM і складом невстановлених профілів','Безпечне призначення доступної eSIM іншому користувачу з перевіркою провайдера','Призупинення, відновлення, скасування та остаточне відкликання eSIM захищені 2FA','Використаний код активації більше не пропонується для повторного встановлення'],criticalRefreshToken:null,criticalAssets:['/dashboard.html','/plans.html','/esim-management.html','/signal-card-scenes-v1.png','/profile.html','/notifications.html','/activity.html','/savings.html','/family-center.html','/family-trip.html','/signal-universe.html','/i18n.js','/style.css','/experience.css','/experience.js','/wallet-pass.html','/pwa.js','/sw.js'] },
   clientVersions: {},
   dailyReports: [], reportSettings: { enabled:true, hour:8, lastSentDate:null },
 });
@@ -31,6 +33,8 @@ async function bootstrap(){
   store.featureRules = {...defaults().featureRules, ...(loaded.featureRules||{}),paymentMethods:{...defaults().featureRules.paymentMethods,...(loaded.featureRules?.paymentMethods||{})}};
   store.providerBalance = {...defaults().providerBalance, ...(loaded.providerBalance||{})};
   store.engagementSettings = {...defaults().engagementSettings, ...(loaded.engagementSettings||{}),rewards:Array.isArray(loaded.engagementSettings?.rewards)?loaded.engagementSettings.rewards:defaults().engagementSettings.rewards};
+  store.esimInventory = Array.isArray(loaded.esimInventory) ? loaded.esimInventory : [];
+  store.esimAssignmentEvents = Array.isArray(loaded.esimAssignmentEvents) ? loaded.esimAssignmentEvents : [];
   store.versionInfo = {...defaults().versionInfo, ...(loaded.versionInfo||{}), frontend:defaults().versionInfo.frontend, backend:defaults().versionInfo.backend, serviceWorker:defaults().versionInfo.serviceWorker, cache:defaults().versionInfo.cache, changelog:defaults().versionInfo.changelog};
   store.reportSettings = {...defaults().reportSettings, ...(loaded.reportSettings||{})};
 }
@@ -42,6 +46,8 @@ async function refresh(){
   store.blacklist={...defaults().blacklist,...(loaded.blacklist||{})};
   store.featureFlags={...defaults().featureFlags,...(loaded.featureFlags||{})};
   store.engagementSettings={...defaults().engagementSettings,...(loaded.engagementSettings||{}),rewards:Array.isArray(loaded.engagementSettings?.rewards)?loaded.engagementSettings.rewards:defaults().engagementSettings.rewards};
+  store.esimInventory=Array.isArray(loaded.esimInventory)?loaded.esimInventory:[];
+  store.esimAssignmentEvents=Array.isArray(loaded.esimAssignmentEvents)?loaded.esimAssignmentEvents:[];
   store.versionInfo={...defaults().versionInfo,...(loaded.versionInfo||{}),frontend:defaults().versionInfo.frontend,backend:defaults().versionInfo.backend,serviceWorker:defaults().versionInfo.serviceWorker,cache:defaults().versionInfo.cache,changelog:defaults().versionInfo.changelog};
   return store;
 }

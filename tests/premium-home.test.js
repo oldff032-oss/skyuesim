@@ -54,6 +54,29 @@ test('home names regional packages from the fulfilled purchase instead of a stal
   assert.equal(deck.active.networkLabel, 'drei.at');
 });
 
+test('home follows an inventory-assigned eSIM instead of an older purchase', () => {
+  const deck = engagement.homeDeck({
+    plan:'custom',
+    esim:{iccid:'new-profile',orderNo:'new-order',inventoryProfileId:'inventory-new',plan:'custom',packageName:'Італія · 30 GB',location:'Італія',usedGb:4,remainingGb:26,dataLimitGb:30},
+    purchases:[{id:'old-purchase',iccid:'old-profile',esimOrderNo:'old-order',plan:'basic',packageName:'Базовий',fulfillmentStatus:'provisioned',paymentStatus:'paid'}],
+  });
+  assert.equal(deck.active.title, 'Італія · 30 GB');
+  assert.equal(deck.active.destination, 'Італія');
+  assert.equal(deck.active.planKey, 'travel');
+  assert.equal(deck.active.totalLabel, '30 GB');
+});
+
+test('an inventory-assigned monthly eSIM cannot inherit an unrelated old travel package', () => {
+  const deck = engagement.homeDeck({
+    plan:'standard',
+    esim:{iccid:'new-profile',inventoryProfileId:'inventory-new',plan:'standard',packageName:'Стандарт',usedGb:1,remainingGb:19,dataLimitGb:20},
+    purchases:[{id:'old-purchase',iccid:'old-profile',plan:'custom',kind:'custom_package',packageCode:'old-travel',packageName:'Стара Італія',location:'Італія',fulfillmentStatus:'provisioned'}],
+  });
+  assert.equal(deck.active.title, 'Стандарт');
+  assert.equal(deck.active.planKey, 'standard');
+  assert.equal(deck.active.destination, null);
+});
+
 test('approved visual system and functional gift center are present on mobile home', () => {
   const dashboard = read('dashboard.html');
   assert.match(dashboard, />Signal eSIM</);
@@ -83,8 +106,8 @@ test('premium atlas is shipped in the offline shell and version is coherent', ()
   const pwa = read('pwa.js');
   const operations = read('operationsStore.js');
   assert.match(worker, /'\/signal-card-scenes-v1\.png'/);
-  assert.match(worker, /signal-shell-v87-compact-nav/);
-  assert.match(pwa, /SIGNAL_FRONTEND_VERSION='2\.6\.1'/);
-  assert.match(operations, /frontend:'2\.6\.1', backend:'2\.6\.1', serviceWorker:'v87'/);
+  assert.match(worker, /signal-shell-v88-esim-lifecycle/);
+  assert.match(pwa, /SIGNAL_FRONTEND_VERSION='2\.7\.0'/);
+  assert.match(operations, /frontend:'2\.7\.0', backend:'2\.7\.0', serviceWorker:'v88'/);
   assert.ok(fs.statSync(path.join(root, 'signal-card-scenes-v1.png')).size > 100000);
 });

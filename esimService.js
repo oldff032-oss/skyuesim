@@ -156,11 +156,11 @@ async function esimAccessRequest(path, body = {}) {
   return payload;
 }
 
-async function queryProfiles({ orderNo = '', iccid = '' }) {
+async function queryProfiles({ orderNo = '', iccid = '', pageNum = 1, pageSize = 50 }) {
   return esimAccessRequest('/api/v1/open/esim/query', {
     orderNo,
     iccid,
-    pager: { pageNum: 1, pageSize: 50 },
+    pager: { pageNum, pageSize },
   });
 }
 
@@ -216,7 +216,10 @@ function mockEsim(email, plan) {
     provider: 'mock-provider',
     apn: 'mock.apn',
     expiredTime: new Date(now + 30 * 24 * 60 * 60 * 1000).toISOString(),
-    activateTime: new Date(now).toISOString(),
+    activateTime: null,
+    esimStatus: 'GOT_RESOURCE',
+    smdpStatus: 'RELEASED',
+    eidBound: false,
   };
 }
 
@@ -312,7 +315,6 @@ function profileToEsim(profile, orderNo, plan) {
     installedBefore: Boolean(profile.eid) || ['ENABLED','DISABLED','DELETED','INSTALLED','DOWNLOADED'].includes(profile.smdpStatus),
     canInstall: profile.smdpStatus === 'RELEASED' && profile.esimStatus === 'GOT_RESOURCE' && !profile.eid && Number(profile.orderUsage) === 0,
     usedGb: bytesToGb(profile.orderUsage),
-    packageName: packageInfo?.packageName || null,
     orderNo,
     esimTranNo: profile.esimTranNo || null,
     iccid: profile.iccid || null,
@@ -323,6 +325,14 @@ function profileToEsim(profile, orderNo, plan) {
     apn: profile.apn || null,
     expiredTime: profile.expiredTime || null,
     activateTime: profile.activateTime || null,
+    esimStatus: profile.esimStatus || null,
+    smdpStatus: profile.smdpStatus || null,
+    eidBound: Boolean(profile.eid),
+    lastUpdateTime: profile.lastUpdateTime || new Date().toISOString(),
+    packageName: packageInfo?.packageName || packageInfo?.name || null,
+    packageCode: packageInfo?.packageCode || null,
+    location: packageInfo?.locationCode || null,
+    durationDays: packageInfo?.duration || profile.totalDuration || null,
   };
 }
 
@@ -379,9 +389,7 @@ async function recoverEsim({ iccid, plan }) {
   if (!/^\d{15,22}$/.test(String(iccid || '').trim())) {
     throw new EsimAccessError('A valid ICCID is required.', { code: 'ICCID_REQUIRED' });
   }
-  if (plan !== 'custom' && !Object.hasOwn(DEFAULT_PLAN_LIMITS_GB, plan)) {
-    throw new EsimAccessError('A valid plan is required.', { code: 'PLAN_REQUIRED' });
-  }
+  if (!plan || typeof plan !== 'string') throw new EsimAccessError('A valid plan is required.', { code: 'PLAN_REQUIRED' });
 
   const response = await queryProfiles({ iccid: String(iccid).trim() });
   const profile = response?.obj?.esimList?.[0];
@@ -395,6 +403,43 @@ async function recoverEsim({ iccid, plan }) {
   const esim = profileToEsim(profile, profile.orderNo, plan);
   log('profile_recovered', { orderNo: mask(esim.orderNo), iccid: mask(esim.iccid) });
   return esim;
+}
+
+async function changeProfileState(action, { esimTranNo = '', iccid = '' } = {}) {
+  const allowed = new Set(['cancel', 'revoke', 'suspend', 'unsuspend']);
+  if (!allowed.has(action)) throw new EsimAccessError('Unsupported eSIM action.', { code: 'ACTION_INVALID' });
+  if (isConfiguredMockMode()) throw new EsimAccessError('Profile management is unavailable while mock mode is enabled.', { code: 'MOCK_MODE' });
+  const transaction = String(esimTranNo || '').trim();
+  const card = String(iccid || '').trim();
+  if (!transaction && !/^\d{15,22}$/.test(card)) throw new EsimAccessError('A valid eSIM transaction number or ICCID is required.', { code: 'ESIM_ID_REQUIRED' });
+  const payload = transaction ? { esimTranNo: transaction } : { iccid: card };
+  const response = await esimAccessRequest(`/api/v1/open/esim/${action}`, payload);
+  log(`profile_${action}`, { esimTranNo: mask(transaction), iccid: mask(card) });
+  return response?.obj || { success: true };
+}
+
+const cancelEsim = identifiers => changeProfileState('cancel', identifiers);
+const revokeEsim = identifiers => changeProfileState('revoke', identifiers);
+const suspendEsim = identifiers => changeProfileState('suspend', identifiers);
+const unsuspendEsim = identifiers => changeProfileState('unsuspend', identifiers);
+
+async function listAllocatedEsims() {
+  if (isConfiguredMockMode()) return [];
+  const profiles = [], seen = new Set();
+  const maximumPages = Math.min(40, positiveInteger(process.env.ESIM_INVENTORY_MAX_PAGES, 20));
+  for (let pageNum = 1; pageNum <= maximumPages; pageNum += 1) {
+    const response = await queryProfiles({ pageNum, pageSize: 500 });
+    const batch = response?.obj?.esimList || [];
+    for (const profile of batch) {
+      const key = String(profile.iccid || profile.esimTranNo || profile.orderNo || '');
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      profiles.push(profileToEsim(profile, profile.orderNo || '', 'custom'));
+    }
+    const total = Number(response?.obj?.pager?.total || 0);
+    if (!batch.length || batch.length < 500 || (total && profiles.length >= total)) break;
+  }
+  return profiles;
 }
 
 async function checkUsage(orderNo) {
@@ -483,4 +528,4 @@ async function manageProfile(iccid, action) {
   await esimAccessRequest('/api/v1/open/esim/' + action, {esimTranNo:current.esimTranNo});
   return {accepted:true};
 }
-module.exports = { provisionEsim, checkUsage, recoverEsim, topupEsim, listPackages, findRenewalTopup, listOwnedProfiles, manageProfile, profileToEsim };
+module.exports = { provisionEsim, checkUsage, recoverEsim, topupEsim, listPackages, findRenewalTopup, cancelEsim, revokeEsim, suspendEsim, unsuspendEsim, listAllocatedEsims, listOwnedProfiles, manageProfile, profileToEsim };

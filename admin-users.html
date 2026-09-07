@@ -88,11 +88,11 @@
         const subscription = user.subscription || {};
         const encodedEmail = encodeURIComponent(user.email);
 
-        const recoveryButton = `<button class="btn ${subscription.status === 'payment_ok_esim_failed' ? 'primary' : 'ghost'}"
+        const recoveryButton = subscription.status === 'payment_ok_esim_failed' ? `<button class="btn primary"
                style="padding:7px 10px;font-size:12px;"
                onclick="recoverEsim('${encodedEmail}', '${subscription.plan || 'basic'}')">
                Відновити eSIM
-             </button>`;
+             </button>` : `<a class="btn ghost" style="padding:7px 10px;font-size:12px;" href="admin-esims.html?email=${encodedEmail}">Керувати eSIM</a>`;
 
         const blockButton = `<button class="btn ghost"
           style="padding:7px 10px;font-size:12px;${subscription.status === 'blocked' ? 'color:var(--cyan);' : 'color:var(--danger);'}"
@@ -125,7 +125,7 @@
 
       if (!iccid) return;
 
-      const plan = prompt('Оберіть тариф: basic, standard або unlimited.', defaultPlan);
+      const plan = prompt('Вкажіть тариф або назву придбаного пакета.', defaultPlan);
       if (!plan) return;
 
       try {
@@ -143,7 +143,7 @@
           throw new Error(data.error || 'Не вдалося відновити eSIM');
         }
 
-        alert('eSIM успішно відновлено. Оплата Stripe не повторювалася.');
+        alert(data.message || 'eSIM відновлено. Оплата Stripe не повторювалася.');
         await load();
       } catch (error) {
         alert(error.message || 'Помилка відновлення eSIM');
@@ -232,6 +232,7 @@
           <button class="btn ghost" style="width:auto;padding:9px 12px;font-size:12px;" onclick="adminUserAction('${encodedEmail}','resync-esim')">Оновити трафік</button>
           <button class="btn ghost" style="width:auto;padding:9px 12px;font-size:12px;" onclick="adminUserAction('${encodedEmail}','resend-esim-instructions')">Інструкція eSIM</button>
           <button class="btn primary" style="width:auto;padding:9px 12px;font-size:12px;" onclick="recoverEsim('${encodedEmail}','${subscription.plan || 'basic'}')">Відновити eSIM</button>
+          <button class="btn ghost" style="width:auto;padding:9px 12px;font-size:12px;" onclick="location.href='admin-esims.html?email=${encodedEmail}'">Повне керування eSIM</button>
           <button class="btn ghost" style="width:auto;padding:9px 12px;font-size:12px;" onclick="createCustomPackageCheckout('${encodedEmail}')">Продати пакет eSIM</button>
           ${subscription.referredBy ? `<button class="btn ghost" style="width:auto;padding:9px 12px;font-size:12px;" onclick="prepareReferralReward('${encodedEmail}')">Підготувати 1 ГБ</button>` : ''}
           ${subscription.referredBy ? `<button class="btn primary" style="width:auto;padding:9px 12px;font-size:12px;" onclick="creditReferralReward('${encodedEmail}')">Нарахувати 1 ГБ рефералу</button>` : ''}

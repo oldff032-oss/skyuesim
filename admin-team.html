@@ -134,7 +134,7 @@
       try{const res=await adminFetch(`/api/admin/team/${encodedEmail}/reset-2fa`,{method:'POST'}),data=await res.json();if(!res.ok)throw new Error(data.error||'Не вдалося скинути 2FA');alert('2FA скинуто. Працівник має увійти паролем і ввімкнути захист знову.');load()}catch(e){alert(e.message)}
     }
     async function editPermissions(email,current){
-      const all=['users.read','support.reply','refunds.manage','esim.retry','activation_code.read','broadcasts.manage','users.delete','backups.manage','security.manage','operations.manage','settings.manage'];
+      const all=['users.read','support.reply','refunds.manage','esim.retry','esim.manage','activation_code.read','broadcasts.manage','users.delete','backups.manage','security.manage','operations.manage','settings.manage'];
       const value=prompt('Вкажіть дозволи через кому:\n'+all.join('\n'),current.join(', '));if(value===null)return;
       const permissions=value.split(',').map(x=>x.trim()).filter(x=>all.includes(x));
       try{const res=await adminFetch(`/api/admin/team/${encodeURIComponent(email)}/permissions`,{method:'PATCH',body:JSON.stringify({permissions})}),data=await res.json();if(!res.ok)throw new Error(data.error);alert('Права оновлено');load()}catch(e){alert(e.message)}

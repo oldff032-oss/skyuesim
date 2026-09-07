@@ -124,21 +124,27 @@ function safeRescueDiagnostics(user = {}, client = {}) {
   return {deviceModel:text(client.deviceModel,100)||'Не визначено',platform:text(client.platform,40)||'web',appVersion:text(client.appVersion,40)||'Не визначено',online:client.online!==false,esimStatus:text(user.esim?.status||user.status||'not_issued',60),lastSyncAt:user.esim?.lastUpdateTime||user.updatedAt||null,purchaseId:text(latest.id,100)||null,stripeStatus:text(latest.paymentStatus||(user.stripeCustomerId?'profile_linked':'not_linked'),60),providerStatus:text(latest.fulfillmentStatus||user.esim?.provider||'not_issued',80),apn:text(user.esim?.apn,100)||null};
 }
 
+function purchaseForCurrentEsim(user = {}, esim = {}) {
+  const identities=[esim.iccid,esim.orderNo,esim.esimTranNo].filter(Boolean).map(String);
+  if(!identities.length)return null;
+  return (user.purchases||[]).find(item=>[item.iccid,item.esimOrderNo,item.esimTranNo].filter(Boolean).map(String).some(value=>identities.includes(value)))||null;
+}
+
 function walletCard(user = {}) {
-  const latest=(user.purchases||[]).find(item=>['provisioned','delivered'].includes(item.fulfillmentStatus))||{};
-  const esim=user.esim||{},nowMs=Date.now(),toNumber=value=>value==null?null:Number(value),fromBytes=value=>value==null?null:Number(value)/(1024**3);
+  const esim=user.esim||{},matched=purchaseForCurrentEsim(user,esim),latest=matched||(!esim.inventoryProfileId?(user.purchases||[]).find(item=>['provisioned','delivered'].includes(item.fulfillmentStatus)):null)||{};
+  const nowMs=Date.now(),toNumber=value=>value==null?null:Number(value),fromBytes=value=>value==null?null:Number(value)/(1024**3);
   const usedGb=fromBytes(esim.usedBytes)??toNumber(esim.usedGb)??0,totalGb=fromBytes(esim.totalBytes)??toNumber(esim.dataLimitGb),remainingGb=fromBytes(esim.remainingBytes)??toNumber(esim.remainingGb)??(totalGb==null?null:Math.max(0,totalGb-usedGb));
   const validUntil=esim.expiredTime||latest.expiresAt||null,validMs=validUntil?new Date(validUntil).getTime():null,daysUntilExpiry=Number.isFinite(validMs)?Math.max(0,Math.ceil((validMs-nowMs)/86400000)):null;
   const trip=user.travelMode?.enabled===false?null:user.travelMode||null,tripStartDate=trip?.startDate||null,tripEndDate=trip?.endDate||null,startMs=tripStartDate?new Date(`${tripStartDate}T00:00:00Z`).getTime():null,endMs=tripEndDate?new Date(`${tripEndDate}T23:59:59Z`).getTime():null;
   const daysUntilTrip=Number.isFinite(startMs)?Math.ceil((startMs-nowMs)/86400000):null,tripStatus=!Number.isFinite(startMs)?'not_planned':nowMs<startMs?'upcoming':Number.isFinite(endMs)&&nowMs>endMs?'completed':'in_progress';
-  const hasEsim=Boolean(esim.orderNo),hasActivation=Boolean(esim.activationCode||esim.qrCodeUrl),expiresBeforeTrip=Number.isFinite(validMs)&&Number.isFinite(endMs)&&validMs<endMs;
+  const hasEsim=Boolean(esim.orderNo||esim.iccid||esim.esimTranNo),hasActivation=Boolean(esim.activationCode||esim.qrCodeUrl),expiresBeforeTrip=Number.isFinite(validMs)&&Number.isFinite(endMs)&&validMs<endMs;
   const status=user.status==='blocked'?'blocked':Number.isFinite(validMs)&&validMs<nowMs?'expired':hasEsim?'active':'planned';
   const esimReadiness=!hasEsim?'not_ready':expiresBeforeTrip?'attention':hasActivation||status==='active'?'ready':'attention';
   const usagePercent=totalGb!=null&&totalGb>0?Math.min(100,Math.max(0,usedGb/totalGb*100)):null;
   const dataStatus=remainingGb==null?'unlimited':remainingGb<=0?'empty':remainingGb<1?'critical':remainingGb<3?'low':'healthy';
   const familyTrip=(user.familyTrips||[]).find(item=>!item.endDate||new Date(`${item.endDate}T23:59:59Z`).getTime()>=nowMs)||(user.familyTrips||[])[0]||null,familyMembers=familyTrip?.members||[],familyReady=familyMembers.filter(item=>['ready','installed'].includes(item.status)).length;
   const cleanNumber=value=>value==null||!Number.isFinite(Number(value))?null:+Number(value).toFixed(3);
-  return {serial:`signal-${crypto.createHash('sha256').update(user.email||'guest').digest('hex').slice(0,16)}`,holder:text(user.displayName,80)||'Signal Traveler',plan:text(latest.packageName||user.plan||'eSIM',100),destination:text(trip?.destination||latest.location||'Global',80),validUntil,status,usedGb:cleanNumber(usedGb),totalGb:cleanNumber(totalGb),remainingGb:cleanNumber(remainingGb),usagePercent:cleanNumber(usagePercent),dataStatus,esimReadiness,tripStartDate,tripEndDate,daysUntilTrip,tripStatus,daysUntilExpiry,lastSyncAt:esim.lastUpdateTime||user.updatedAt||null,familyReady,familyTotal:familyMembers.length};
+  return {serial:`signal-${crypto.createHash('sha256').update(user.email||'guest').digest('hex').slice(0,16)}`,holder:text(user.displayName,80)||'Signal Traveler',plan:text(esim.packageName||latest.packageName||esim.plan||user.plan||'eSIM',100),destination:text(trip?.destination||esim.location||latest.location||'Global',80),validUntil,status,usedGb:cleanNumber(usedGb),totalGb:cleanNumber(totalGb),remainingGb:cleanNumber(remainingGb),usagePercent:cleanNumber(usagePercent),dataStatus,esimReadiness,tripStartDate,tripEndDate,daysUntilTrip,tripStatus,daysUntilExpiry,lastSyncAt:esim.lastUpdateTime||user.updatedAt||null,familyReady,familyTotal:familyMembers.length};
 }
 
 function smartTripStatus(user = {}) {
@@ -205,9 +211,9 @@ function familyCenter(user = {}) {
 }
 
 function homeDeck(user = {}, settings = {}) {
-  const card=walletCard(user),club=publicClub(user,settings),latest=(user.purchases||[]).find(item=>['provisioned','delivered'].includes(item.fulfillmentStatus))||(user.purchases||[])[0]||{};
+  const card=walletCard(user),club=publicClub(user,settings),esim=user.esim||{},matched=purchaseForCurrentEsim(user,esim),latest=matched||(!esim.inventoryProfileId?((user.purchases||[]).find(item=>['provisioned','delivered'].includes(item.fulfillmentStatus))||(user.purchases||[])[0]):null)||{};
   const monthly={basic:{title:'Базовий',dataLabel:'10 GB',totalGb:10,scene:'basic'},standard:{title:'Стандарт',dataLabel:'20 GB',totalGb:20,scene:'standard'},unlimited:{title:'Безліміт',dataLabel:'∞ GB',totalGb:null,scene:'unlimited'}};
-  const rawPurchasePlan=String(latest.plan||'').toLowerCase(),rawUserPlan=String(user.plan||'').toLowerCase(),packageName=text(latest.packageName,100),purchaseLocation=text(latest.location,80),tripDestination=text(user.travelMode?.destination,80);
+  const rawPurchasePlan=String(esim.plan||latest.plan||'').toLowerCase(),rawUserPlan=String(user.plan||'').toLowerCase(),packageName=text(esim.packageName||latest.packageName,100),purchaseLocation=text(esim.location||latest.location,80),tripDestination=text(user.travelMode?.destination,80);
   const customPackage=rawPurchasePlan==='custom'||latest.kind==='custom_package'||latest.kind==='family_esim'||Boolean(latest.packageCode)||Boolean(purchaseLocation);
   let planKey=monthly[rawPurchasePlan]?rawPurchasePlan:monthly[rawUserPlan]?rawUserPlan:'';
   if(customPackage)planKey='';

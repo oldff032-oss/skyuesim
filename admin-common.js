@@ -10,6 +10,7 @@ function requireAdminAuth(){
     ['admin-dashboard.html',svg('<path d="M3 11.5 12 4l9 7.5M5.5 10.5V20h13v-9.5"/>')+'Огляд'],
     ['admin-users.html',svg('<circle cx="9" cy="8" r="4"/><path d="M2.5 21a6.5 6.5 0 0 1 13 0M16 5.5a3.5 3.5 0 0 1 0 7M17 15a6 6 0 0 1 4.5 6"/>')+'Клієнти'],
     ['admin-purchases.html',svg('<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M3 10h18M7 15h4"/>')+'Замовлення й оплати'],
+    ['admin-esims.html',svg('<rect x="5" y="2" width="14" height="20" rx="3"/><path d="M9 7h6v5H9zM9 16h.01M12 16h.01M15 16h.01"/>')+'Керування eSIM'],
     ['admin-mobile-topups.html',svg('<path d="M5 8.5a10 10 0 0 1 14 0M8 12a6 6 0 0 1 8 0M11 15.5a2 2 0 0 1 2 0"/><path d="M12 19h.01"/>')+'Поповнення SIM'],
     ['admin-travel.html',svg('<path d="M3 11.5h18M12 3c3 3 4.5 6 4.5 9S15 18 12 21c-3-3-4.5-6-4.5-9S9 6 12 3Z"/><path d="m15.5 7.5 5-3M18 6l2 2"/>')+'Подорожі'],
     ['admin-engagement.html',svg('<path d="M12 3 9.8 8.1 4 9l4.2 4.1-1 5.8 4.8-2.6 4.8 2.6-1-5.8L20 9l-5.8-.9L12 3Z"/>')+'Passport і Club'],

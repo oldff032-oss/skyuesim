@@ -195,7 +195,7 @@ test('maintenance support works without account unlock and remains rate limited'
 test('service worker bypasses stale cache for maintenance and localization assets', () => {
   const worker=read('sw.js');
   const support=read('support.html');
-  assert.match(worker, /signal-shell-v87-compact-nav/);
+  assert.match(worker, /signal-shell-v88-esim-lifecycle/);
   assert.match(worker, /fetch\(event\.request, \{ cache:'no-store' \}\)/);
   assert.match(worker, /'\/i18n\.js'/);
   assert.match(worker, /'\/style\.css'/);
@@ -220,7 +220,7 @@ test('admin navigation exposes every section and scrolls independently', () => {
   const css=read('style.css');
   const common=read('admin-common.js');
   assert.match(css, /\.admin-sidebar[\s\S]*overflow-y:auto/);
-  for(const page of ['admin-dashboard.html','admin-users.html','admin-purchases.html','admin-tickets.html','admin-operations.html','admin-control-center.html','admin-team.html','admin-diagnostics.html']) assert.match(common,new RegExp(page.replace('.','\\.')));
+  for(const page of ['admin-dashboard.html','admin-users.html','admin-purchases.html','admin-esims.html','admin-tickets.html','admin-operations.html','admin-control-center.html','admin-team.html','admin-diagnostics.html']) assert.match(common,new RegExp(page.replace('.','\\.')));
   assert.doesNotMatch(common, /admin-(feedback|error-guide|plan-changes|notifications|versions|guide)\.html/);
   assert.match(common, /admin-nav-icon/);
   assert.match(common, /nav\.innerHTML=links\.map/);
@@ -328,7 +328,7 @@ test('bottom navigation always identifies usage and charts stay visible without 
   assert.match(css, /nav-art/);
   assert.match(css, /clip:rect\(0,0,0,0\)/);
   assert.match(pwa, /setAttribute\('aria-label',label\)/);
-  assert.match(pwa, /\/sw\.js\?v=87/);
+  assert.match(pwa, /\/sw\.js\?v=88/);
   assert.doesNotMatch(pwa, /nav-(?:home|plans|usage|profile)-v2\.png/);
   for(const marker of ['M3.5 10.5 12 3l8.5 7.5','circle cx="12" cy="12" r="9"','M4 20V10M10 20V5','circle cx="12" cy="7.5" r="3.5"']) assert.match(pwa,new RegExp(marker.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')));
   assert.doesNotMatch(css, /navBreathe[\s\S]{0,80}infinite/);

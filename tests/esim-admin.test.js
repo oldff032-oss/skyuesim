@@ -1,0 +1,48 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const inventory = require('../esimInventoryService');
+
+const root = path.resolve(__dirname, '..');
+const read = file => fs.readFileSync(path.join(root, file), 'utf8');
+
+test('eSIM lifecycle distinguishes reusable profiles from installed profiles', () => {
+  assert.equal(inventory.profileState({smdpStatus:'RELEASED',esimStatus:'GOT_RESOURCE',activateTime:null,eidBound:false}), 'available');
+  assert.equal(inventory.profileState({smdpStatus:'ENABLED',esimStatus:'IN_USE',activateTime:'2026-01-01'}), 'active');
+  assert.equal(inventory.profileState({smdpStatus:'DELETED',esimStatus:'IN_USE'}), 'deleted_from_device');
+  assert.equal(inventory.profileState({smdpStatus:'ENABLED',esimStatus:'USED_UP'}), 'used_up');
+});
+
+test('inventory deduplicates purchase records in favour of the current owner', () => {
+  const profile={iccid:'89852240810733629810',orderNo:'B123',esimTranNo:'T123',smdpStatus:'RELEASED',esimStatus:'GOT_RESOURCE'};
+  const records=inventory.collectInventory({a:{email:'a@example.com',plan:'standard',esim:profile,purchases:[{id:'p1',iccid:profile.iccid,esimOrderNo:profile.orderNo}]}},[]);
+  assert.equal(records.length,1);
+  assert.equal(records[0].source,'current');
+  assert.equal(records[0].ownerEmail,'a@example.com');
+});
+
+test('admin inventory responses never expose QR or activation secrets', () => {
+  const record=inventory.publicRecord({id:'esim_1',source:'pool',profile:{iccid:'89852240810733629810',activationCode:'LPA:1$secret',qrCodeUrl:'https://secret.example/qr',smdpStatus:'RELEASED',esimStatus:'GOT_RESOURCE'}});
+  assert.equal(record.canAssign,true);
+  assert.equal('activationCode' in record,false);
+  assert.equal('qrCodeUrl' in record,false);
+  assert.equal(record.iccidLast4,'9810');
+});
+
+test('admin eSIM actions are protected by explicit permission and two-factor gates', () => {
+  const server=read('server.js'),auth=read('adminAuthService.js'),page=read('admin-esims.html');
+  assert.match(auth,/esim\.manage/);
+  assert.match(server,/\/api\/admin\/esims\/\:id\/assign',[^\n]*requirePermission\('esim\.manage',\{requireTwoFactor:true\}\)/);
+  assert.match(server,/\/api\/admin\/esims\/\:id\/\:action',[^\n]*requirePermission\('esim\.manage',\{requireTwoFactor:true\}\)/);
+  assert.match(page,/власник видаляє його в налаштуваннях телефону/);
+});
+
+test('customer activation hides already-consumed install credentials', () => {
+  const server=read('server.js'),page=read('esim-management.html'),provider=read('esimService.js');
+  assert.match(server,/activationCode: canInstall \? esim\.activationCode \|\| null : null/);
+  assert.match(server,/qrCodeUrl: canInstall \? esim\.qrCodeUrl \|\| null : null/);
+  assert.match(page,/Цей код уже був завантажений на пристрій/);
+  assert.match(provider,/smdpStatus: profile\.smdpStatus/);
+  assert.match(provider,/esimStatus: profile\.esimStatus/);
+});
