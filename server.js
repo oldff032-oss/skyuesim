@@ -2169,8 +2169,10 @@ app.post('/api/admin/mobile-topups/:orderId/retry',adminAuth.requireAdmin,adminA
 
 app.get('/api/admin/esims',adminAuth.requireAdmin,adminAuth.requirePermission('users.read'),(req,res)=>{
   const records=collectEsimInventory().map(esimInventory.publicRecord);
+  const knownUsers=new Map([...Object.keys(authStore.readAll().users||{}),...Object.keys(getAllUsers())].map(email=>[String(email).trim().toLowerCase(),true]));
+  const eligibleUsers=[...knownUsers.keys()].map(email=>{const user=getUser(email)||{};return {email,displayName:user.displayName||null,status:user.status||'registered',hasEsim:Boolean(user.esim)};}).filter(user=>user.status!=='blocked'&&!user.hasEsim).sort((a,b)=>a.email.localeCompare(b.email));
   const assignmentEvents=(operationsStore.store().esimAssignmentEvents||[]).slice(0,100).map(item=>({id:item.id,profileId:item.profileId,action:item.action,fromEmail:item.fromEmail||null,toEmail:item.toEmail||null,adminEmail:item.adminEmail,createdAt:item.createdAt}));
-  res.json({records,assignmentEvents,totals:{all:records.length,available:records.filter(item=>item.state==='available').length,inUse:records.filter(item=>['active','installed','suspended'].includes(item.state)).length,attention:records.filter(item=>['unknown','quarantined'].includes(item.state)).length,finished:records.filter(item=>['expired','used_up','cancelled','revoked'].includes(item.state)).length}});
+  res.json({records,eligibleUsers,assignmentEvents,totals:{all:records.length,available:records.filter(item=>item.state==='available').length,inUse:records.filter(item=>['active','installed','suspended'].includes(item.state)).length,attention:records.filter(item=>['unknown','quarantined'].includes(item.state)).length,finished:records.filter(item=>['expired','used_up','cancelled','revoked'].includes(item.state)).length}});
 });
 
 app.post('/api/admin/esims/sync-provider',adminAuth.requireAdmin,adminAuth.requirePermission('esim.retry'),async(req,res)=>{
@@ -2223,6 +2225,7 @@ app.post('/api/admin/esims/:id/assign',adminAuth.requireAdmin,adminAuth.requireR
   if(esimInventory.profileState(record.profile,record.stateOverride)!=='available')return res.status(409).json({error:'Ця eSIM уже встановлена, використана або має непідтверджений статус. Її не можна передати іншому телефону.'});
   const target=getUser(targetEmail);
   if(!target&&!authStore.readAll().users?.[targetEmail])return res.status(404).json({error:'Користувача-отримувача не знайдено'});
+  if(target?.status==='blocked')return res.status(409).json({error:'Акаунт користувача заблоковано. Спочатку відновіть доступ до акаунта.'});
   if(target?.esim)return res.status(409).json({error:'У користувача вже є eSIM. Спочатку безпечно відв’яжіть або відкличте поточну.'});
   if(esimAdminActionsInProgress.has(id))return res.status(409).json({error:'Для цієї eSIM уже виконується інша дія'});
   esimAdminActionsInProgress.add(id);
@@ -2238,16 +2241,17 @@ app.post('/api/admin/esims/:id/assign',adminAuth.requireAdmin,adminAuth.requireR
       return res.status(409).json({error:'Стан eSIM або користувача змінився під час перевірки. Оновіть список.'});
     }
     const plan=record.plan||target?.plan||'custom';
-    saveUser(targetEmail,{email:targetEmail,status:'active',plan,esim:{...profile,plan,packageName:record.packageName||profile.packageName||null,location:record.profile?.location||profile.location||null,dataLimitGb:record.profile?.dataLimitGb??profile.dataLimitGb??null,durationDays:record.profile?.durationDays??profile.durationDays??null,inventoryProfileId:id,assignedAt:new Date().toISOString(),assignedBy:req.admin.email},lastEsimProvisionError:null});
+    const grantedAt=new Date().toISOString(),grant={id:`grant_${crypto.randomUUID()}`,type:'admin_promo',profileId:id,packageName:record.packageName||profile.packageName||null,priceCents:0,currency:null,grantedAt,grantedBy:req.admin.email};
+    saveUser(targetEmail,{email:targetEmail,status:'active',plan,esim:{...profile,plan,packageName:record.packageName||profile.packageName||null,location:record.profile?.location||profile.location||null,dataLimitGb:record.profile?.dataLimitGb??profile.dataLimitGb??null,durationDays:record.profile?.durationDays??profile.durationDays??null,inventoryProfileId:id,grantType:'admin_promo',priceCents:0,assignedAt:grantedAt,assignedBy:req.admin.email},esimGrants:[grant,...(target?.esimGrants||[])].slice(0,100),lastEsimProvisionError:null});
     removeEsimFromPool(id);
     await storage.saveNow('users.json',getAllUsers());
     await operationsStore.saveNow();
     await storage.finishExternalEvent('esim-inventory-assignment',reservationId,'completed');
     reserved=false;
-    recordEsimAssignment({profileId:id,action:'assigned',fromEmail:record.previousOwnerEmail||null,toEmail:targetEmail,adminEmail:req.admin.email});
-    auditStore.log({adminEmail:req.admin.email,action:'esim_assigned_from_inventory',target:targetEmail,details:{profileId:id,previousOwnerEmail:record.previousOwnerEmail||null,iccidEnding:String(profile.iccid||'').slice(-4)}});
-    sendToEmail(targetEmail,{title:'eSIM готова до встановлення',body:'Адміністратор підключив до вашого акаунта доступну eSIM. Відкрийте «Моя eSIM» та встановіть її один раз.',url:'/esim-management.html',tag:`esim-assigned-${id.slice(-8)}`}).catch(()=>{});
-    res.json({ok:true,record:esimInventory.publicRecord(findEsimInventoryRecord(id))});
+    recordEsimAssignment({profileId:id,action:'free_promo_assigned',fromEmail:record.previousOwnerEmail||null,toEmail:targetEmail,adminEmail:req.admin.email});
+    auditStore.log({adminEmail:req.admin.email,action:'free_promo_esim_granted',target:targetEmail,details:{profileId:id,priceCents:0,previousOwnerEmail:record.previousOwnerEmail||null,iccidEnding:String(profile.iccid||'').slice(-4)}});
+    sendToEmail(targetEmail,{title:'Вам безкоштовно додано eSIM',body:'Адміністратор подарував вам пакет мобільного інтернету без оплати й підписки. Відкрийте «Моя eSIM» та встановіть профіль один раз.',url:'/esim-management.html',tag:`free-esim-${id.slice(-8)}`}).catch(()=>{});
+    res.json({ok:true,message:'eSIM видано безкоштовно. Stripe, оплата та підписка не створювалися.',record:esimInventory.publicRecord(findEsimInventoryRecord(id))});
   }catch(error){if(reserved)await storage.finishExternalEvent('esim-inventory-assignment',reservationId,'failed',error.message).catch(()=>{});res.status(502).json({error:`eSIM Access: ${error.message}`,code:error.code||'ESIM_ASSIGN_FAILED'});}
   finally{esimAdminActionsInProgress.delete(id);}
 });

@@ -46,3 +46,14 @@ test('customer activation hides already-consumed install credentials', () => {
   assert.match(provider,/smdpStatus: profile\.smdpStatus/);
   assert.match(provider,/esimStatus: profile\.esimStatus/);
 });
+
+test('Super Admin can grant a provider-confirmed free eSIM without Stripe', () => {
+  const server=read('server.js'),page=read('admin-esims.html');
+  const route=server.slice(server.indexOf("app.post('/api/admin/esims/:id/assign'"),server.indexOf("app.post('/api/admin/esims/:id/detach'"));
+  assert.match(page,/Видати eSIM безкоштовно/);
+  assert.match(page,/Оплата Stripe і підписка не створюються/);
+  assert.match(route,/grantType:'admin_promo'/);
+  assert.match(route,/priceCents:0/);
+  assert.match(route,/Stripe, оплата та підписка не створювалися/);
+  assert.doesNotMatch(route,/createCheckout|createCustomPackageCheckout|upsertPurchase/);
+});
