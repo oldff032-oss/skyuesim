@@ -84,6 +84,8 @@ test('deleted provider profiles are archived and can issue a new same-package re
   assert.match(route,/await provisionEsim/);
   assert.match(route,/grantType:'admin_replacement'/);
   assert.match(route,/stateOverride:'replaced'/);
+  assert.match(route,/REPLACEMENT_PERSISTENCE_UNCONFIRMED/);
   assert.doesNotMatch(route,/createCheckout|createCustomPackageCheckout/);
   assert.match(provider,/transactionId: suppliedTransactionId/);
+  assert.match(page,/Сервер не підтвердив нову eSIM в акаунті/);
 });

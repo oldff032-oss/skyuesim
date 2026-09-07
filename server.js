@@ -2294,11 +2294,13 @@ app.post('/api/admin/esims/:id/replace-and-assign',adminAuth.requireAdmin,adminA
     putEsimInPool({...record,stateOverride:'replaced',replacementIssuedAt:now,replacementProfileId:newProfileId,replacementAssignedTo:targetEmail,replacementOrderNo:profile.orderNo||null});
     await storage.saveNow('users.json',getAllUsers());
     await operationsStore.saveNow();
+    const persistedUsers=storage.snapshot(['users.json'])['users.json']||{},persistedProfile=persistedUsers[targetEmail]?.esim,assignedRecord=findEsimInventoryRecord(newProfileId);
+    if(esimInventory.profileId(persistedProfile)!==newProfileId||assignedRecord?.ownerEmail!==targetEmail)throw Object.assign(new Error('Новий профіль створено, але підтвердити його збереження в акаунті не вдалося. Не повторюйте операцію — перевірте замовлення в eSIM Access.'),{code:'REPLACEMENT_PERSISTENCE_UNCONFIRMED'});
     await storage.finishExternalEvent('esim-inventory-replacement',reservationId,'completed');reserved=false;
     recordEsimAssignment({profileId:newProfileId,sourceProfileId:id,action:'replacement_issued',fromEmail:record.previousOwnerEmail||null,toEmail:targetEmail,adminEmail:req.admin.email});
     auditStore.log({adminEmail:req.admin.email,action:'esim_replacement_granted',target:targetEmail,details:{sourceProfileId:id,newProfileId,packageCode,priceCents:0,providerBalanceCharged:true,iccidEnding:String(profile.iccid||'').slice(-4)}});
     sendToEmail(targetEmail,{title:'Вам безкоштовно додано нову eSIM',body:'Адміністратор видав вам новий профіль мобільного інтернету. Відкрийте «Моя eSIM» та встановіть його один раз.',url:'/esim-management.html',tag:`esim-replacement-${newProfileId.slice(-8)}`}).catch(()=>{});
-    res.json({ok:true,message:'Нову eSIM того самого пакета створено й безкоштовно видано користувачу. Вартість списана лише з балансу eSIM Access.',profileId:newProfileId});
+    res.json({ok:true,message:'Нову eSIM того самого пакета створено й безкоштовно видано користувачу. Вартість списана лише з балансу eSIM Access.',profileId:newProfileId,record:esimInventory.publicRecord(assignedRecord)});
   }catch(error){if(reserved)await storage.finishExternalEvent('esim-inventory-replacement',reservationId,'failed',error.message).catch(()=>{});res.status(error.status||502).json({error:`eSIM Access: ${error.message}`,code:error.code||'ESIM_REPLACEMENT_FAILED'});}
   finally{esimAdminActionsInProgress.delete(id);}
 });
