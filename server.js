@@ -126,7 +126,25 @@ function purchaseForProfile(user,profile) {
 }
 
 function profileIdentifiers(profile) { return {esimTranNo:profile?.esimTranNo||'',iccid:profile?.iccid||''}; }
-function validateSupportAttachment(attachment){if(!attachment)return null;const type=String(attachment.type||'').toLowerCase(),allowed=['image/png','image/jpeg','image/webp','application/pdf'];if(!allowed.includes(type)||typeof attachment.dataUrl!=='string'||attachment.dataUrl.length>800000||!attachment.dataUrl.startsWith(`data:${type};base64,`))throw Object.assign(new Error('Дозволено PNG, JPG, WEBP або PDF до 550 КБ'),{code:'INVALID_ATTACHMENT'});return {name:String(attachment.name||'attachment').replace(/[\r\n<>"']/g,'').slice(0,120),type,dataUrl:attachment.dataUrl};}
+const SUPPORT_MAX_FILES=5,SUPPORT_MAX_FILE_BYTES=2*1024*1024,SUPPORT_MAX_TOTAL_BYTES=8*1024*1024;
+function attachmentError(message){return Object.assign(new Error(message),{code:'INVALID_ATTACHMENT'});}
+function validateSupportAttachment(attachment){
+  if(!attachment)return null;
+  const type=String(attachment.type||'').toLowerCase(),allowed=['image/png','image/jpeg','image/webp','application/pdf'],dataUrl=attachment.dataUrl;
+  if(!allowed.includes(type)||typeof dataUrl!=='string'||!dataUrl.startsWith(`data:${type};base64,`))throw attachmentError('Дозволено лише PNG, JPG, WEBP або PDF');
+  const encoded=dataUrl.slice(dataUrl.indexOf(',')+1);
+  if(!encoded||!/^[a-z0-9+/]+={0,2}$/i.test(encoded))throw attachmentError('Файл пошкоджений або має неправильний формат');
+  const size=Buffer.byteLength(encoded,'base64');
+  if(size>SUPPORT_MAX_FILE_BYTES)throw attachmentError('Один файл не може перевищувати 2 МБ');
+  return {name:String(attachment.name||'attachment').replace(/[\r\n<>"']/g,'').slice(0,120),type,dataUrl,size};
+}
+function validateSupportAttachments(value){
+  const source=Array.isArray(value)?value:(value?[value]:[]);
+  if(source.length>SUPPORT_MAX_FILES)throw attachmentError('Можна прикріпити не більше 5 файлів');
+  const files=source.map(validateSupportAttachment).filter(Boolean),total=files.reduce((sum,file)=>sum+file.size,0);
+  if(total>SUPPORT_MAX_TOTAL_BYTES)throw attachmentError('Загальний розмір вкладень не може перевищувати 8 МБ');
+  return files;
+}
 
 function buildSupportDiagnostics(user, client = {}) {
   const latestPurchase = Array.isArray(user?.purchases) ? user.purchases[0] : null;
@@ -472,7 +490,11 @@ function rateLimit(name,windowMs,maximum,keyFromRequest=()=> ''){
 // тому для цього одного маршруту JSON-парсер вимикаємо.
 app.use('/api/webhook', express.raw({ type: 'application/json' }));
 app.use('/api/inbound-email', express.raw({ type: 'application/json' }));
-app.use(express.json({ limit: '1mb' }));
+const regularJsonParser=express.json({limit:'1mb'}),supportUploadJsonParser=express.json({limit:'12mb'});
+app.use((req,res,next)=>{
+  const supportUpload=req.method==='POST'&&(/^\/api\/support\/tickets(?:\/[^/]+\/reply)?$/.test(req.path)||/^\/api\/admin\/tickets\/[^/]+\/reply$/.test(req.path));
+  return (supportUpload?supportUploadJsonParser:regularJsonParser)(req,res,next);
+});
 
 // =========================================================
 // АВТЕНТИФІКАЦІЯ: email -> код -> пароль -> акаунт, і логін
@@ -1449,12 +1471,12 @@ app.post('/api/support/tickets', requireUserSession,rateLimit('support_ticket',6
     const category = String(req.body?.category || 'Інше').trim().slice(0, 60);
     const subject = String(req.body?.subject || '').trim().slice(0, 160);
     const message = String(req.body?.message || '').trim().slice(0, 5000);
-    const attachment = req.body?.attachment;
+    const attachments = req.body?.attachments ?? req.body?.attachment;
     const email=req.userEmail;
     if (!subject || !message) return res.status(400).json({ error: 'Потрібні subject і message' });
-    const safeAttachment=validateSupportAttachment(attachment);
+    const safeAttachments=validateSupportAttachments(attachments);
     const diagnostics=buildSupportDiagnostics(getUser(email),req.body?.diagnostics);
-    const ticket = ticketStore.createTicket({ email, category: category || 'Інше', subject, message, attachment:safeAttachment, diagnostics });
+    const ticket = ticketStore.createTicket({ email, category: category || 'Інше', subject, message, attachments:safeAttachments, diagnostics });
     notifySuperAdminsAboutTicket(ticket);
     sendEmail({to:email,subject:`Звернення #${ticket.id} отримано — Signal`,html:emailTemplates.notification({title:'Ми отримали ваше звернення',message:`Звернення «${subject}» зареєстровано під номером #${ticket.id}. Відповідь з’явиться в застосунку та надійде на email.`,actionUrl:`/ticket.html?id=${ticket.id}`,actionLabel:'Переглянути звернення'})}).catch(()=>{});
     res.json(ticketStore.stripNotesForUser(ticket));
@@ -1482,13 +1504,13 @@ app.get('/api/support/tickets/:id', requireUserSession, (req, res) => {
 
 app.post('/api/support/tickets/:id/reply', requireUserSession, (req, res) => {
   const message = String(req.body?.message || '').trim().slice(0, 5000);
-  const attachment = req.body?.attachment;
+  const attachments = req.body?.attachments ?? req.body?.attachment;
   const ticket = ticketStore.getTicket(req.params.id);
   if (!ticket) return res.status(404).json({ error: 'Тікет не знайдено' });
   if (ticket.email !== req.userEmail) return res.status(403).json({ error: 'Немає доступу до цього тікета' });
   if (!message) return res.status(400).json({ error: 'Напиши повідомлення' });
-  let safeAttachment;try{safeAttachment=validateSupportAttachment(attachment);}catch(error){return res.status(400).json({error:error.message,code:error.code});}
-  const updated = ticketStore.addMessage(req.params.id, { from: 'user', text: message, attachment:safeAttachment });
+  let safeAttachments;try{safeAttachments=validateSupportAttachments(attachments);}catch(error){return res.status(400).json({error:error.message,code:error.code});}
+  const updated = ticketStore.addMessage(req.params.id, { from: 'user', text: message, attachments:safeAttachments });
   notifyStaffAboutUserReply(updated);
   res.json(ticketStore.stripNotesForUser(updated));
 });
@@ -1885,7 +1907,9 @@ app.post('/api/admin/announcements', adminAuth.requireAdmin, adminAuth.requireRo
   if (normalizedAudience !== 'all' && !authStore.readAll().users?.[normalizedAudience] && !getUser(normalizedAudience)) return res.status(404).json({error:'Користувача з таким email не знайдено'});
   if (expiresAt && Number.isNaN(new Date(expiresAt).getTime())) return res.status(400).json({error:'Некоректна дата завершення'});
   if (expiresAt && new Date(expiresAt).getTime() <= Date.now()) return res.status(400).json({error:'Час завершення має бути в майбутньому'});
-  const announcement={ id:Date.now().toString(36), title:String(title).replace(/^\s*\[maintenance\]\s*/i,'').slice(0,100), message:String(message).slice(0,500), audience:normalizedAudience, type:isMaintenance?'maintenance':'notice', startsAt:new Date().toISOString(), expiresAt:expiresAt||null, createdBy:req.admin.email };
+  const cleanMessage=String(message).trim();
+  if(cleanMessage.length>5000)return res.status(400).json({error:'Текст повідомлення не може перевищувати 5000 символів'});
+  const announcement={ id:Date.now().toString(36), title:String(title).replace(/^\s*\[maintenance\]\s*/i,'').slice(0,100), message:cleanMessage, audience:normalizedAudience, type:isMaintenance?'maintenance':'notice', startsAt:new Date().toISOString(), expiresAt:expiresAt||null, createdBy:req.admin.email };
   operationsStore.store().announcements.unshift(announcement); await operationsStore.saveNow();
   let pushRecipients = 0, pushDelivered = 0;
   if(sendPush && isPushConfigured()) {

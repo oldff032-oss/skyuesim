@@ -55,9 +55,9 @@ test('global update assets use one coherent cache and app version', () => {
   const worker = read('sw.js');
   const pwa = read('pwa.js');
   for (const page of ['/travel-assistant.html','/esim-topup.html','/family-share.html','/notifications.html','/activity.html','/savings.html','/family-center.html']) assert.match(worker, new RegExp(page.replace('.', '\\.')));
-  assert.match(worker, /signal-shell-v89-stability/);
-  assert.match(pwa, /SIGNAL_FRONTEND_VERSION='2\.8\.0'/);
-  assert.match(pwa, /SIGNAL_SW_VERSION='v89'/);
+  assert.match(worker, /signal-shell-v91-support-studio/);
+  assert.match(pwa, /SIGNAL_FRONTEND_VERSION='2\.9\.0'/);
+  assert.match(pwa, /SIGNAL_SW_VERSION='v91'/);
 });
 
 test('customer pages render immediately and admin navigation stays compact', () => {

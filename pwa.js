@@ -1,10 +1,10 @@
 // Register from every entry page so a fresh "Add to Home Screen" install has
 // a service worker even when it starts directly on dashboard.html.
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('/sw.js?v=89', { updateViaCache: 'none' }).then(registration => registration.update()).catch(() => {});
+  navigator.serviceWorker.register('/sw.js?v=91', { updateViaCache: 'none' }).then(registration => registration.update()).catch(() => {});
   navigator.serviceWorker.addEventListener('controllerchange',()=>{
-    if(sessionStorage.getItem('signal_sw_reloaded_v89')==='1')return;
-    sessionStorage.setItem('signal_sw_reloaded_v89','1');
+    if(sessionStorage.getItem('signal_sw_reloaded_v91')==='1')return;
+    sessionStorage.setItem('signal_sw_reloaded_v91','1');
     location.reload();
   });
 }
@@ -50,7 +50,7 @@ if (window.location.pathname.endsWith('/app-tools.html')) {
 // auth headers, PINs, tokens, QR data or full URLs/query strings.
 const signalOriginalFetch = window.fetch.bind(window);
 let signalDiagnosticCount = 0;
-const SIGNAL_FRONTEND_VERSION='2.8.0',SIGNAL_SW_VERSION='v89',SIGNAL_CACHE_VERSION='signal-shell-v89-stability';
+const SIGNAL_FRONTEND_VERSION='2.9.0',SIGNAL_SW_VERSION='v91',SIGNAL_CACHE_VERSION='signal-shell-v91-support-studio';
 window.SIGNAL_APP_VERSION=SIGNAL_FRONTEND_VERSION;
 window.addEventListener('load',async()=>{
   if(typeof API_URL==='undefined')return;

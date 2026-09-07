@@ -70,18 +70,17 @@
     let currentRecoveryVerification = null;
     const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[char]));
 
-    function renderAttachment(a){
-      if(!a) return '';
-      if(a.type && a.type.startsWith('image/')){
-        return `<img src="${a.dataUrl}" alt="${escapeHtml(a.name || 'attachment')}" style="max-width:100%; border-radius:10px; margin-top:8px; display:block;" />`;
-      }
-      return `<a href="${a.dataUrl}" download="${escapeHtml(a.name || 'attachment')}" style="display:block; margin-top:8px; color:inherit; text-decoration:underline; font-size:12px;">📎 ${escapeHtml(a.name || 'attachment')}</a>`;
+    function renderAttachments(message){
+      const files=Array.isArray(message.attachments)?message.attachments:(message.attachment?[message.attachment]:[]);
+      return files.map(a=>a.type && a.type.startsWith('image/')
+        ? `<img src="${a.dataUrl}" alt="${escapeHtml(a.name || 'attachment')}" style="max-width:100%; border-radius:10px; margin-top:8px; display:block;" />`
+        : `<a href="${a.dataUrl}" download="${escapeHtml(a.name || 'attachment')}" style="display:block; margin-top:8px; color:inherit; text-decoration:underline; font-size:12px;">📎 ${escapeHtml(a.name || 'attachment')}</a>`).join('');
     }
 
     function fileToAttachment(file){
       return new Promise((resolve, reject) => {
         if(!file) return resolve(null);
-        if(file.size > 550 * 1024){ reject(new Error('Файл завеликий (максимум 550 КБ)')); return; }
+        if(file.size > 2 * 1024 * 1024){ reject(new Error('Файл завеликий (максимум 2 МБ)')); return; }
         const reader = new FileReader();
         reader.onload = () => resolve({ name: file.name, type: file.type, dataUrl: reader.result });
         reader.onerror = () => reject(new Error('Не вдалося прочитати файл'));
@@ -130,7 +129,7 @@
                     <div class="msg-row ${m.from === 'note' ? 'admin' : m.from}">
                       <div class="avatar">${m.from === 'user' ? initial : '🛠️'}</div>
                       <div class="msg-bubble">
-                        <div class="msg ${escapeHtml(m.from)}">${escapeHtml(m.text).replace(/\n/g,'<br>')}${renderAttachment(m.attachment)}</div>
+                        <div class="msg ${escapeHtml(m.from)}">${escapeHtml(m.text).replace(/\n/g,'<br>')}${renderAttachments(m)}</div>
                         <div class="msg-time">${m.from === 'admin' ? 'Ви' : m.from === 'note' ? 'Нотатка' : ticket.email} · ${new Date(m.createdAt).toLocaleString('uk-UA')}</div>
                       </div>
                     </div>`).join('')}

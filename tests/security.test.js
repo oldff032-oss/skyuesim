@@ -153,7 +153,7 @@ test('customer support screens are mobile friendly and free of legacy mojibake',
   for (const pageName of ['support.html','new-ticket.html','ticket.html']) {
     const page = read(pageName);
     assert.match(page, /viewport-fit=cover/);
-    assert.match(page, /class="mark"/);
+    assert.match(page, /signal-premium-logo\.png/);
     assert.doesNotMatch(page, /Рџ|РЎРё|вЂ/);
   }
 });
@@ -174,6 +174,8 @@ test('maintenance support works without account unlock and remains rate limited'
   assert.match(read('admin-operations.html'), /Повідомлення збережено й підтверджено сервером/);
   assert.match(pwa, /signal-announcement-card/);
   assert.match(read('style.css'), /\.maintenance-message[\s\S]*overflow-y:auto/);
+  assert.match(read('style.css'), /\.maintenance-message[\s\S]*white-space:pre-wrap[\s\S]*touch-action:pan-y/);
+  assert.match(read('style.css'), /@media\(max-width:480px\)[\s\S]*\.signal-maintenance-screen\{display:block[\s\S]*\.maintenance-message\{flex:none;max-height:none/);
   assert.match(read('style.css'), /\.maintenance-actions[\s\S]*flex:none/);
   assert.match(pwa, /startMaintenanceCountdown/);
   assert.match(pwa, /signal-maintenance-countdown-value/);
@@ -184,6 +186,11 @@ test('maintenance support works without account unlock and remains rate limited'
   assert.match(pwa, /Читати повністю/);
   assert.match(read('style.css'), /\.home>#announcements\{display:none!important\}/);
   assert.match(server, /Час завершення має бути в майбутньому/);
+  assert.match(server, /cleanMessage\.length>5000/);
+  assert.match(server, /message:cleanMessage/);
+  assert.doesNotMatch(server, /message:String\(message\)\.slice\(0,500\)/);
+  assert.match(read('admin-operations.html'), /maxlength="5000"/);
+  assert.match(read('admin-operations.html'), /messageCount/);
   assert.match(read('admin-operations.html'), /\/api\/announcements\?email=/);
   assert.match(read('admin-operations.html'), /не стало активним для користувачів/);
   assert.doesNotMatch(pwa, /\(support\|new-ticket\|ticket\|maintenance-support\)/);
@@ -195,7 +202,7 @@ test('maintenance support works without account unlock and remains rate limited'
 test('service worker bypasses stale cache for maintenance and localization assets', () => {
   const worker=read('sw.js');
   const support=read('support.html');
-  assert.match(worker, /signal-shell-v89-stability/);
+  assert.match(worker, /signal-shell-v91-support-studio/);
   assert.match(worker, /fetch\(event\.request, \{ cache:'no-store' \}\)/);
   assert.match(worker, /'\/i18n\.js'/);
   assert.match(worker, /'\/style\.css'/);
@@ -332,7 +339,7 @@ test('bottom navigation always identifies usage and charts stay visible without 
   assert.match(css, /nav-art/);
   assert.match(css, /clip:rect\(0,0,0,0\)/);
   assert.match(pwa, /setAttribute\('aria-label',label\)/);
-  assert.match(pwa, /\/sw\.js\?v=89/);
+  assert.match(pwa, /\/sw\.js\?v=91/);
   assert.doesNotMatch(pwa, /nav-(?:home|plans|usage|profile)-v2\.png/);
   for(const marker of ['M3.5 10.5 12 3l8.5 7.5','circle cx="12" cy="12" r="9"','M4 20V10M10 20V5','circle cx="12" cy="7.5" r="3.5"']) assert.match(pwa,new RegExp(marker.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')));
   assert.doesNotMatch(css, /navBreathe[\s\S]{0,80}infinite/);
@@ -440,6 +447,27 @@ test('ticket diagnostics use a strict secret-free whitelist',()=>{
   assert.match(customer,/#replyBox\{display:block!important/);
   assert.match(customer,/replyBox\.hidden=ticket\.status==='closed'/);
   assert.match(customer,/Відповісти та відкрити знову/);
+});
+
+test('support form accepts several validated attachments without native white controls',()=>{
+  const server=read('server.js'),ticketStore=read('ticketStore.js'),form=read('new-ticket.html'),customer=read('ticket.html'),admin=read('admin-ticket.html'),support=read('support.html');
+  assert.match(form,/id="attachments" multiple/);
+  assert.match(form,/MAX_FILES=5/);
+  assert.match(form,/MAX_FILE_SIZE=2\*1024\*1024/);
+  assert.match(form,/MAX_TOTAL_SIZE=8\*1024\*1024/);
+  assert.match(form,/class="upload-zone"/);
+  assert.match(form,/selectedFiles/);
+  assert.match(form,/body:JSON\.stringify\(\{category,subject,message,attachments,diagnostics\}\)/);
+  assert.match(server,/SUPPORT_MAX_FILES=5/);
+  assert.match(server,/SUPPORT_MAX_FILE_BYTES=2\*1024\*1024/);
+  assert.match(server,/SUPPORT_MAX_TOTAL_BYTES=8\*1024\*1024/);
+  assert.match(server,/validateSupportAttachments/);
+  assert.match(server,/supportUploadJsonParser=express\.json\(\{limit:'12mb'\}\)/);
+  assert.match(ticketStore,/messages: \[\{ from: 'user', text: message, attachments:safeAttachments/);
+  assert.match(customer,/renderAttachments\(m\)/);
+  assert.match(admin,/renderAttachments\(m\)/);
+  assert.match(support,/До 5 фото або PDF/);
+  assert.doesNotMatch(form,/class="file" type="file"/);
 });
 
 test('personal admin email uses a registered recipient and branded support template',()=>{

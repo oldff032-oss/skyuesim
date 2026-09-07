@@ -3,11 +3,12 @@ let store = { tickets: [], nextId: 1001 };
 
 async function bootstrap() { store = { tickets: [], nextId: 1001, ...(await storage.load('tickets.json', store)) }; }
 function writeAll(data) { store = data; storage.save('tickets.json', store); }
-function createTicket({ email, category, subject, message, attachment, recoveryRequest = null, diagnostics = null }) {
+function createTicket({ email, category, subject, message, attachment, attachments = [], recoveryRequest = null, diagnostics = null }) {
   const now = new Date().toISOString();
   const priority=category === 'access_recovery' ? 'high' : 'normal';
   const slaMinutes=priority==='high'?240:1440;
-  const ticket = { id: store.nextId++, email, category, subject, status: 'open', priority, tags:[], createdAt: now, updatedAt: now, slaDueAt:new Date(Date.now()+slaMinutes*60000).toISOString(), messages: [{ from: 'user', text: message, attachment: attachment || null, createdAt: now }], ...(recoveryRequest ? { recoveryRequest } : {}), ...(diagnostics ? { diagnostics } : {}) };
+  const safeAttachments=Array.isArray(attachments)&&attachments.length?attachments:(attachment?[attachment]:[]);
+  const ticket = { id: store.nextId++, email, category, subject, status: 'open', priority, tags:[], createdAt: now, updatedAt: now, slaDueAt:new Date(Date.now()+slaMinutes*60000).toISOString(), messages: [{ from: 'user', text: message, attachments:safeAttachments, createdAt: now }], ...(recoveryRequest ? { recoveryRequest } : {}), ...(diagnostics ? { diagnostics } : {}) };
   store.tickets.push(ticket); writeAll(store); return ticket;
 }
 function getTicketsByEmail(email) { return store.tickets.filter(t => t.email === email).sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt)); }
@@ -19,9 +20,10 @@ function getAllTickets({ status, priority, search } = {}) {
   return list.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
 }
 function getTicket(id) { return store.tickets.find(t => t.id === Number(id)) || null; }
-function addMessage(id, { from, text, attachment, adminEmail = null }) {
+function addMessage(id, { from, text, attachment, attachments = [], adminEmail = null }) {
   const ticket = getTicket(id); if (!ticket) return null;
-  ticket.messages.push({ from, text, attachment: attachment || null, ...(from==='admin'&&adminEmail?{adminEmail}:{}), createdAt: new Date().toISOString() }); ticket.updatedAt = new Date().toISOString();
+  const safeAttachments=Array.isArray(attachments)&&attachments.length?attachments:(attachment?[attachment]:[]);
+  ticket.messages.push({ from, text, attachments:safeAttachments, ...(from==='admin'&&adminEmail?{adminEmail}:{}), createdAt: new Date().toISOString() }); ticket.updatedAt = new Date().toISOString();
   if (from === 'admin') { if (!ticket.firstResponseAt) ticket.firstResponseAt=new Date().toISOString(); if (ticket.status === 'open') ticket.status = 'in_progress'; }
   if(from==='user'&&['resolved','closed'].includes(ticket.status)){ticket.status='open';ticket.reopenedAt=new Date().toISOString();}
   writeAll(store); return ticket;
