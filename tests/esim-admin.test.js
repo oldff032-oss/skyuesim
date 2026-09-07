@@ -70,3 +70,20 @@ test('an unused assigned eSIM can be transferred in one step without moving bill
   assert.match(route,/Stripe-підписка попереднього власника не змінювалася/);
   assert.doesNotMatch(route,/cancelSubscription|stripeSubscriptionId:null/);
 });
+
+test('deleted provider profiles are archived and can issue a new same-package replacement', () => {
+  const page=read('admin-esims.html'),server=read('server.js'),provider=read('esimService.js');
+  const record=inventory.publicRecord({id:'old_profile',source:'pool',stateOverride:'quarantined',profile:{iccid:'89852240810733629810',packageCode:'EU20',smdpStatus:'DELETED',esimStatus:'GOT_RESOURCE'}});
+  assert.equal(record.state,'quarantined');
+  assert.equal(record.canAssign,false);
+  assert.equal(record.canReplace,true);
+  assert.match(page,/Архів провайдера/);
+  assert.match(page,/Видати нову eSIM/);
+  const route=server.slice(server.indexOf("app.post('/api/admin/esims/:id/replace-and-assign'"),server.indexOf("app.post('/api/admin/esims/:id/detach'"));
+  assert.match(route,/confirmProviderCharge/);
+  assert.match(route,/await provisionEsim/);
+  assert.match(route,/grantType:'admin_replacement'/);
+  assert.match(route,/stateOverride:'replaced'/);
+  assert.doesNotMatch(route,/createCheckout|createCustomPackageCheckout/);
+  assert.match(provider,/transactionId: suppliedTransactionId/);
+});

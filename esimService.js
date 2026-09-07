@@ -336,7 +336,7 @@ function profileToEsim(profile, orderNo, plan) {
   };
 }
 
-async function provisionEsim({ email, plan, packageCode: suppliedPackageCode = '', dataLimitGb: suppliedDataLimitGb = null }) {
+async function provisionEsim({ email, plan, packageCode: suppliedPackageCode = '', dataLimitGb: suppliedDataLimitGb = null, transactionId: suppliedTransactionId = '' }) {
   if (!email || typeof email !== 'string') {
     throw new EsimAccessError('A customer email is required.', { code: 'EMAIL_REQUIRED' });
   }
@@ -352,7 +352,8 @@ async function provisionEsim({ email, plan, packageCode: suppliedPackageCode = '
 
   const packageCode = suppliedPackageCode || packageCodeFor(plan);
   if (!/^[A-Za-z0-9_-]{3,80}$/.test(packageCode)) throw new EsimAccessError('Invalid package code.', { code: 'PACKAGE_CODE_INVALID' });
-  const requestId = transactionId();
+  const requestId = suppliedTransactionId || transactionId();
+  if (!/^[A-Za-z0-9_-]{8,50}$/.test(requestId)) throw new EsimAccessError('Invalid eSIM order transaction ID.', { code: 'TRANSACTION_ID_INVALID' });
   log('creating_order', { email: mask(email, 3), plan, packageCode, transactionId: requestId });
 
   const order = await esimAccessRequest('/api/v1/open/esim/order', {

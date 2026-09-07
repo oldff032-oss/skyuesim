@@ -19,7 +19,7 @@ function profileState(esim = {}, override = '') {
   const forced = upper(override || esim.lifecycleState);
   const smdp = upper(esim.smdpStatus);
   const provider = upper(esim.esimStatus || esim.status);
-  if (['REVOKED', 'CANCELLED', 'CANCELED', 'DETACHED', 'QUARANTINED'].includes(forced)) return forced === 'CANCELED' ? 'cancelled' : forced.toLowerCase();
+  if (['REVOKED', 'CANCELLED', 'CANCELED', 'DETACHED', 'QUARANTINED', 'REPLACED'].includes(forced)) return forced === 'CANCELED' ? 'cancelled' : forced.toLowerCase();
   if (provider.includes('REVOK')) return 'revoked';
   if (provider.includes('CANCEL')) return 'cancelled';
   if (provider.includes('EXPIRED')) return 'expired';
@@ -36,7 +36,7 @@ const labels = {
   available: 'Готова до встановлення', active: 'Використовується', installed: 'Встановлена', suspended: 'Призупинена',
   used_up: 'Пакет вичерпано', expired: 'Строк завершено', deleted_from_device: 'Видалена з пристрою',
   cancelled: 'Скасована з поверненням', revoked: 'Відкликана назавжди', detached: 'Відв’язана',
-  quarantined: 'Потребує перевірки', unknown: 'Статус не підтверджено',
+  quarantined: 'Не можна повторно видати', replaced: 'Замінена новою eSIM', unknown: 'Статус не підтверджено',
 };
 
 function maskReference(value, visible = 5) {
@@ -48,20 +48,24 @@ function maskReference(value, visible = 5) {
 
 function capabilities(state, source) {
   const current = source === 'current';
+  const pool = source === 'pool';
   return {
-    canAssign: source === 'pool' && state === 'available',
+    canAssign: pool && state === 'available',
     canTransfer: current && state === 'available',
+    canReplace: pool && ['deleted_from_device', 'revoked', 'expired', 'used_up', 'cancelled', 'quarantined'].includes(state),
     canDetach: current && state === 'available',
     canCancel: ['current', 'pool'].includes(source) && state === 'available',
     canSuspend: current && ['active', 'installed'].includes(state),
     canUnsuspend: current && state === 'suspended',
     canRevoke: ['current', 'pool'].includes(source) && ['active', 'installed', 'suspended', 'used_up', 'unknown', 'quarantined'].includes(state),
-    canSync: ['current', 'pool', 'purchase'].includes(source) && !['revoked', 'cancelled'].includes(state),
+    canSync: ['current', 'pool', 'purchase'].includes(source) && !['revoked', 'cancelled', 'replaced'].includes(state),
   };
 }
 
 function publicRecord(record) {
   const state = profileState(record.profile, record.stateOverride);
+  const actions = capabilities(state, record.source);
+  actions.canReplace = actions.canReplace && !record.replacementIssuedAt && Boolean(record.profile?.packageCode || ['basic', 'standard', 'unlimited'].includes(record.plan));
   return {
     id: record.id,
     source: record.source,
@@ -73,6 +77,8 @@ function publicRecord(record) {
     recipientName: record.recipientName || null,
     plan: record.plan || null,
     packageName: record.packageName || null,
+    hasReplacementPackage: Boolean(record.profile?.packageCode || ['basic', 'standard', 'unlimited'].includes(record.plan)),
+    replacementIssuedAt: record.replacementIssuedAt || null,
     purchaseId: record.purchaseId || null,
     provider: record.profile?.provider || null,
     iccidLast4: clean(record.profile?.iccid).slice(-4) || null,
@@ -83,7 +89,7 @@ function publicRecord(record) {
     activateTime: record.profile?.activateTime || null,
     expiredTime: record.profile?.expiredTime || null,
     lastUpdateTime: record.profile?.lastUpdateTime || record.profile?.recoveredAt || record.storedAt || null,
-    ...capabilities(state, record.source),
+    ...actions,
   };
 }
 
