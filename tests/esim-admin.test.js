@@ -105,3 +105,17 @@ test('a profile deleted from the first phone can be transferred only through a f
   assert.match(route,/status:sourceOwner\.status==='blocked'\?'blocked':'esim_transferred'/);
   assert.match(route,/Використану eSIM замінено новим профілем і передано іншому користувачу/);
 });
+
+test('archived eSIM transfer stays visible when provider sync omitted the package code', () => {
+  const records=inventory.collectInventory({
+    'first@example.com':{email:'first@example.com',purchases:[{id:'purchase_1',iccid:'89852240810733629810',packageCode:'EU20GB30D',packageName:'Europe 20GB',dataLimitGb:20,durationDays:30}]},
+  },[{id:'archived_1',previousOwnerEmail:'first@example.com',purchaseId:'purchase_1',stateOverride:'revoked',profile:{iccid:'89852240810733629810',esimStatus:'REVOKED'}}]);
+  const record=inventory.publicRecord(records[0]),page=read('admin-esims.html'),server=read('server.js');
+  assert.equal(record.state,'revoked');
+  assert.equal(record.hasReplacementPackage,true);
+  assert.equal(record.canReplace,true);
+  assert.match(page,/refreshAdminIdentity/);
+  assert.match(page,/needsFreshProfile/);
+  assert.match(page,/Код цього пакета з eSIM Access/);
+  assert.match(server,/record\.profile\?\.packageCode\|\|req\.body\?\.packageCode/);
+});

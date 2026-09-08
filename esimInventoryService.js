@@ -96,6 +96,21 @@ function publicRecord(record) {
 function collectInventory(users = {}, pool = []) {
   const records = new Map();
   const priorities = { current: 100, family: 90, pool: 80, history: 60, purchase: 20 };
+  const userFor = email => users?.[clean(email).toLowerCase()] || null;
+  const matchingPurchase = (user, esim, purchaseId = '') => {
+    const purchases = Array.isArray(user?.purchases) ? user.purchases : [];
+    return purchases.find(item => purchaseId && item.id === purchaseId)
+      || purchases.find(item => [item.iccid, item.esimOrderNo, item.esimTranNo].filter(Boolean).some(value => [esim?.iccid, esim?.orderNo, esim?.esimTranNo].includes(value)))
+      || null;
+  };
+  const withPurchasePackage = (profile, purchase) => ({
+    ...profile,
+    packageCode: profile?.packageCode || purchase?.packageCode || null,
+    packageName: profile?.packageName || purchase?.packageName || null,
+    dataLimitGb: profile?.dataLimitGb ?? purchase?.dataLimitGb ?? null,
+    durationDays: profile?.durationDays ?? purchase?.durationDays ?? null,
+    location: profile?.location || purchase?.location || null,
+  });
   const add = record => {
     const id = record.id || profileId(record.profile);
     if (!id) return;
@@ -104,19 +119,25 @@ function collectInventory(users = {}, pool = []) {
     if (!previous || priorities[next.source] > priorities[previous.source]) records.set(id, next);
   };
 
-  for (const item of Array.isArray(pool) ? pool : []) add({ ...item, source: 'pool' });
+  for (const item of Array.isArray(pool) ? pool : []) {
+    const previousUser=userFor(item.ownerEmail || item.previousOwnerEmail),purchase=matchingPurchase(previousUser,item.profile,item.purchaseId);
+    add({ ...item, source:'pool', packageName:item.packageName||purchase?.packageName||null, profile:withPurchasePackage(item.profile,purchase) });
+  }
   for (const user of Object.values(users || {})) {
     const purchases = Array.isArray(user.purchases) ? user.purchases : [];
-    const purchaseFor = esim => purchases.find(item => [item.iccid, item.esimOrderNo, item.esimTranNo].filter(Boolean).some(value => [esim?.iccid, esim?.orderNo, esim?.esimTranNo].includes(value))) || null;
+    const purchaseFor = (esim,purchaseId='') => matchingPurchase(user,esim,purchaseId);
     if (user.esim) {
       const purchase = purchaseFor(user.esim);
-      add({ source:'current', ownerEmail:user.email, ownerHasPaidSubscription:Boolean(user.stripeSubscriptionId), plan:user.esim.plan || user.plan, packageName:user.esim.packageName || purchase?.packageName || null, purchaseId:purchase?.id || null, profile:user.esim });
+      add({ source:'current', ownerEmail:user.email, ownerHasPaidSubscription:Boolean(user.stripeSubscriptionId), plan:user.esim.plan || user.plan, packageName:user.esim.packageName || purchase?.packageName || null, purchaseId:purchase?.id || null, profile:withPurchasePackage(user.esim,purchase) });
     }
     for (const shared of user.sharedEsims || []) add({ source:'family', ownerEmail:user.email, recipientName:shared.recipientName || null, plan:shared.plan || user.plan, packageName:shared.packageName || null, purchaseId:shared.purchaseId || null, profile:shared.esim });
-    for (const entry of user.esimHistory || []) add({ source:'history', ownerEmail:user.email, plan:entry.plan || null, packageName:entry.packageName || null, purchaseId:entry.purchaseId || null, profile:entry.esim || entry });
+    for (const entry of user.esimHistory || []) {
+      const profile=entry.esim||entry,purchase=purchaseFor(profile,entry.purchaseId);
+      add({ source:'history', ownerEmail:user.email, plan:entry.plan || purchase?.plan || null, packageName:entry.packageName || purchase?.packageName || null, purchaseId:entry.purchaseId || purchase?.id || null, profile:withPurchasePackage(profile,purchase) });
+    }
     for (const purchase of purchases) {
       if (!purchase.iccid && !purchase.esimOrderNo && !purchase.esimTranNo) continue;
-      add({ source:'purchase', ownerEmail:user.email, plan:purchase.plan || user.plan, packageName:purchase.packageName || null, purchaseId:purchase.id || null, profile:{ iccid:purchase.iccid, orderNo:purchase.esimOrderNo, esimTranNo:purchase.esimTranNo, provider:'esim-access' } });
+      add({ source:'purchase', ownerEmail:user.email, plan:purchase.plan || user.plan, packageName:purchase.packageName || null, purchaseId:purchase.id || null, profile:{ iccid:purchase.iccid, orderNo:purchase.esimOrderNo, esimTranNo:purchase.esimTranNo, provider:'esim-access', packageCode:purchase.packageCode||null, packageName:purchase.packageName||null, dataLimitGb:purchase.dataLimitGb??null, durationDays:purchase.durationDays??null, location:purchase.location||null } });
     }
   }
   return [...records.values()].sort((a, b) => new Date(b.profile?.lastUpdateTime || b.storedAt || 0) - new Date(a.profile?.lastUpdateTime || a.storedAt || 0));

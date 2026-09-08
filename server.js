@@ -2324,7 +2324,8 @@ app.post('/api/admin/esims/:id/replace-and-assign',adminAuth.requireAdmin,adminA
   if(!target&&!authStore.readAll().users?.[targetEmail])return res.status(404).json({error:'Користувача-отримувача не знайдено'});
   if(target?.status==='blocked')return res.status(409).json({error:'Акаунт користувача заблоковано'});
   if(target?.esim)return res.status(409).json({error:'У користувача вже є eSIM. Спочатку звільніть його поточний профіль.'});
-  const packageCode=String(record.profile?.packageCode||'').trim(),plan=record.plan||target?.plan||'custom';
+  const packageCode=String(record.profile?.packageCode||req.body?.packageCode||'').trim(),plan=record.plan||target?.plan||'custom';
+  if(packageCode&&!/^[A-Za-z0-9_-]{3,80}$/.test(packageCode))return res.status(400).json({error:'Некоректний packageCode нового профілю'});
   if(!packageCode&&!['basic','standard','unlimited'].includes(plan))return res.status(409).json({error:'Провайдер не повернув packageCode старого пакета. Синхронізуйте eSIM або виберіть пакет вручну в каталозі.'});
   if(esimAdminActionsInProgress.has(id))return res.status(409).json({error:'Для цього запису вже виконується інша дія'});
   const reservationId=`${id}:replacement:${record.storedAt||record.profile?.lastUpdateTime||'initial'}`;
