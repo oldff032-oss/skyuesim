@@ -119,3 +119,13 @@ test('archived eSIM transfer stays visible when provider sync omitted the packag
   assert.match(page,/Код цього пакета з eSIM Access/);
   assert.match(server,/record\.profile\?\.packageCode\|\|req\.body\?\.packageCode/);
 });
+
+test('account deletion preserves package details needed to reissue a working QR', () => {
+  const server=read('server.js');
+  const route=server.slice(server.indexOf("app.delete('/api/admin/users/:email'"),server.indexOf("app.post('/api/admin/users/:email/revoke-sessions'"));
+  assert.match(route,/const archivedProfile=/);
+  assert.match(route,/packageCode:user\.esim\.packageCode\|\|purchase\?\.packageCode/);
+  assert.match(route,/remainingGb:user\.esim\.remainingGb/);
+  assert.match(route,/providerState==='available'\?null/);
+  assert.match(route,/Передати з новим QR/);
+});

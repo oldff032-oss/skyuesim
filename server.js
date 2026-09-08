@@ -2565,8 +2565,10 @@ app.delete('/api/admin/users/:email', adminAuth.requireAdmin, adminAuth.requireR
     operationsStore.save();
 
     if(user?.esim){
-      const profileId=esimInventory.profileId(user.esim);
-      if(profileId)putEsimInPool({id:profileId,profile:user.esim,plan:user.plan||null,packageName:purchaseForProfile(user,user.esim)?.packageName||null,purchaseId:purchaseForProfile(user,user.esim)?.id||null,previousOwnerEmail:email,stateOverride:'quarantined',storedAt:new Date().toISOString()});
+      const profileId=esimInventory.profileId(user.esim),purchase=purchaseForProfile(user,user.esim),providerState=esimInventory.profileState(user.esim);
+      const archivedProfile={...user.esim,packageCode:user.esim.packageCode||purchase?.packageCode||null,packageName:user.esim.packageName||purchase?.packageName||null,dataLimitGb:user.esim.dataLimitGb??purchase?.dataLimitGb??null,durationDays:user.esim.durationDays??purchase?.durationDays??null,location:user.esim.location||purchase?.location||null,remainingGb:user.esim.remainingGb??(user.esim.dataLimitGb!=null?Math.max(0,Number(user.esim.dataLimitGb)-Number(user.esim.usedGb||0)):null)};
+      const stateOverride=providerState==='available'?null:providerState==='deleted_from_device'?'deleted_from_device':'quarantined';
+      if(profileId)putEsimInPool({id:profileId,profile:archivedProfile,plan:user.plan||null,packageName:archivedProfile.packageName||null,purchaseId:purchase?.id||null,previousOwnerEmail:email,stateOverride,accountDeletedAt:new Date().toISOString(),storedAt:new Date().toISOString()});
     }
     deleteUser(email);
     for (const related of Object.values(getAllUsers())) {
@@ -2588,7 +2590,7 @@ app.delete('/api/admin/users/:email', adminAuth.requireAdmin, adminAuth.requireR
       stripeSubscriptionCanceled,
       stripeCustomerDeleted,
       removed: { sessions: authRemoval.sessions, pushSubscriptions, tickets },
-      providerEsimNote: user?.esim ? 'Профіль eSIM відв’язано від застосунку та збережено в розділі «Керування eSIM» зі статусом «Потребує перевірки». Для припинення інтернету відкличте його у провайдера перед видаленням акаунта.' : null,
+      providerEsimNote: user?.esim ? 'Профіль eSIM і дані пакета збережено в «Керуванні eSIM». Невстановлений профіль можна передати напряму. Для вже встановленого профілю потрібно створити новий QR через «Передати з новим QR»; це нове замовлення з балансу eSIM Access.' : null,
     });
   } catch (error) {
     console.error(`[admin delete user] ${email}:`, error.message);
