@@ -407,6 +407,24 @@ async function recoverEsim({ iccid, plan }) {
   return esim;
 }
 
+// Import a support-issued replacement by its exact provider order number.
+// This is read-only at eSIM Access and never creates or charges a new order.
+async function recoverEsimByOrderNo({ orderNo, plan = 'custom' }) {
+  const reference = String(orderNo || '').trim();
+  if (isConfiguredMockMode()) {
+    throw new EsimAccessError('Cannot recover a real eSIM while mock mode is enabled.', { code: 'MOCK_MODE' });
+  }
+  if (!/^[A-Za-z0-9_-]{6,80}$/.test(reference)) {
+    throw new EsimAccessError('A valid provider order number is required.', { code: 'ORDER_NUMBER_REQUIRED' });
+  }
+  const response = await queryProfiles({ orderNo: reference });
+  const profile = response?.obj?.esimList?.[0];
+  if (!profile) throw new EsimAccessError('eSIM Access did not find this order.', { code: 'PROFILE_NOT_FOUND' });
+  const esim = profileToEsim(profile, profile.orderNo || reference, plan);
+  log('order_profile_recovered', { orderNo: mask(esim.orderNo), iccid: mask(esim.iccid) });
+  return esim;
+}
+
 async function changeProfileState(action, { esimTranNo = '', iccid = '' } = {}) {
   const allowed = new Set(['cancel', 'revoke', 'suspend', 'unsuspend']);
   if (!allowed.has(action)) throw new EsimAccessError('Unsupported eSIM action.', { code: 'ACTION_INVALID' });
@@ -530,4 +548,4 @@ async function manageProfile(iccid, action) {
   await esimAccessRequest('/api/v1/open/esim/' + action, {esimTranNo:current.esimTranNo});
   return {accepted:true};
 }
-module.exports = { provisionEsim, checkUsage, recoverEsim, topupEsim, listPackages, findRenewalTopup, cancelEsim, revokeEsim, suspendEsim, unsuspendEsim, listAllocatedEsims, listOwnedProfiles, manageProfile, profileToEsim };
+module.exports = { provisionEsim, checkUsage, recoverEsim, recoverEsimByOrderNo, topupEsim, listPackages, findRenewalTopup, cancelEsim, revokeEsim, suspendEsim, unsuspendEsim, listAllocatedEsims, listOwnedProfiles, manageProfile, profileToEsim };

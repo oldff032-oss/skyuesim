@@ -11,7 +11,7 @@ const { generateRegistrationOptions, verifyRegistrationResponse } = require('@si
 
 const { createCheckoutSession, createCustomPackageCheckout, createMobileTopupCheckout, createBillingPortalSession, cancelSubscription, cancelSubscriptionAtPeriodEnd, cancelAllSubscriptionsForCustomers, deleteStripeCustomer, constructWebhookEvent, getNextBillingDate, getBillingHistory, getRecoveryPaymentEvidence, findCustomerIdsByEmail, resolveStripeCustomerProfile, getCustomerEmail, getSubscriptionStateByEmail, listCompletedCheckoutPurchasesByEmail, getCheckoutPurchaseDetails, listRefundablePaymentsByEmail, refundPayment } = require('./stripeService');
 const crypto = require('crypto');
-const { provisionEsim, checkUsage, recoverEsim, topupEsim, listPackages, findRenewalTopup, cancelEsim, revokeEsim, suspendEsim, unsuspendEsim, listAllocatedEsims } = require('./esimService');
+const { provisionEsim, checkUsage, recoverEsim, recoverEsimByOrderNo, topupEsim, listPackages, findRenewalTopup, cancelEsim, revokeEsim, suspendEsim, unsuspendEsim, listAllocatedEsims } = require('./esimService');
 const esimInventory = require('./esimInventoryService');
 const { bootstrap: bootstrapUsers, getUser, saveUser, deleteUser, getUserByStripeCustomerId, getAllUsers } = require('./db');
 const storage = require('./persistentState');
@@ -2244,6 +2244,31 @@ app.post('/api/admin/esims/sync-provider',adminAuth.requireAdmin,adminAuth.requi
     res.json({ok:true,received:profiles.length,linked,pooled,review});
   }catch(error){res.status(502).json({error:`eSIM Access: ${error.message}`,code:error.code||'ESIM_INVENTORY_SYNC_FAILED'});}
   finally{esimAdminActionsInProgress.delete('provider_inventory');}
+});
+
+app.post('/api/admin/esims/import-provider-profile',adminAuth.requireAdmin,adminAuth.requireRole('super_admin'),adminAuth.requirePermission('esim.manage',{requireTwoFactor:true}),rateLimit('admin_esim_import',15*60*1000,20,req=>req.admin.email),async(req,res)=>{
+  const reference=String(req.body?.reference||'').trim();
+  if(reference.length<6||reference.length>500)return res.status(400).json({error:'Вставте Order No, ICCID або посилання, отримане від підтримки.'});
+  const iccid=reference.match(/(?:^|\D)(\d{15,22})(?:\D|$)/)?.[1]||'',orderNo=reference.match(/\bB[A-Za-z0-9_-]{7,79}\b/i)?.[0]||'';
+  try{
+    let profile=null;
+    if(iccid)profile=await recoverEsim({iccid,plan:'custom'});
+    else if(orderNo)profile=await recoverEsimByOrderNo({orderNo,plan:'custom'});
+    else{
+      const profiles=await listAllocatedEsims(),needle=reference.replace(/\s+/g,'');
+      profile=profiles.find(item=>[item.orderNo,item.esimTranNo,item.qrCodeUrl,item.activationCode].some(value=>String(value||'').replace(/\s+/g,'')===needle))||null;
+    }
+    if(!profile)return res.status(404).json({error:'Профіль за цим посиланням не знайдено у вашому API-акаунті. Попросіть підтримку надати Order No або ICCID нового профілю.',code:'SUPPORT_PROFILE_NOT_FOUND'});
+    const id=esimInventory.profileId(profile),existing=findEsimInventoryRecord(id);
+    if(!id)return res.status(409).json({error:'Провайдер повернув профіль без ICCID або номера транзакції.'});
+    if(['current','family'].includes(existing?.source))return res.status(409).json({error:`Ця eSIM уже прив’язана до ${existing.ownerEmail||'іншого користувача'}.`,code:'PROFILE_ALREADY_ASSIGNED'});
+    const state=esimInventory.profileState(profile),stateOverride=state==='available'?null:['revoked','cancelled'].includes(state)?state:'quarantined';
+    putEsimInPool({...(existing?.source==='pool'?existing:{}),id,profile,plan:existing?.plan||profile.plan||'custom',packageName:existing?.packageName||profile.packageName||null,purchaseId:existing?.purchaseId||null,previousOwnerEmail:existing?.previousOwnerEmail||null,stateOverride,importedFromSupportAt:new Date().toISOString(),importedBy:req.admin.email,storedAt:existing?.storedAt||new Date().toISOString()});
+    await operationsStore.saveNow();
+    const imported=findEsimInventoryRecord(id);
+    auditStore.log({adminEmail:req.admin.email,action:'support_esim_profile_imported',target:id,details:{state,orderEnding:String(profile.orderNo||'').slice(-6),iccidEnding:String(profile.iccid||'').slice(-4)}});
+    res.json({ok:true,state,record:esimInventory.publicRecord(imported),message:state==='available'?'Нову eSIM від підтримки додано на склад. Тепер натисніть «Видати безкоштовно».':'Профіль знайдено, але провайдер ще не позначив його готовим до нового встановлення. Він доданий до перевірки; кошти не списувалися.'});
+  }catch(error){res.status(error.status||502).json({error:`eSIM Access: ${error.message}`,code:error.code||'SUPPORT_PROFILE_IMPORT_FAILED'});}
 });
 
 app.post('/api/admin/esims/:id/sync',adminAuth.requireAdmin,adminAuth.requirePermission('esim.retry'),async(req,res)=>{

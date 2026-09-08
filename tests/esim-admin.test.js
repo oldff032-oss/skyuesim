@@ -135,3 +135,17 @@ test('account deletion preserves package details needed to reissue a working QR'
   assert.match(route,/providerState==='available'\?null/);
   assert.match(route,/Передати з новим QR/);
 });
+
+test('Super Admin can import an exact support replacement without creating another order', () => {
+  const server=read('server.js'),provider=read('esimService.js'),page=read('admin-esims.html');
+  const route=server.slice(server.indexOf("app.post('/api/admin/esims/import-provider-profile'"),server.indexOf("app.post('/api/admin/esims/:id/sync'"));
+  assert.match(page,/Імпортувати від підтримки/);
+  assert.match(page,/Order No, ICCID або нове посилання/);
+  assert.match(route,/requireRole\('super_admin'\)/);
+  assert.match(route,/requirePermission\('esim\.manage',\{requireTwoFactor:true\}\)/);
+  assert.match(route,/recoverEsimByOrderNo/);
+  assert.match(route,/listAllocatedEsims/);
+  assert.match(route,/putEsimInPool/);
+  assert.doesNotMatch(route,/provisionEsim|\/esim\/order|confirmProviderCharge/);
+  assert.match(provider,/async function recoverEsimByOrderNo/);
+});
