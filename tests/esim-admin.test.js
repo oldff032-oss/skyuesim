@@ -146,6 +146,10 @@ test('Super Admin can import an exact support replacement without creating anoth
   assert.match(route,/recoverEsimByOrderNo/);
   assert.match(route,/listAllocatedEsims/);
   assert.match(route,/putEsimInPool/);
+  assert.match(route,/type:'support_replacement'/);
+  assert.match(route,/saveUser\(targetEmail/);
+  assert.match(route,/support_profile_assigned/);
+  assert.match(route,/priceCents:0/);
   assert.doesNotMatch(route,/provisionEsim|\/esim\/order|confirmProviderCharge/);
   assert.match(provider,/async function recoverEsimByOrderNo/);
 });

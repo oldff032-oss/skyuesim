@@ -2247,22 +2247,41 @@ app.post('/api/admin/esims/sync-provider',adminAuth.requireAdmin,adminAuth.requi
 });
 
 app.post('/api/admin/esims/import-provider-profile',adminAuth.requireAdmin,adminAuth.requireRole('super_admin'),adminAuth.requirePermission('esim.manage',{requireTwoFactor:true}),rateLimit('admin_esim_import',15*60*1000,20,req=>req.admin.email),async(req,res)=>{
-  const reference=String(req.body?.reference||'').trim();
+  const reference=String(req.body?.reference||'').trim(),targetEmail=String(req.body?.email||'').trim().toLowerCase();
   if(reference.length<6||reference.length>500)return res.status(400).json({error:'Вставте Order No, ICCID або посилання, отримане від підтримки.'});
+  if(targetEmail&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(targetEmail))return res.status(400).json({error:'Вкажіть правильний email користувача.'});
   const iccid=reference.match(/(?:^|\D)(\d{15,22})(?:\D|$)/)?.[1]||'',orderNo=reference.match(/\bB[A-Za-z0-9_-]{7,79}\b/i)?.[0]||'';
   try{
     let profile=null;
     if(iccid)profile=await recoverEsim({iccid,plan:'custom'});
     else if(orderNo)profile=await recoverEsimByOrderNo({orderNo,plan:'custom'});
     else{
-      const profiles=await listAllocatedEsims(),needle=reference.replace(/\s+/g,'');
-      profile=profiles.find(item=>[item.orderNo,item.esimTranNo,item.qrCodeUrl,item.activationCode].some(value=>String(value||'').replace(/\s+/g,'')===needle))||null;
+      const profiles=await listAllocatedEsims(),needle=reference.replace(/\s+/g,''),needleToken=needle.split('/').pop()?.split(/[?#]/)[0]||'';
+      profile=profiles.find(item=>[item.orderNo,item.esimTranNo,item.qrCodeUrl,item.activationCode].some(value=>{const normalized=String(value||'').replace(/\s+/g,''),token=normalized.split('/').pop()?.split(/[?#]/)[0]||'';return normalized===needle||(needleToken.length>=16&&token===needleToken)}))||null;
     }
     if(!profile)return res.status(404).json({error:'Профіль за цим посиланням не знайдено у вашому API-акаунті. Попросіть підтримку надати Order No або ICCID нового профілю.',code:'SUPPORT_PROFILE_NOT_FOUND'});
     const id=esimInventory.profileId(profile),existing=findEsimInventoryRecord(id);
     if(!id)return res.status(409).json({error:'Провайдер повернув профіль без ICCID або номера транзакції.'});
+    if(existing?.source==='current'&&existing.ownerEmail===targetEmail)return res.json({ok:true,state:existing.state,record:esimInventory.publicRecord(existing),message:'Ця eSIM уже прив’язана до вибраного користувача.'});
     if(['current','family'].includes(existing?.source))return res.status(409).json({error:`Ця eSIM уже прив’язана до ${existing.ownerEmail||'іншого користувача'}.`,code:'PROFILE_ALREADY_ASSIGNED'});
-    const state=esimInventory.profileState(profile),stateOverride=state==='available'?null:['revoked','cancelled'].includes(state)?state:'quarantined';
+    const state=esimInventory.profileState(profile),assignableStates=['available','active','installed','suspended'];
+    if(targetEmail){
+      const target=getUser(targetEmail),registered=Boolean(target||authStore.readAll().users?.[targetEmail]);
+      if(!registered)return res.status(404).json({error:'Користувача з таким email не знайдено.'});
+      if(target?.status==='blocked')return res.status(409).json({error:'Акаунт користувача заблоковано.'});
+      if(target?.esim&&esimInventory.profileId(target.esim)!==id)return res.status(409).json({error:'У користувача вже є інша eSIM. Спочатку визначте долю поточного профілю.'});
+      if(!assignableStates.includes(state))return res.status(409).json({error:`Провайдер повернув статус «${state}». Цей профіль не можна безпечно прив’язати користувачу.`,code:'SUPPORT_PROFILE_NOT_ASSIGNABLE'});
+      const now=new Date().toISOString(),plan=target?.plan||profile.plan||'custom',packageName=profile.packageName||existing?.packageName||'eSIM від підтримки',grant={id:`grant_${crypto.randomUUID()}`,type:'support_replacement',profileId:id,packageName,priceCents:0,currency:null,grantedAt:now,grantedBy:req.admin.email};
+      saveUser(targetEmail,{email:targetEmail,status:'active',plan,esim:{...profile,plan,packageName,inventoryProfileId:id,grantType:'support_replacement',priceCents:0,assignedAt:now,assignedBy:req.admin.email},esimGrants:[grant,...(target?.esimGrants||[])].slice(0,100),lastEsimProvisionError:null});
+      if(existing?.source==='pool')removeEsimFromPool(id);
+      await storage.saveNow('users.json',getAllUsers());await operationsStore.saveNow();
+      const assigned=findEsimInventoryRecord(id);
+      recordEsimAssignment({profileId:id,action:'support_profile_assigned',fromEmail:null,toEmail:targetEmail,adminEmail:req.admin.email});
+      auditStore.log({adminEmail:req.admin.email,action:'support_esim_profile_assigned',target:targetEmail,details:{profileId:id,state,orderEnding:String(profile.orderNo||'').slice(-6),iccidEnding:String(profile.iccid||'').slice(-4),priceCents:0}});
+      sendToEmail(targetEmail,{title:'Вам додано eSIM',body:state==='available'?'Нову eSIM від підтримки прив’язано до вашого акаунта. Відкрийте «Моя eSIM» та встановіть профіль один раз.':'eSIM від підтримки прив’язано до вашого акаунта. У застосунку доступні статус, пакет і використання.',url:'/esim-management.html',tag:`support-esim-${id.slice(-8)}`}).catch(()=>{});
+      return res.json({ok:true,state,assignedTo:targetEmail,record:esimInventory.publicRecord(assigned),message:state==='available'?'eSIM від підтримки безкоштовно прив’язано до користувача. Новий QR доступний у «Моя eSIM».':'Уже встановлену eSIM від підтримки прив’язано до користувача. У застосунку з’являться пакет, статус і залишок.'});
+    }
+    const stateOverride=state==='available'?null:['revoked','cancelled'].includes(state)?state:'quarantined';
     putEsimInPool({...(existing?.source==='pool'?existing:{}),id,profile,plan:existing?.plan||profile.plan||'custom',packageName:existing?.packageName||profile.packageName||null,purchaseId:existing?.purchaseId||null,previousOwnerEmail:existing?.previousOwnerEmail||null,stateOverride,importedFromSupportAt:new Date().toISOString(),importedBy:req.admin.email,storedAt:existing?.storedAt||new Date().toISOString()});
     await operationsStore.saveNow();
     const imported=findEsimInventoryRecord(id);
