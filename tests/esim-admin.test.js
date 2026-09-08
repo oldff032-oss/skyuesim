@@ -42,6 +42,9 @@ test('customer activation hides already-consumed install credentials', () => {
   const server=read('server.js'),page=read('esim-management.html'),provider=read('esimService.js');
   assert.match(server,/activationCode: canInstall \? esim\.activationCode \|\| null : null/);
   assert.match(server,/qrCodeUrl: canInstall \? esim\.qrCodeUrl \|\| null : null/);
+  assert.match(server,/supportInstallUrl: canInstall \? esim\.supportInstallUrl \|\| null : null/);
+  assert.match(server,/delete result\.esim\.supportInstallUrl/);
+  assert.match(page,/Відкрити сторінку встановлення/);
   assert.match(page,/Цей код уже був завантажений на пристрій/);
   assert.match(provider,/smdpStatus: profile\.smdpStatus/);
   assert.match(provider,/esimStatus: profile\.esimStatus/);
@@ -140,11 +143,16 @@ test('Super Admin can import an exact support replacement without creating anoth
   const server=read('server.js'),provider=read('esimService.js'),page=read('admin-esims.html');
   const route=server.slice(server.indexOf("app.post('/api/admin/esims/import-provider-profile'"),server.indexOf("app.post('/api/admin/esims/:id/sync'"));
   assert.match(page,/Імпортувати від підтримки/);
-  assert.match(page,/Order No, ICCID або нове посилання/);
+  assert.match(page,/ПОВНЕ посилання підтримки/);
   assert.match(route,/requireRole\('super_admin'\)/);
   assert.match(route,/requirePermission\('esim\.manage',\{requireTwoFactor:true\}\)/);
   assert.match(route,/recoverEsimByOrderNo/);
   assert.match(route,/listAllocatedEsims/);
+  assert.match(route,/directLookupError/);
+  assert.match(route,/item\.iccid,item\.orderNo,item\.transactionId/);
+  assert.match(route,/confirmSupportLinkImport===true/);
+  assert.match(route,/safeSupportInstallUrl/);
+  assert.match(page,/p\\\.qrsim\\\.net/);
   assert.match(route,/putEsimInPool/);
   assert.match(route,/type:'support_replacement'/);
   assert.match(route,/saveUser\(targetEmail/);

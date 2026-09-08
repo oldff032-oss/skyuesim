@@ -74,7 +74,7 @@ function userStatusView(user) {
   if(!user)return null;
   const allowed=['email','displayName','avatarDataUrl','status','plan','createdAt','updatedAt','subscriptionPeriodEnd','lastRenewalError','lastEsimProvisionError'];
   const result=Object.fromEntries(allowed.filter(key=>user[key]!==undefined).map(key=>[key,user[key]]));
-  if(user.esim){const hidden=new Set(['pinHash','passkeyChallenge','passwordHash']);result.esim=Object.fromEntries(Object.entries(user.esim).filter(([key])=>!hidden.has(key)));const installState=esimInventory.profileState(user.esim);result.esim.installState=installState;result.esim.canInstall=installState==='available';result.esim.needsReplacement=['installed','active','deleted_from_device'].includes(installState);if(installState!=='available'){delete result.esim.activationCode;delete result.esim.qrCodeUrl;}}
+  if(user.esim){const hidden=new Set(['pinHash','passkeyChallenge','passwordHash']);result.esim=Object.fromEntries(Object.entries(user.esim).filter(([key])=>!hidden.has(key)));const installState=esimInventory.profileState(user.esim);result.esim.installState=installState;result.esim.canInstall=installState==='available';result.esim.needsReplacement=['installed','active','deleted_from_device'].includes(installState);if(installState!=='available'){delete result.esim.activationCode;delete result.esim.qrCodeUrl;delete result.esim.supportInstallUrl;}}
   if(user.pendingPlanChange){const change=user.pendingPlanChange;result.pendingPlanChange={purchaseId:change.purchaseId||null,packageName:change.packageName||null,dataLimitGb:change.dataLimitGb??null,durationDays:change.durationDays??null,location:change.location||null,scheduledFor:change.scheduledFor||null,paidAt:change.paidAt||null,status:change.status==='failed'?'failed':change.cancellationError?'needs_attention':'scheduled',error:change.status==='failed'?'Не вдалося активувати новий пакет. Звернися в підтримку.':null};}
   return result;
 }
@@ -82,7 +82,7 @@ function userStatusView(user) {
 function adminSubscriptionListView(user) {
   if(!user)return null;
   const safe=JSON.parse(JSON.stringify(user));
-  if(safe.esim){delete safe.esim.activationCode;delete safe.esim.qrCodeUrl;delete safe.esim.pinHash;delete safe.esim.passwordHash;delete safe.esim.passkeyChallenge;}
+  if(safe.esim){delete safe.esim.activationCode;delete safe.esim.qrCodeUrl;delete safe.esim.supportInstallUrl;delete safe.esim.pinHash;delete safe.esim.passwordHash;delete safe.esim.passkeyChallenge;}
   for(const item of safe.sharedEsims||[]){if(item.esim){delete item.esim.activationCode;delete item.esim.qrCodeUrl;}if(item.share)delete item.share.tokenHash;}
   for(const entry of safe.esimHistory||[]){const profile=entry.esim||entry;if(profile){delete profile.activationCode;delete profile.qrCodeUrl;}}
   return safe;
@@ -126,6 +126,13 @@ function purchaseForProfile(user,profile) {
 }
 
 function profileIdentifiers(profile) { return {esimTranNo:profile?.esimTranNo||'',iccid:profile?.iccid||''}; }
+function safeSupportInstallUrl(value) {
+  try {
+    const parsed=new URL(String(value||'').trim()),host=parsed.hostname.toLowerCase();
+    if(parsed.protocol!=='https:'||parsed.username||parsed.password||host!=='p.qrsim.net')return null;
+    parsed.hash='';return parsed.toString();
+  } catch { return null; }
+}
 const SUPPORT_MAX_FILES=5,SUPPORT_MAX_FILE_BYTES=2*1024*1024,SUPPORT_MAX_TOTAL_BYTES=8*1024*1024;
 function attachmentError(message){return Object.assign(new Error(message),{code:'INVALID_ATTACHMENT'});}
 function validateSupportAttachment(attachment){
@@ -1158,14 +1165,18 @@ app.get('/api/account/esim', requireUserSession, (req, res) => {
     status: user.status,
     esim: {
       iccid: esim.iccid || null,
+      provider: esim.provider || null,
       status: esim.status || 'unknown',
       providerStatus: esim.providerStatus || 'UNKNOWN',
       installationStatus: esim.installationStatus || 'UNKNOWN',
       installedBefore: esim.installedBefore === true,
       activationCode: canInstall ? esim.activationCode || null : null,
       qrCodeUrl: canInstall ? esim.qrCodeUrl || null : null,
+      supportInstallUrl: canInstall ? esim.supportInstallUrl || null : null,
       apn: esim.apn || null,
+      packageName: esim.packageName || null,
       dataLimitGb: esim.dataLimitGb ?? null,
+      durationDays: esim.durationDays ?? null,
       usedGb: esim.usedGb ?? 0,
       remainingGb: esim.remainingGb ?? null,
       activateTime: esim.activateTime || null,
@@ -2250,16 +2261,32 @@ app.post('/api/admin/esims/import-provider-profile',adminAuth.requireAdmin,admin
   const reference=String(req.body?.reference||'').trim(),targetEmail=String(req.body?.email||'').trim().toLowerCase();
   if(reference.length<6||reference.length>500)return res.status(400).json({error:'Вставте Order No, ICCID або посилання, отримане від підтримки.'});
   if(targetEmail&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(targetEmail))return res.status(400).json({error:'Вкажіть правильний email користувача.'});
-  const iccid=reference.match(/(?:^|\D)(\d{15,22})(?:\D|$)/)?.[1]||'',orderNo=reference.match(/\bB[A-Za-z0-9_-]{7,79}\b/i)?.[0]||'';
+  const manualIccid=String(req.body?.supportIccid||'').replace(/\s+/g,''),iccid=manualIccid||reference.match(/(?:^|\D)(\d{15,22})(?:\D|$)/)?.[1]||'',orderNo=reference.match(/\bB[A-Za-z0-9_-]{7,79}\b/i)?.[0]||'',supportInstallUrl=safeSupportInstallUrl(reference);
+  if(manualIccid&&!/^\d{15,22}$/.test(manualIccid))return res.status(400).json({error:'ICCID зі сторінки підтримки має містити 15–22 цифри.'});
   try{
-    let profile=null;
-    if(iccid)profile=await recoverEsim({iccid,plan:'custom'});
-    else if(orderNo)profile=await recoverEsimByOrderNo({orderNo,plan:'custom'});
-    else{
-      const profiles=await listAllocatedEsims(),needle=reference.replace(/\s+/g,''),needleToken=needle.split('/').pop()?.split(/[?#]/)[0]||'';
-      profile=profiles.find(item=>[item.orderNo,item.esimTranNo,item.qrCodeUrl,item.activationCode].some(value=>{const normalized=String(value||'').replace(/\s+/g,''),token=normalized.split('/').pop()?.split(/[?#]/)[0]||'';return normalized===needle||(needleToken.length>=16&&token===needleToken)}))||null;
+    let profile=null,directLookupError=null,inventoryLookupError=null;
+    // eSIM Access occasionally does not return support-issued replacements from
+    // the filtered ICCID endpoint even though they are present in the account's
+    // paginated profile list. A failed direct lookup must therefore fall back to
+    // the full read-only inventory instead of aborting the import.
+    if(iccid){try{profile=await recoverEsim({iccid,plan:'custom'});}catch(error){directLookupError=error;}}
+    if(!profile&&orderNo){try{profile=await recoverEsimByOrderNo({orderNo,plan:'custom'});}catch(error){directLookupError=error;}}
+    if(!profile){
+      try{
+        const profiles=await listAllocatedEsims(),needle=reference.replace(/\s+/g,''),needleToken=needle.split('/').pop()?.split(/[?#]/)[0]||'';
+        profile=profiles.find(item=>[item.iccid,item.orderNo,item.transactionId,item.esimTranNo,item.qrCodeUrl,item.activationCode].some(value=>{const normalized=String(value||'').replace(/\s+/g,''),token=normalized.split('/').pop()?.split(/[?#]/)[0]||'';return normalized===needle||(needleToken.length>=16&&token===needleToken)}))||null;
+      }catch(error){inventoryLookupError=error;}
     }
-    if(!profile)return res.status(404).json({error:'Профіль за цим посиланням не знайдено у вашому API-акаунті. Попросіть підтримку надати Order No або ICCID нового профілю.',code:'SUPPORT_PROFILE_NOT_FOUND'});
+    if(!profile){
+      if(supportInstallUrl&&req.body?.confirmSupportLinkImport===true&&/^\d{15,22}$/.test(iccid)&&targetEmail){
+        const packageName=String(req.body?.packageName||'eSIM від підтримки').replace(/[\r\n<>]/g,' ').trim().slice(0,120)||'eSIM від підтримки',gbMatch=packageName.match(/(\d+(?:[.,]\d+)?)\s*GB/i),daysMatch=packageName.match(/(\d+)\s*(?:дн|day)/i),now=new Date().toISOString();
+        profile={status:'active',providerStatus:'GOT_RESOURCE',installationStatus:'RELEASED',installedBefore:false,canInstall:true,usedGb:0,remainingGb:gbMatch?Number(gbMatch[1].replace(',','.')):null,orderNo:`SUPPORT-${crypto.createHash('sha256').update(supportInstallUrl).digest('hex').slice(0,16)}`,transactionId:null,esimTranNo:null,iccid,activationCode:null,qrCodeUrl:null,supportInstallUrl,dataLimitGb:gbMatch?Number(gbMatch[1].replace(',','.')):null,provider:'support-link',apn:String(req.body?.apn||'').replace(/[^A-Za-z0-9._-]/g,'').slice(0,100)||null,expiredTime:null,activateTime:null,esimStatus:'GOT_RESOURCE',smdpStatus:'RELEASED',eidBound:false,lastUpdateTime:now,packageName,durationDays:daysMatch?Number(daysMatch[1]):null,manuallyImportedFromSupport:true};
+      }
+    }
+    if(!profile){
+      const lookupError=inventoryLookupError||(directLookupError&&directLookupError.code!=='PROFILE_NOT_FOUND'?directLookupError:null);if(lookupError)throw lookupError;
+      return res.status(404).json({error:'eSIM Access не повернув цей новий профіль у ваш API-акаунт. Вставте повне посилання підтримки або попросіть підтримку прив’язати ICCID до вашого API-кабінету та надати Order No.',code:'SUPPORT_PROFILE_NOT_FOUND'});
+    }
     const id=esimInventory.profileId(profile),existing=findEsimInventoryRecord(id);
     if(!id)return res.status(409).json({error:'Провайдер повернув профіль без ICCID або номера транзакції.'});
     if(existing?.source==='current'&&existing.ownerEmail===targetEmail)return res.json({ok:true,state:existing.state,record:esimInventory.publicRecord(existing),message:'Ця eSIM уже прив’язана до вибраного користувача.'});
@@ -2271,7 +2298,7 @@ app.post('/api/admin/esims/import-provider-profile',adminAuth.requireAdmin,admin
       if(target?.status==='blocked')return res.status(409).json({error:'Акаунт користувача заблоковано.'});
       if(target?.esim&&esimInventory.profileId(target.esim)!==id)return res.status(409).json({error:'У користувача вже є інша eSIM. Спочатку визначте долю поточного профілю.'});
       if(!assignableStates.includes(state))return res.status(409).json({error:`Провайдер повернув статус «${state}». Цей профіль не можна безпечно прив’язати користувачу.`,code:'SUPPORT_PROFILE_NOT_ASSIGNABLE'});
-      const now=new Date().toISOString(),plan=target?.plan||profile.plan||'custom',packageName=profile.packageName||existing?.packageName||'eSIM від підтримки',grant={id:`grant_${crypto.randomUUID()}`,type:'support_replacement',profileId:id,packageName,priceCents:0,currency:null,grantedAt:now,grantedBy:req.admin.email};
+      const now=new Date().toISOString(),plan=profile.manuallyImportedFromSupport?'custom':target?.plan||profile.plan||'custom',packageName=profile.packageName||existing?.packageName||'eSIM від підтримки',grant={id:`grant_${crypto.randomUUID()}`,type:'support_replacement',profileId:id,packageName,priceCents:0,currency:null,grantedAt:now,grantedBy:req.admin.email};
       saveUser(targetEmail,{email:targetEmail,status:'active',plan,esim:{...profile,plan,packageName,inventoryProfileId:id,grantType:'support_replacement',priceCents:0,assignedAt:now,assignedBy:req.admin.email},esimGrants:[grant,...(target?.esimGrants||[])].slice(0,100),lastEsimProvisionError:null});
       if(existing?.source==='pool')removeEsimFromPool(id);
       await storage.saveNow('users.json',getAllUsers());await operationsStore.saveNow();
@@ -3308,6 +3335,7 @@ app.post('/api/account/email-change/confirm',requireUserSession,rateLimit('email
 app.post('/api/account/esim/recover',requireUserSession,rateLimit('self_esim_recovery',60*60*1000,3,req=>req.userEmail),async(req,res)=>{
   const user=getUser(req.userEmail);
   if(!user?.esim?.iccid||!user?.plan)return res.status(409).json({error:'Немає виданої eSIM для відновлення',code:'ESIM_NOT_ISSUED'});
+  if(user.esim.provider==='support-link')return res.json({ok:true,externalSupportProfile:true,esim:userStatusView({esim:user.esim}).esim,message:'Цю eSIM видала підтримка окремим захищеним посиланням. Статус встановлення перевіряється на сторінці підтримки.'});
   try{
     const esim=await recoverEsim({iccid:user.esim.iccid,plan:user.plan});
     const merged={...user.esim,...esim,recoveredAt:new Date().toISOString()};
