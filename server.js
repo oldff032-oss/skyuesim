@@ -2280,7 +2280,18 @@ app.post('/api/admin/esims/import-provider-profile',adminAuth.requireAdmin,admin
     if(!profile){
       if(supportInstallUrl&&req.body?.confirmSupportLinkImport===true&&/^\d{15,22}$/.test(iccid)&&targetEmail){
         const packageName=String(req.body?.packageName||'eSIM від підтримки').replace(/[\r\n<>]/g,' ').trim().slice(0,120)||'eSIM від підтримки',gbMatch=packageName.match(/(\d+(?:[.,]\d+)?)\s*GB/i),daysMatch=packageName.match(/(\d+)\s*(?:дн|day)/i),now=new Date().toISOString();
-        profile={status:'active',providerStatus:'GOT_RESOURCE',installationStatus:'RELEASED',installedBefore:false,canInstall:true,usedGb:0,remainingGb:gbMatch?Number(gbMatch[1].replace(',','.')):null,orderNo:`SUPPORT-${crypto.createHash('sha256').update(supportInstallUrl).digest('hex').slice(0,16)}`,transactionId:null,esimTranNo:null,iccid,activationCode:null,qrCodeUrl:null,supportInstallUrl,dataLimitGb:gbMatch?Number(gbMatch[1].replace(',','.')):null,provider:'support-link',apn:String(req.body?.apn||'').replace(/[^A-Za-z0-9._-]/g,'').slice(0,100)||null,expiredTime:null,activateTime:null,esimStatus:'GOT_RESOURCE',smdpStatus:'RELEASED',eidBound:false,lastUpdateTime:now,packageName,durationDays:daysMatch?Number(daysMatch[1]):null,manuallyImportedFromSupport:true};
+        const alreadyInstalled=req.body?.alreadyInstalled===true;
+        const dataLimitGb=gbMatch?Number(gbMatch[1].replace(',','.')):null;
+        profile={
+          status:'active',providerStatus:alreadyInstalled?'IN_USE':'GOT_RESOURCE',installationStatus:alreadyInstalled?'ENABLED':'RELEASED',
+          installedBefore:alreadyInstalled,canInstall:!alreadyInstalled,usedGb:0,remainingGb:dataLimitGb,
+          orderNo:`SUPPORT-${crypto.createHash('sha256').update(supportInstallUrl).digest('hex').slice(0,16)}`,
+          transactionId:null,esimTranNo:null,iccid,activationCode:null,qrCodeUrl:null,supportInstallUrl,dataLimitGb,
+          provider:'support-link',apn:String(req.body?.apn||'').replace(/[^A-Za-z0-9._-]/g,'').slice(0,100)||null,
+          expiredTime:null,activateTime:alreadyInstalled?now:null,esimStatus:alreadyInstalled?'IN_USE':'GOT_RESOURCE',
+          smdpStatus:alreadyInstalled?'ENABLED':'RELEASED',eidBound:alreadyInstalled,lastUpdateTime:now,packageName,
+          durationDays:daysMatch?Number(daysMatch[1]):null,manuallyImportedFromSupport:true
+        };
       }
     }
     if(!profile){

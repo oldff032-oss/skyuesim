@@ -151,6 +151,8 @@ test('Super Admin can import an exact support replacement without creating anoth
   assert.match(route,/directLookupError/);
   assert.match(route,/item\.iccid,item\.orderNo,item\.transactionId/);
   assert.match(route,/confirmSupportLinkImport===true/);
+  assert.match(route,/alreadyInstalled=req\.body\?\.alreadyInstalled===true/);
+  assert.match(page,/Василь уже встановив цю eSIM/);
   assert.match(route,/safeSupportInstallUrl/);
   assert.match(page,/p\\\.qrsim\\\.net/);
   assert.match(route,/putEsimInPool/);
