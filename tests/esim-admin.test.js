@@ -49,7 +49,7 @@ test('customer activation hides already-consumed install credentials', () => {
 
 test('Super Admin can grant a provider-confirmed free eSIM without Stripe', () => {
   const server=read('server.js'),page=read('admin-esims.html');
-  const route=server.slice(server.indexOf("app.post('/api/admin/esims/:id/assign'"),server.indexOf("app.post('/api/admin/esims/:id/detach'"));
+  const route=server.slice(server.indexOf("app.post('/api/admin/esims/:id/assign'"),server.indexOf("app.post('/api/admin/esims/:id/replace-and-assign'"));
   assert.match(page,/Видати eSIM безкоштовно/);
   assert.match(page,/Оплата Stripe і підписка не створюються/);
   assert.match(route,/grantType=transferred\?'admin_transfer':'admin_promo'/);
@@ -64,7 +64,7 @@ test('an unused assigned eSIM can be transferred in one step without moving bill
   assert.equal(record.ownerHasPaidSubscription,true);
   assert.match(page,/Передати іншому/);
   assert.match(page,/Stripe-підписка поточного власника не переноситься/);
-  const route=server.slice(server.indexOf("app.post('/api/admin/esims/:id/assign'"),server.indexOf("app.post('/api/admin/esims/:id/detach'"));
+  const route=server.slice(server.indexOf("app.post('/api/admin/esims/:id/assign'"),server.indexOf("app.post('/api/admin/esims/:id/replace-and-assign'"));
   assert.match(route,/reason:'admin_transfer'/);
   assert.match(route,/status:sourceOwner\?\.status==='blocked'\?'blocked':'esim_transferred'/);
   assert.match(route,/Stripe-підписка попереднього власника не змінювалася/);
@@ -88,4 +88,20 @@ test('deleted provider profiles are archived and can issue a new same-package re
   assert.doesNotMatch(route,/createCheckout|createCustomPackageCheckout/);
   assert.match(provider,/transactionId: suppliedTransactionId/);
   assert.match(page,/Сервер не підтвердив нову eSIM в акаунті/);
+});
+
+test('a profile deleted from the first phone can be transferred only through a fresh provider QR', () => {
+  const page=read('admin-esims.html'),client=read('admin-client.html'),server=read('server.js');
+  const record=inventory.publicRecord({id:'deleted_current',source:'current',ownerEmail:'first@example.com',profile:{iccid:'89852240810733629810',packageCode:'EU20',smdpStatus:'DELETED',esimStatus:'IN_USE'}});
+  assert.equal(record.state,'deleted_from_device');
+  assert.equal(record.canTransfer,false);
+  assert.equal(record.canReplace,true);
+  assert.match(page,/Передати з новим QR/);
+  assert.match(page,/Старий QR уже використаний/);
+  assert.match(client,/transferEsim/);
+  const route=server.slice(server.indexOf("app.post('/api/admin/esims/:id/replace-and-assign'"),server.indexOf("app.post('/api/admin/esims/:id/detach'"));
+  assert.match(route,/\['pool','current'\]\.includes\(record\.source\)/);
+  assert.match(route,/reason:'admin_replacement_transfer'/);
+  assert.match(route,/status:sourceOwner\.status==='blocked'\?'blocked':'esim_transferred'/);
+  assert.match(route,/Використану eSIM замінено новим профілем і передано іншому користувачу/);
 });

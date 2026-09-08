@@ -52,7 +52,7 @@ function capabilities(state, source) {
   return {
     canAssign: pool && state === 'available',
     canTransfer: current && state === 'available',
-    canReplace: pool && ['deleted_from_device', 'revoked', 'expired', 'used_up', 'cancelled', 'quarantined'].includes(state),
+    canReplace: (current || pool) && ['deleted_from_device', 'revoked', 'expired', 'used_up', 'cancelled', 'quarantined'].includes(state),
     canDetach: current && state === 'available',
     canCancel: ['current', 'pool'].includes(source) && state === 'available',
     canSuspend: current && ['active', 'installed'].includes(state),
