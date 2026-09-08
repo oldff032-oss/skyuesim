@@ -15,7 +15,7 @@ function requireAdminAuth(){
   ];
   const allowed=page=>!page[2]||role==='super_admin';
   const currentSection=contextSections.find(section=>section.pages.some(page=>page[0]===current));
-  const active=href=>current===href||currentSection?.root===href;
+  const active=href=>current===href||(current==='admin-client.html'&&href==='admin-users.html')||currentSection?.root===href;
   const primary=[
     ['admin-dashboard.html',svg('<path d="M3 11.5 12 4l9 7.5M5.5 10.5V20h13v-9.5"/>')+'Огляд'],
     ['admin-users.html',svg('<circle cx="9" cy="8" r="4"/><path d="M2.5 21a6.5 6.5 0 0 1 13 0M16 5.5a3.5 3.5 0 0 1 0 7M17 15a6 6 0 0 1 4.5 6"/>')+'Клієнти'],

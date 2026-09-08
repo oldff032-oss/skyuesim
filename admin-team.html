@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Команда — E7 Admin</title>
+<title>Команда й доступ — Signal Admin</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
@@ -17,12 +17,13 @@
   .role-badge.admin{ background:rgba(59,130,246,0.15); color:var(--blue); }
   .role-badge.support{ background:rgba(52,228,184,0.15); color:var(--success); }
   .role-badge.viewer{ background:rgba(136,145,168,0.15); color:var(--text-muted); }
+  .role-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-top:18px}.role-card{padding:14px}.role-card b{display:block;margin-bottom:6px}.role-card small{color:var(--text-muted);line-height:1.5}@media(max-width:900px){.role-grid{grid-template-columns:1fr 1fr}}@media(max-width:540px){.role-grid{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
   <div class="admin-shell">
     <aside class="admin-sidebar">
-      <div class="brand"><div class="mark" style="width:32px;height:32px;font-size:15px;">🛠️</div><span style="font-size:15px;">E7 Admin</span></div>
+      <div class="brand"><div class="mark" style="width:32px;height:32px;font-size:15px;">🛡️</div><span style="font-size:15px;">Signal Admin</span></div>
       <nav class="admin-nav">
         <a href="admin-dashboard.html">📊 Dashboard</a>
         <a href="admin-tickets.html">🎫 Support</a>
@@ -33,8 +34,9 @@
       </nav>
     </aside>
     <main class="admin-main">
-      <h1 style="font-size:22px;">Команда адмінів</h1>
-      <p class="lead">Ролі: Super Admin (повний доступ) · Admin (Users/Payments/eSIM/Support/Reports) · Support (тільки Support + дані користувача) · Viewer (лише перегляд)</p>
+      <h1 style="font-size:22px;">Команда й доступ</h1>
+      <p class="lead">Super Admin призначає ролі та окремі дозволи. Усі критичні зміни вимагають 2FA і потрапляють до журналу.</p>
+      <section class="role-grid"><div class="glass role-card"><b>Super Admin</b><small>Повний контроль системи, клієнтів, eSIM, оплат, команди й безпеки.</small></div><div class="glass role-card"><b>Admin</b><small>Клієнти, профілі, синхронізація, продажі, підтримка та входи — без критичних дій.</small></div><div class="glass role-card"><b>Support</b><small>Перегляд клієнта, звернення, внутрішні нотатки та повідомлення.</small></div><div class="glass role-card"><b>Viewer</b><small>Лише перегляд без будь-яких змін.</small></div></section>
 
       <div class="glass glass-card" style="margin-top:20px;">
         <div style="font-weight:700; font-size:14px; margin-bottom:12px;">Додати адміна</div>
@@ -134,7 +136,7 @@
       try{const res=await adminFetch(`/api/admin/team/${encodedEmail}/reset-2fa`,{method:'POST'}),data=await res.json();if(!res.ok)throw new Error(data.error||'Не вдалося скинути 2FA');alert('2FA скинуто. Працівник має увійти паролем і ввімкнути захист знову.');load()}catch(e){alert(e.message)}
     }
     async function editPermissions(email,current){
-      const all=['users.read','support.reply','refunds.manage','esim.retry','esim.manage','activation_code.read','broadcasts.manage','users.delete','backups.manage','security.manage','operations.manage','settings.manage'];
+      const all=['users.read','users.manage','support.reply','refunds.manage','esim.retry','esim.manage','activation_code.read','broadcasts.manage','users.delete','backups.manage','security.manage','operations.manage','settings.manage'];
       const value=prompt('Вкажіть дозволи через кому:\n'+all.join('\n'),current.join(', '));if(value===null)return;
       const permissions=value.split(',').map(x=>x.trim()).filter(x=>all.includes(x));
       try{const res=await adminFetch(`/api/admin/team/${encodeURIComponent(email)}/permissions`,{method:'PATCH',body:JSON.stringify({permissions})}),data=await res.json();if(!res.ok)throw new Error(data.error);alert('Права оновлено');load()}catch(e){alert(e.message)}

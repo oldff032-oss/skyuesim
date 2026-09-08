@@ -1553,7 +1553,10 @@ app.post('/api/admin/login/recover-2fa',async(req,res)=>{
 });
 
 app.get('/api/admin/me', adminAuth.requireAdmin, (req, res) => {
-  res.json(req.admin);
+  res.json({
+    ...req.admin,
+    permissions: adminAuth.permissionsFor(req.admin.email, req.admin.role),
+  });
 });
 
 app.get('/api/admin/security/2fa',adminAuth.requireAdmin,(req,res)=>res.json(adminAuth.twoFactorStatus(req.admin.email)));
@@ -1597,7 +1600,7 @@ app.get('/api/admin/assignees', adminAuth.requireAdmin, adminAuth.requireRole('s
   res.json(adminAuth.listAdmins().filter((admin) => !admin.blocked && admin.role === 'admin').map((admin) => ({ email: admin.email, role: admin.role })));
 });
 
-app.post('/api/admin/team', adminAuth.requireAdmin, adminAuth.requireRole('super_admin'), async (req, res) => {
+app.post('/api/admin/team', adminAuth.requireAdmin, adminAuth.requireRole('super_admin'), adminAuth.requirePermission('security.manage',{requireTwoFactor:true}), async (req, res) => {
   try {
     const { email, password, role } = req.body;
     if (!email || !password || !role) return res.status(400).json({ error: 'Потрібні email, password і role' });
@@ -1610,7 +1613,7 @@ app.post('/api/admin/team', adminAuth.requireAdmin, adminAuth.requireRole('super
   }
 });
 
-app.patch('/api/admin/team/:email/block', adminAuth.requireAdmin, adminAuth.requireRole('super_admin'), (req, res) => {
+app.patch('/api/admin/team/:email/block', adminAuth.requireAdmin, adminAuth.requireRole('super_admin'), adminAuth.requirePermission('security.manage',{requireTwoFactor:true}), (req, res) => {
   try {
     const result = adminAuth.setAdminBlocked({
       email: req.params.email,
@@ -1624,9 +1627,9 @@ app.patch('/api/admin/team/:email/block', adminAuth.requireAdmin, adminAuth.requ
   }
 });
 
-app.post('/api/admin/team/:email/reset-2fa',adminAuth.requireAdmin,adminAuth.requireRole('super_admin'),(req,res)=>{try{const result=adminAuth.resetTwoFactor({email:req.params.email,actorEmail:req.admin.email});auditStore.log({adminEmail:req.admin.email,action:'admin_2fa_reset',target:result.email});sendEmail({to:result.email,subject:'Вашу 2FA скинув Super Admin — Сигнал',html:emailTemplates.adminSecurityAlert({title:'Двофакторний захист скинуто',message:`Super Admin ${req.admin.email} скинув вашу 2FA та завершив усі активні сесії. Увійдіть знову й одразу підключіть захист.`})}).catch(error=>console.error('[2fa reset email]',error.message));res.json({ok:true,...result});}catch(error){res.status(400).json({error:error.message,code:error.code});}});
+app.post('/api/admin/team/:email/reset-2fa',adminAuth.requireAdmin,adminAuth.requireRole('super_admin'),adminAuth.requirePermission('security.manage',{requireTwoFactor:true}),(req,res)=>{try{const result=adminAuth.resetTwoFactor({email:req.params.email,actorEmail:req.admin.email});auditStore.log({adminEmail:req.admin.email,action:'admin_2fa_reset',target:result.email});sendEmail({to:result.email,subject:'Вашу 2FA скинув Super Admin — Сигнал',html:emailTemplates.adminSecurityAlert({title:'Двофакторний захист скинуто',message:`Super Admin ${req.admin.email} скинув вашу 2FA та завершив усі активні сесії. Увійдіть знову й одразу підключіть захист.`})}).catch(error=>console.error('[2fa reset email]',error.message));res.json({ok:true,...result});}catch(error){res.status(400).json({error:error.message,code:error.code});}});
 
-app.delete('/api/admin/team/:email', adminAuth.requireAdmin, adminAuth.requireRole('super_admin'), (req, res) => {
+app.delete('/api/admin/team/:email', adminAuth.requireAdmin, adminAuth.requireRole('super_admin'), adminAuth.requirePermission('security.manage',{requireTwoFactor:true}), (req, res) => {
   try {
     const email = req.params.email;
     adminAuth.deleteAdmin({ email, actorEmail: req.admin.email });
@@ -1895,7 +1898,7 @@ app.patch('/api/admin/feature-rules',adminAuth.requireAdmin,adminAuth.requirePer
 app.patch('/api/admin/provider-balance',adminAuth.requireAdmin,adminAuth.requirePermission('settings.manage'),async(req,res)=>{const amount=req.body?.amount==null?null:Number(req.body.amount),averageOrderCost=req.body?.averageOrderCost==null?null:Number(req.body.averageOrderCost);if((amount!=null&&!Number.isFinite(amount))||(averageOrderCost!=null&&(!Number.isFinite(averageOrderCost)||averageOrderCost<=0)))return res.status(400).json({error:'Вкажіть коректні числові значення'});const balance={amount,currency:String(req.body?.currency||'USD').slice(0,8),averageOrderCost,updatedAt:new Date().toISOString(),source:'manual'};operationsStore.store().providerBalance=balance;operationsStore.save();auditStore.log({adminEmail:req.admin.email,action:'provider_balance_updated',details:balance});const orders=amount!=null&&averageOrderCost>0?Math.floor(amount/averageOrderCost):null;if(orders!=null&&orders<10){for(const admin of adminAuth.listAdmins().filter(a=>a.role==='super_admin'&&!a.blocked))sendEmail({to:admin.email,subject:`${orders<3?'🚨':'⚠️'} Низький баланс eSIM Access`,html:emailTemplates.notification({title:orders<3?'Продажі призупинено':'Потрібно поповнити баланс',message:`Поточного балансу орієнтовно вистачить на ${orders} замовлень.`,actionUrl:'/admin-control-center.html#settings',actionLabel:'Відкрити баланс'})}).catch(()=>{});}res.json(balance);});
 app.patch('/api/admin/version-info',adminAuth.requireAdmin,adminAuth.requirePermission('settings.manage'),(req,res)=>{const state=operationsStore.store(),current=state.versionInfo,before={...current},entry=String(req.body?.change||'').trim();state.versionInfo={...current,frontend:String(req.body?.frontend||current.frontend).slice(0,40),backend:String(req.body?.backend||current.backend).slice(0,40),serviceWorker:String(req.body?.serviceWorker||current.serviceWorker).slice(0,40),cache:String(req.body?.cache||current.cache).slice(0,80),deployedAt:req.body?.deployedAt||new Date().toISOString(),changelog:entry?[{id:`change_${Date.now().toString(36)}`,version:String(req.body?.frontend||current.frontend),text:entry.slice(0,500),createdAt:new Date().toISOString(),by:req.admin.email},...(current.changelog||[])].slice(0,100):current.changelog};operationsStore.save();auditStore.log({adminEmail:req.admin.email,action:'version_info_updated',target:state.versionInfo.frontend,details:{before,after:state.versionInfo}});res.json(state.versionInfo);});
 app.post('/api/admin/daily-report/generate',adminAuth.requireAdmin,adminAuth.requirePermission('operations.manage'),(req,res)=>{const c=controlContext(),report=controlCenter.dailyReport(c);c.operations.dailyReports.unshift(report);c.operations.dailyReports=c.operations.dailyReports.slice(0,90);operationsStore.save();auditStore.log({adminEmail:req.admin.email,action:'daily_report_generated',details:{status:report.status}});res.json(report);});
-app.patch('/api/admin/team/:email/permissions',adminAuth.requireAdmin,adminAuth.requireRole('super_admin'),(req,res)=>{try{const result=adminAuth.setPermissions({email:req.params.email,permissions:req.body?.permissions});auditStore.log({adminEmail:req.admin.email,action:'admin_permissions_updated',target:result.email,details:{permissions:result.permissions}});res.json(result);}catch(error){res.status(400).json({error:error.message});}});
+app.patch('/api/admin/team/:email/permissions',adminAuth.requireAdmin,adminAuth.requireRole('super_admin'),adminAuth.requirePermission('security.manage',{requireTwoFactor:true}),(req,res)=>{try{const result=adminAuth.setPermissions({email:req.params.email,permissions:req.body?.permissions});auditStore.log({adminEmail:req.admin.email,action:'admin_permissions_updated',target:result.email,details:{permissions:result.permissions}});res.json(result);}catch(error){res.status(400).json({error:error.message});}});
 
 app.get('/api/admin/operations', adminAuth.requireAdmin, async (req, res) => {await operationsStore.refresh();res.json(operationsStore.store());});
 app.post('/api/admin/announcements', adminAuth.requireAdmin, adminAuth.requireRole('super_admin','admin'), async (req,res) => {
@@ -2027,7 +2030,7 @@ app.post('/api/admin/email-broadcasts/:audience',adminAuth.requireAdmin,adminAut
   res.json({ok:delivery.failed.length===0,...record});
 });
 app.delete('/api/admin/announcements/:id', adminAuth.requireAdmin, adminAuth.requireRole('super_admin','admin'), async (req,res)=>{ await operationsStore.refresh();const s=operationsStore.store(),found=s.announcements.find(a=>a.id===req.params.id);if(found?.type==='security'&&req.admin.role!=='super_admin')return res.status(403).json({error:'Режим безпеки може вимкнути лише Super Admin'});s.announcements=s.announcements.filter(a=>a.id!==req.params.id);await operationsStore.saveNow();auditStore.log({adminEmail:req.admin.email,action:'announcement_deleted',target:req.params.id});res.json({ok:true}); });
-app.post('/api/admin/users/:email/note', adminAuth.requireAdmin, adminAuth.requireRole('super_admin','admin','support'), (req,res)=>{ const text=String(req.body?.text||'').trim(); if(!text) return res.status(400).json({error:'Введіть нотатку'}); const s=operationsStore.store(); (s.notes[req.params.email] ||= []).push({text:text.slice(0,1000),by:req.admin.email,createdAt:new Date().toISOString()}); operationsStore.save(); auditStore.log({adminEmail:req.admin.email,action:'user_note_added',target:req.params.email}); res.json({ok:true}); });
+app.post('/api/admin/users/:email/note', adminAuth.requireAdmin, adminAuth.requireRole('super_admin','admin','support'), adminAuth.requirePermission('support.reply'), (req,res)=>{ const text=String(req.body?.text||'').trim(); if(!text) return res.status(400).json({error:'Введіть нотатку'}); const s=operationsStore.store(); (s.notes[req.params.email] ||= []).push({text:text.slice(0,1000),by:req.admin.email,createdAt:new Date().toISOString()}); operationsStore.save(); auditStore.log({adminEmail:req.admin.email,action:'user_note_added',target:req.params.email}); res.json({ok:true}); });
 app.post('/api/admin/blacklist', adminAuth.requireAdmin, adminAuth.requireRole('super_admin','admin'), (req,res)=>{ const {type,value}=req.body||{}; if(!['emails','iccids'].includes(type)||!value) return res.status(400).json({error:'Некоректні дані'}); const list=operationsStore.store().blacklist[type]; if(!list.includes(value)) list.push(value); operationsStore.save(); auditStore.log({adminEmail:req.admin.email,action:'blacklist_added',target:value}); res.json({ok:true}); });
 app.delete('/api/admin/blacklist/:type/:value', adminAuth.requireAdmin, adminAuth.requireRole('super_admin','admin'), (req,res)=>{ const list=operationsStore.store().blacklist[req.params.type]; if(!list) return res.status(400).json({error:'Некоректний список'}); operationsStore.store().blacklist[req.params.type]=list.filter(v=>v!==req.params.value); operationsStore.save(); res.json({ok:true}); });
 app.post('/api/admin/templates', adminAuth.requireAdmin, adminAuth.requireRole('super_admin','admin','support'), (req,res)=>{ const {title,text}=req.body||{}; if(!title||!text) return res.status(400).json({error:'Вкажіть назву і текст'}); const template={id:Date.now().toString(36),title:String(title).slice(0,100),text:String(text).slice(0,2000),by:req.admin.email}; operationsStore.store().templates.unshift(template); operationsStore.save(); res.json(template); });
@@ -2114,6 +2117,25 @@ app.get('/api/admin/users/:email', adminAuth.requireAdmin, adminAuth.requirePerm
   });
 });
 
+// Safe profile fields that an operator may correct without changing billing,
+// identity, plan entitlements, or eSIM ownership.
+app.patch('/api/admin/users/:email/profile', adminAuth.requireAdmin, adminAuth.requireRole('super_admin', 'admin'), adminAuth.requirePermission('users.manage'), (req, res) => {
+  const email = String(req.params.email || '').trim().toLowerCase();
+  const user = getUser(email);
+  const authUser = authStore.readAll().users?.[email];
+  if (!user && !authUser) return res.status(404).json({ error: 'Користувача не знайдено' });
+
+  const displayName = String(req.body?.displayName ?? user?.displayName ?? '').trim();
+  const language = String(req.body?.language ?? user?.language ?? 'uk').trim().toLowerCase();
+  if (displayName.length > 80) return res.status(400).json({ error: 'Ім’я може містити до 80 символів' });
+  if (!['uk', 'en'].includes(language)) return res.status(400).json({ error: 'Доступні мови: українська або англійська' });
+
+  const before = { displayName:user?.displayName || '', language:user?.language || 'uk' };
+  const updated = saveUser(email, { email, displayName, language });
+  auditStore.log({ adminEmail:req.admin.email, action:'user_profile_updated', target:email, details:{ before, after:{ displayName, language } } });
+  res.json({ ok:true, profile:{ email, displayName:updated.displayName || '', language:updated.language || 'uk' } });
+});
+
 app.get('/api/admin/users/:email/refundable-payments', adminAuth.requireAdmin, adminAuth.requireRole('super_admin'), async (req, res) => {
   try {
     const email = String(req.params.email || '').trim().toLowerCase();
@@ -2125,7 +2147,7 @@ app.get('/api/admin/users/:email/refundable-payments', adminAuth.requireAdmin, a
   }
 });
 
-app.post('/api/admin/users/:email/sync-stripe-status', adminAuth.requireAdmin, adminAuth.requireRole('super_admin','admin'), async (req, res) => {
+app.post('/api/admin/users/:email/sync-stripe-status', adminAuth.requireAdmin, adminAuth.requireRole('super_admin','admin'), adminAuth.requirePermission('operations.manage'), async (req, res) => {
   const email = String(req.params.email || '').trim().toLowerCase();
   const user = getUser(email);
   if (!user && !authStore.readAll().users?.[email]) return res.status(404).json({ error:'Користувача не знайдено' });
@@ -2149,7 +2171,7 @@ app.post('/api/admin/users/:email/sync-stripe-status', adminAuth.requireAdmin, a
   }
 });
 
-app.post('/api/admin/users/:email/sync-purchases', adminAuth.requireAdmin, adminAuth.requireRole('super_admin','admin'), async (req, res) => {
+app.post('/api/admin/users/:email/sync-purchases', adminAuth.requireAdmin, adminAuth.requireRole('super_admin','admin'), adminAuth.requirePermission('operations.manage'), async (req, res) => {
   const email = String(req.params.email || '').trim().toLowerCase();
   const user = getUser(email);
   if (!user && !authStore.readAll().users?.[email]) return res.status(404).json({ error:'Користувача не знайдено' });
@@ -2563,7 +2585,7 @@ app.delete('/api/admin/users/:email', adminAuth.requireAdmin, adminAuth.requireR
   }
 });
 
-app.post('/api/admin/users/:email/revoke-sessions', adminAuth.requireAdmin, adminAuth.requireRole('super_admin', 'admin'), (req, res) => {
+app.post('/api/admin/users/:email/revoke-sessions', adminAuth.requireAdmin, adminAuth.requireRole('super_admin', 'admin'), adminAuth.requirePermission('users.manage'), (req, res) => {
   const email = req.params.email;
   if (!authStore.readAll().users?.[email]) return res.status(404).json({ error: 'Користувача не знайдено' });
   const revoked = authService.revokeAllSessions(email);
@@ -2571,7 +2593,7 @@ app.post('/api/admin/users/:email/revoke-sessions', adminAuth.requireAdmin, admi
   res.json({ ok: true, revoked });
 });
 
-app.post('/api/admin/users/:email/notify', adminAuth.requireAdmin, adminAuth.requireRole('super_admin', 'admin', 'support'), async (req, res) => {
+app.post('/api/admin/users/:email/notify', adminAuth.requireAdmin, adminAuth.requireRole('super_admin', 'admin', 'support'), adminAuth.requirePermission('support.reply'), async (req, res) => {
   const email = req.params.email;
   const { channel, title, message } = req.body || {};
   if (!getUser(email) && !authStore.readAll().users?.[email]) return res.status(404).json({ error: 'Користувача не знайдено' });
@@ -2597,7 +2619,7 @@ app.post('/api/admin/users/:email/notify', adminAuth.requireAdmin, adminAuth.req
   }
 });
 
-app.post('/api/admin/users/:email/custom-package-checkout', adminAuth.requireAdmin, adminAuth.requireRole('super_admin', 'admin'), async (req, res) => {
+app.post('/api/admin/users/:email/custom-package-checkout', adminAuth.requireAdmin, adminAuth.requireRole('super_admin', 'admin'), adminAuth.requirePermission('operations.manage'), async (req, res) => {
   const email = req.params.email;
   const { packageCode, packageName, amountCents, currency = 'usd', dataLimitGb = null, durationDays = null, location = '' } = req.body || {};
   const user = getUser(email);
@@ -2685,7 +2707,7 @@ app.post('/api/admin/referrals/:email/credit-reward', adminAuth.requireAdmin, ad
   } catch (error) { res.status(502).json({ error: error.message }); }
 });
 
-app.post('/api/admin/users/:email/resync-esim', adminAuth.requireAdmin, adminAuth.requireRole('super_admin', 'admin'), async (req, res) => {
+app.post('/api/admin/users/:email/resync-esim', adminAuth.requireAdmin, adminAuth.requireRole('super_admin', 'admin'), adminAuth.requirePermission('esim.retry'), async (req, res) => {
   const email = req.params.email;
   const user = getUser(email);
   if (!user?.esim?.orderNo) return res.status(404).json({ error: 'Активну eSIM не знайдено' });
@@ -2720,7 +2742,7 @@ app.post('/api/admin/users/:email/resend-esim-instructions', adminAuth.requireAd
 });
 
 // Blocked users cannot sign in. Unblocking restores the exact status they had.
-app.patch('/api/admin/users/:email/block', adminAuth.requireAdmin, adminAuth.requireRole('super_admin', 'admin'), (req, res) => {
+app.patch('/api/admin/users/:email/block', adminAuth.requireAdmin, adminAuth.requireRole('super_admin', 'admin'), adminAuth.requirePermission('users.manage'), (req, res) => {
   const email = req.params.email;
   const { blocked } = req.body || {};
   const authUser = authStore.readAll().users?.[email];

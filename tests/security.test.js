@@ -219,13 +219,15 @@ test('feedback has a branded customer form and a protected admin inbox', () => {
   const form=read('feedback.html');
   const admin=read('admin-feedback.html');
   const users=read('admin-users.html');
+  const client=read('admin-client.html');
   assert.match(server, /app\.post\('\/api\/account\/feedback', requireUserSession/);
   assert.match(server, /app\.get\('\/api\/admin\/feedback', adminAuth\.requireAdmin/);
   assert.match(form, /rating-button/);
   assert.match(form, /feedback-text/);
   assert.match(admin, /summary\.distribution/);
   assert.match(admin, /avatarDataUrl/);
-  assert.match(users, /userDetailsAvatar/);
+  assert.match(users, /user-avatar/);
+  assert.match(client, /id="avatar"/);
 });
 
 test('admin navigation keeps every section in compact groups and scrolls independently', () => {
@@ -261,9 +263,27 @@ test('control center covers operations reconciliation jobs delivery and reportin
 test('granular permissions and dangerous two-factor gates are enforced',()=>{
   const auth=read('adminAuthService.js'),server=read('server.js');
   assert.match(auth,/ALL_PERMISSIONS/);assert.match(auth,/function requirePermission/);assert.match(auth,/STEP_UP_REQUIRED/);
+  assert.match(auth,/'users\.manage'/);
   assert.match(server,/requirePermission\('refunds\.manage',\{requireTwoFactor:true\}\)/);
   assert.match(server,/requirePermission\('users\.delete',\{requireTwoFactor:true\}\)/);
   assert.match(server,/requirePermission\('backups\.manage',\{requireTwoFactor:true\}\)/);
+  assert.match(server,/app\.post\('\/api\/admin\/team',[^\n]*requirePermission\('security\.manage',\{requireTwoFactor:true\}\)/);
+  assert.match(server,/app\.patch\('\/api\/admin\/team\/:email\/permissions',[^\n]*requirePermission\('security\.manage',\{requireTwoFactor:true\}\)/);
+});
+
+test('client control center consolidates safe admin work and Super Admin eSIM actions',()=>{
+  const server=read('server.js'),page=read('admin-client.html'),users=read('admin-users.html'),common=read('admin-common.js');
+  for(const section of ['overview','esim','billing','support','security','timeline'])assert.match(page,new RegExp(`id="${section}"`));
+  for(const label of ['Новий профіль і новий QR','Вільні eSIM зі складу','Пакети й оплати','Внутрішні нотатки','Критична зона','Повна історія клієнта'])assert.match(page,new RegExp(label));
+  assert.match(page,/isSuper\(\)/);
+  assert.match(page,/replace-and-assign/);
+  assert.match(page,/Використаний QR не відновлюється/);
+  assert.match(users,/admin-client\.html\?email=/);
+  assert.match(common,/current==='admin-client\.html'/);
+  assert.match(server,/app\.patch\('\/api\/admin\/users\/:email\/profile',[^\n]*requirePermission\('users\.manage'\)/);
+  assert.match(server,/app\.post\('\/api\/admin\/users\/:email\/revoke-sessions',[^\n]*requirePermission\('users\.manage'\)/);
+  assert.match(server,/app\.patch\('\/api\/admin\/users\/:email\/block',[^\n]*requirePermission\('users\.manage'\)/);
+  assert.match(server,/permissions: adminAuth\.permissionsFor/);
 });
 
 test('delivery translation health and user timeline remain persistent and protected',()=>{
@@ -320,15 +340,15 @@ test('customer cancellation is scheduled and billing is self-service',()=>{
 });
 
 test('Stripe profiles recover automatically and checkout reuses one customer',()=>{
-  const server=read('server.js'),stripe=read('stripeService.js'),payments=read('payments.html'),admin=read('admin-users.html');
+  const server=read('server.js'),stripe=read('stripeService.js'),payments=read('payments.html'),admin=read('admin-client.html');
   assert.match(stripe,/resolveStripeCustomerProfile/);
   assert.match(stripe,/customerId \? \{ customer:customerId \} : \{ customer_email:email \}/);
   assert.match(server,/recoverStripeProfile\(req\.userEmail\)/);
   assert.match(server,/\/api\/account\/billing-profile/);
   assert.match(server,/stripeProfileLastCheckedAt/);
   assert.match(payments,/Stripe-профіль прив’язано/);
-  assert.match(admin,/Знайти й прив’язати Stripe/);
-  assert.match(admin,/Додаткових Stripe-профілів/);
+  assert.match(admin,/Синхронізувати Stripe/);
+  assert.match(admin,/Дублі профілю/);
 });
 
 test('bottom navigation always identifies usage and charts stay visible without motion',()=>{
