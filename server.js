@@ -2330,14 +2330,21 @@ app.post('/api/admin/esims/:id/replace-and-assign',adminAuth.requireAdmin,adminA
   if(esimAdminActionsInProgress.has(id))return res.status(409).json({error:'Для цього запису вже виконується інша дія'});
   const reservationId=`${id}:replacement:${record.storedAt||record.profile?.lastUpdateTime||'initial'}`;
   const externalTransactionId=`signal-admin-${crypto.createHash('sha256').update(reservationId).digest('hex').slice(0,24)}`;
-  let reserved=false;
+  let reserved=false,recoveredExistingOrder=false;
   esimAdminActionsInProgress.add(id);
   try{
     reserved=await storage.claimExternalEvent('esim-inventory-replacement',reservationId,'provision');
-    if(!reserved)return res.status(409).json({error:'Нову eSIM для цього запису вже створюють або створили. Оновіть список.'});
     const latestRecord=findEsimInventoryRecord(id),latestTarget=getUser(targetEmail);
     if(latestRecord?.replacementIssuedAt||latestRecord?.source!==record.source||latestRecord?.ownerEmail!==record.ownerEmail||latestTarget?.esim)throw Object.assign(new Error('Стан запису або користувача змінився. Оновіть список.'),{status:409,code:'REPLACEMENT_STATE_CHANGED'});
-    const profile=await provisionEsim({email:targetEmail,plan,packageCode,dataLimitGb:record.profile?.dataLimitGb,transactionId:externalTransactionId});
+    const providerProfiles=await listAllocatedEsims();
+    let profile=providerProfiles.find(item=>String(item.transactionId||'')===externalTransactionId)||null;
+    if(profile){
+      recoveredExistingOrder=true;
+    }else if(reserved){
+      profile=await provisionEsim({email:targetEmail,plan,packageCode,dataLimitGb:record.profile?.dataLimitGb,transactionId:externalTransactionId});
+    }else{
+      return res.status(409).json({error:'Попередня операція ще обробляється провайдером. Нове замовлення не створено. Синхронізуйте склад через хвилину та повторіть прив’язку.',code:'REPLACEMENT_PENDING_PROVIDER'});
+    }
     if(esimInventory.profileState(profile)!=='available')throw Object.assign(new Error('Провайдер створив профіль, але він ще не готовий до встановлення. Зверніться в підтримку eSIM Access.'),{code:'REPLACEMENT_NOT_READY'});
     const now=new Date().toISOString(),newProfileId=esimInventory.profileId(profile),grant={id:`grant_${crypto.randomUUID()}`,type:'admin_replacement',profileId:newProfileId,sourceProfileId:id,packageName:record.packageName||profile.packageName||null,priceCents:0,currency:null,grantedAt:now,grantedBy:req.admin.email};
     if(sourceOwner){
@@ -2355,10 +2362,10 @@ app.post('/api/admin/esims/:id/replace-and-assign',adminAuth.requireAdmin,adminA
     if(esimInventory.profileId(persistedProfile)!==newProfileId||assignedRecord?.ownerEmail!==targetEmail)throw Object.assign(new Error('Новий профіль створено, але підтвердити його збереження в акаунті не вдалося. Не повторюйте операцію — перевірте замовлення в eSIM Access.'),{code:'REPLACEMENT_PERSISTENCE_UNCONFIRMED'});
     await storage.finishExternalEvent('esim-inventory-replacement',reservationId,'completed');reserved=false;
     recordEsimAssignment({profileId:newProfileId,sourceProfileId:id,action:sourceOwner?'replacement_transferred':'replacement_issued',fromEmail:record.ownerEmail||record.previousOwnerEmail||null,toEmail:targetEmail,adminEmail:req.admin.email});
-    auditStore.log({adminEmail:req.admin.email,action:'esim_replacement_granted',target:targetEmail,details:{sourceProfileId:id,newProfileId,packageCode,priceCents:0,providerBalanceCharged:true,iccidEnding:String(profile.iccid||'').slice(-4)}});
+    auditStore.log({adminEmail:req.admin.email,action:'esim_replacement_granted',target:targetEmail,details:{sourceProfileId:id,newProfileId,packageCode,priceCents:0,providerBalanceCharged:!recoveredExistingOrder,recoveredExistingOrder,iccidEnding:String(profile.iccid||'').slice(-4)}});
     if(sourceOwner)sendToEmail(record.ownerEmail,{title:'eSIM передано іншому користувачу',body:'Використаний профіль відв’язано від вашого акаунта. Платіжна підписка, якщо вона є, не переносилася та керується окремо.',url:'/profile.html',tag:`esim-replacement-out-${id.slice(-8)}`}).catch(()=>{});
     sendToEmail(targetEmail,{title:'Вам передано нову eSIM',body:'Адміністратор видав вам новий профіль того самого пакета з новим QR. Відкрийте «Моя eSIM» та встановіть його один раз.',url:'/esim-management.html',tag:`esim-replacement-${newProfileId.slice(-8)}`}).catch(()=>{});
-    res.json({ok:true,message:sourceOwner?'Використану eSIM замінено новим профілем і передано іншому користувачу. Новий QR доступний у його акаунті. Платіжна підписка попереднього власника не переносилася.':'Нову eSIM того самого пакета створено й безкоштовно видано користувачу. Вартість списана лише з балансу eSIM Access.',profileId:newProfileId,record:esimInventory.publicRecord(assignedRecord)});
+    res.json({ok:true,message:recoveredExistingOrder?'Уже створену eSIM знайдено у провайдера та без повторної оплати прив’язано до користувача. Новий QR доступний у його акаунті.':sourceOwner?'Використану eSIM замінено новим профілем і передано іншому користувачу. Новий QR доступний у його акаунті. Платіжна підписка попереднього власника не переносилася.':'Нову eSIM того самого пакета створено й безкоштовно видано користувачу. Вартість списана лише з балансу eSIM Access.',profileId:newProfileId,record:esimInventory.publicRecord(assignedRecord)});
   }catch(error){if(reserved)await storage.finishExternalEvent('esim-inventory-replacement',reservationId,'failed',error.message).catch(()=>{});res.status(error.status||502).json({error:`eSIM Access: ${error.message}`,code:error.code||'ESIM_REPLACEMENT_FAILED'});}
   finally{esimAdminActionsInProgress.delete(id);}
 });

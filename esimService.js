@@ -316,6 +316,7 @@ function profileToEsim(profile, orderNo, plan) {
     canInstall: profile.smdpStatus === 'RELEASED' && profile.esimStatus === 'GOT_RESOURCE' && !profile.eid && Number(profile.orderUsage) === 0,
     usedGb: bytesToGb(profile.orderUsage),
     orderNo,
+    transactionId: profile.transactionId || null,
     esimTranNo: profile.esimTranNo || null,
     iccid: profile.iccid || null,
     activationCode: profile.ac || profile.activationCode || null,

@@ -71,7 +71,7 @@ self.addEventListener('fetch', (event) => {
   // HTML and critical scripts are network-first so a newly deployed auth,
   // push or payment fix is not hidden behind an old PWA cache.
   const url = new URL(event.request.url);
-  const neverCache = ['/pwa.js','/config.js','/sw.js','/i18n.js','/style.css','/experience.css','/experience.js'].includes(url.pathname);
+  const neverCache = ['/pwa.js','/config.js','/sw.js','/i18n.js','/style.css','/experience.css','/experience.js','/admin-common.js'].includes(url.pathname);
   if (neverCache) {
     event.respondWith(fetch(event.request, { cache:'no-store' }).then(response=>{
       const copy=response.clone();caches.open(CACHE_NAME).then(cache=>cache.put(event.request,copy));return response;

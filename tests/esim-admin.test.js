@@ -85,8 +85,13 @@ test('deleted provider profiles are archived and can issue a new same-package re
   assert.match(route,/grantType:'admin_replacement'/);
   assert.match(route,/stateOverride:'replaced'/);
   assert.match(route,/REPLACEMENT_PERSISTENCE_UNCONFIRMED/);
+  assert.match(route,/listAllocatedEsims\(\)/);
+  assert.match(route,/item\.transactionId/);
+  assert.match(route,/recoveredExistingOrder/);
+  assert.match(route,/без повторної оплати прив’язано/);
   assert.doesNotMatch(route,/createCheckout|createCustomPackageCheckout/);
   assert.match(provider,/transactionId: suppliedTransactionId/);
+  assert.match(provider,/transactionId: profile\.transactionId \|\| null/);
   assert.match(page,/record\.source==='current'&&record\.ownerEmail===email/);
   assert.match(page,/!data\.profileId\|\|record\.id===data\.profileId/);
 });
