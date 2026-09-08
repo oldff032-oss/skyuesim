@@ -87,7 +87,8 @@ test('deleted provider profiles are archived and can issue a new same-package re
   assert.match(route,/REPLACEMENT_PERSISTENCE_UNCONFIRMED/);
   assert.doesNotMatch(route,/createCheckout|createCustomPackageCheckout/);
   assert.match(provider,/transactionId: suppliedTransactionId/);
-  assert.match(page,/Сервер не підтвердив нову eSIM в акаунті/);
+  assert.match(page,/record\.source==='current'&&record\.ownerEmail===email/);
+  assert.match(page,/!data\.profileId\|\|record\.id===data\.profileId/);
 });
 
 test('a profile deleted from the first phone can be transferred only through a fresh provider QR', () => {
