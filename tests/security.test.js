@@ -271,6 +271,13 @@ test('granular permissions and dangerous two-factor gates are enforced',()=>{
   assert.match(server,/app\.patch\('\/api\/admin\/team\/:email\/permissions',[^\n]*requirePermission\('security\.manage',\{requireTwoFactor:true\}\)/);
 });
 
+test('usage fallback does not reference webhook-only state', () => {
+  const server = read('server.js');
+  const route = server.slice(server.indexOf("app.get('/api/usage'"), server.indexOf("app.get('/api/billing'"));
+  assert.doesNotMatch(route, /inboundId|finishExternalEvent\('resend'/);
+  assert.match(route, /const cached=cachedUser\?\.esim/);
+});
+
 test('client control center consolidates safe admin work and Super Admin eSIM actions',()=>{
   const server=read('server.js'),page=read('admin-client.html'),users=read('admin-users.html'),common=read('admin-common.js');
   for(const section of ['overview','esim','billing','support','security','timeline'])assert.match(page,new RegExp(`id="${section}"`));

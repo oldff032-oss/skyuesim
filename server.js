@@ -3489,7 +3489,6 @@ app.get('/api/usage', requireUserSession, async (req, res) => {
 
     res.json({ usedBytes, totalBytes, remainingBytes, usedGb, totalGb, remainingGb, source:'esim_access_operator', esimStatus: usage.esimStatus, apn: usage.apn, expiredTime: usage.expiredTime, activateTime: usage.activateTime, lastUpdateTime: usage.lastUpdateTime });
   } catch (err) {
-    if(inboundId)await storage.finishExternalEvent('resend',inboundId,'failed',err.message).catch(()=>{});
     console.error(err);
     const cached=cachedUser?.esim;
     if(cached&&cached.usedBytes!=null)return res.json({usedBytes:cached.usedBytes,totalBytes:cached.totalBytes??null,remainingBytes:cached.remainingBytes??null,usedGb:cached.usedGb??0,totalGb:cached.dataLimitGb??null,remainingGb:cached.remainingGb??null,source:'cached',stale:true,lastUpdateTime:cached.lastUpdateTime||cached.updatedAt||null,warning:'Оператор тимчасово недоступний. Показано останні відомі дані.'});
