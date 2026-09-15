@@ -1223,6 +1223,35 @@ function safeTopupPackage(item) {
   };
 }
 
+function safeAdminTopupPackage(item) {
+  const safe = safeTopupPackage(item);
+  if (!safe) return null;
+  const providerCostUsd = Number(item?.price || 0) / 10000;
+  return {
+    ...safe,
+    location:String(item?.location || item?.locationCode || '').slice(0,160),
+    providerCostUsd:Number.isFinite(providerCostUsd) && providerCostUsd > 0 ? +providerCostUsd.toFixed(4) : null,
+  };
+}
+
+async function providerManagedEsimForTopup(email, user) {
+  if (!user?.esim?.iccid) {
+    const error = new Error('У користувача немає встановленої eSIM для поповнення.');
+    error.code = 'ESIM_NOT_ISSUED'; error.status = 409; throw error;
+  }
+  if (user.esim.provider !== 'support-link') return user.esim;
+  try {
+    const recovered = await recoverEsim({ iccid:user.esim.iccid, plan:user.plan || user.esim.plan || 'custom' });
+    const esim = { ...user.esim, ...recovered, provider:'esim-access', providerLinkedAt:new Date().toISOString() };
+    saveUser(email, { esim });
+    await storage.saveNow('users.json', getAllUsers());
+    return esim;
+  } catch (cause) {
+    const error = new Error('Цю eSIM підтримка ще не прив’язала до вашого API-акаунта eSIM Access. Попросіть підтримку прив’язати ICCID до API/reseller account — після цього пакет можна буде додати без нового QR.');
+    error.code = 'PROVIDER_PROFILE_NOT_LINKED'; error.status = 409; error.cause = cause; throw error;
+  }
+}
+
 // Same-origin, authenticated QR proxy. The provider image can be displayed by
 // <img>, but often blocks browser fetch/CORS, which prevented encrypted offline
 // storage. Only a QR URL already owned by this authenticated account is fetched.
@@ -1262,11 +1291,13 @@ app.get('/api/account/esim/topups', requireUserSession, requireFeature('travelPa
   const user=getUser(req.userEmail);
   if(!user?.esim?.iccid)return res.status(409).json({error:'Спочатку активуйте eSIM',code:'ESIM_NOT_ISSUED'});
   try{
-    const packages=(await listPackages({type:'TOPUP',iccid:user.esim.iccid})).map(safeTopupPackage).filter(Boolean).filter(packageAllowed).sort((a,b)=>(a.dataLimitGb||Infinity)-(b.dataLimitGb||Infinity)||a.durationDays-b.durationDays||a.amountCents-b.amountCents).slice(0,100);
-    res.json({packages,iccidEnding:String(user.esim.iccid).slice(-4),current:{plan:user.plan||null,remainingGb:user.esim.remainingGb??null,expiredTime:user.esim.expiredTime||null}});
+    const esim=await providerManagedEsimForTopup(req.userEmail,user);
+    const packages=(await listPackages({type:'TOPUP',iccid:esim.iccid})).map(safeTopupPackage).filter(Boolean).filter(packageAllowed).sort((a,b)=>(a.dataLimitGb||Infinity)-(b.dataLimitGb||Infinity)||a.durationDays-b.durationDays||a.amountCents-b.amountCents).slice(0,100);
+    res.json({packages,iccidEnding:String(esim.iccid).slice(-4),current:{plan:user.plan||null,remainingGb:esim.remainingGb??null,expiredTime:esim.expiredTime||null}});
   }catch(error){
     recordDiagnostic(req,{email:req.userEmail,source:'esim_access',type:'topup_flow',action:'catalog',outcome:'failed',severity:'warning',message:error.message,errorCode:error.code||'TOPUP_CATALOG_FAILED'});
-    res.status(502).json({error:'Не вдалося завантажити сумісні пакети для цієї eSIM',code:error.code||'TOPUP_CATALOG_FAILED'});
+    const status=Number(error.status)>=400?Number(error.status):502;
+    res.status(status).json({error:error.code==='PROVIDER_PROFILE_NOT_LINKED'?error.message:'Не вдалося завантажити сумісні пакети для цієї eSIM',code:error.code||'TOPUP_CATALOG_FAILED'});
   }
 });
 
@@ -1276,16 +1307,18 @@ app.post('/api/account/esim/topups/checkout', requireUserSession, requireFeature
   const packageCode=String(req.body?.packageCode||'').trim();
   if(!/^[A-Za-z0-9_-]{3,80}$/.test(packageCode))return res.status(400).json({error:'Некоректний пакет'});
   try{
-    const selected=(await listPackages({type:'TOPUP',iccid:user.esim.iccid,packageCode})).map(safeTopupPackage).filter(Boolean).find(item=>item.packageCode===packageCode);
+    const esim=await providerManagedEsimForTopup(req.userEmail,user);
+    const selected=(await listPackages({type:'TOPUP',iccid:esim.iccid,packageCode})).map(safeTopupPackage).filter(Boolean).find(item=>item.packageCode===packageCode);
     if(!selected)return res.status(404).json({error:'Цей пакет більше не сумісний з eSIM. Оновіть список.',code:'TOPUP_NOT_AVAILABLE'});
     if(!packageAllowed(selected)||!paymentMethodEnabled('stripeCard'))return res.status(503).json({error:'Оплата цього пакета тимчасово недоступна'});
     const recovered=await recoverStripeProfile(req.userEmail).catch(()=>({customerId:user.stripeCustomerId||null}));
     const session=await createCustomPackageCheckout({email:req.userEmail,customerId:recovered.customerId||user.stripeCustomerId||null,packageCode:selected.packageCode,packageName:selected.name,amountCents:selected.amountCents,currency:'usd',dataLimitGb:selected.dataLimitGb,durationDays:selected.durationDays,location:'',changeMode:'topup_existing',previousPlan:user.plan||'',previousSubscriptionId:user.stripeSubscriptionId||''});
     recordDiagnostic(req,{email:req.userEmail,source:'stripe',type:'topup_flow',action:'checkout_created',outcome:'success',severity:'info',message:'Existing eSIM top-up checkout created',purchaseId:session.id,context:{packageCode,amountCents:selected.amountCents,iccidEnding:String(user.esim.iccid).slice(-4)}});
-    res.json({url:session.url,rewardApplied:reward?{name:reward.name,code:reward.code,discountCents}:null});
+    res.json({url:session.url});
   }catch(error){
     recordDiagnostic(req,{email:req.userEmail,source:error.code?.includes('PACKAGE')?'esim_access':'stripe',type:'topup_flow',action:'checkout',outcome:'failed',severity:'error',message:error.message,errorCode:error.code||'TOPUP_CHECKOUT_FAILED'});
-    res.status(502).json({error:'Не вдалося створити безпечну оплату поповнення',code:error.code||'TOPUP_CHECKOUT_FAILED'});
+    const status=Number(error.status)>=400?Number(error.status):502;
+    res.status(status).json({error:error.code==='PROVIDER_PROFILE_NOT_LINKED'?error.message:'Не вдалося створити безпечну оплату поповнення',code:error.code||'TOPUP_CHECKOUT_FAILED'});
   }
 });
 
@@ -2832,6 +2865,62 @@ app.post('/api/admin/users/:email/resync-esim', adminAuth.requireAdmin, adminAut
     auditStore.log({ adminEmail: req.admin.email, action: 'esim_usage_resynced', target: email });
     res.json({ ok: true, usedGb, totalGb, remainingGb });
   } catch (error) { res.status(502).json({ error: error.message }); }
+});
+
+app.get('/api/admin/users/:email/esim-topups',adminAuth.requireAdmin,adminAuth.requireRole('super_admin'),adminAuth.requirePermission('esim.manage',{requireTwoFactor:true}),async(req,res)=>{
+  const email=String(req.params.email||'').trim().toLowerCase(),user=getUser(email);
+  if(!user)return res.status(404).json({error:'Користувача не знайдено'});
+  try{
+    const esim=await providerManagedEsimForTopup(email,user);
+    const packages=(await listPackages({type:'TOPUP',iccid:esim.iccid})).map(safeAdminTopupPackage).filter(Boolean).filter(packageAllowed).sort((a,b)=>(a.dataLimitGb??Infinity)-(b.dataLimitGb??Infinity)||a.durationDays-b.durationDays||(a.providerCostUsd??Infinity)-(b.providerCostUsd??Infinity)).slice(0,100);
+    res.json({packages,iccidEnding:String(esim.iccid).slice(-4),customerCharged:false,newQrRequired:false,current:{remainingGb:esim.remainingGb??null,expiredTime:esim.expiredTime||null}});
+  }catch(error){
+    recordDiagnostic(req,{email,source:'esim_access',type:'admin_esim_topup',action:'catalog',outcome:'failed',severity:'warning',message:error.message,errorCode:error.code||'TOPUP_CATALOG_FAILED'});
+    const status=Number(error.status)>=400?Number(error.status):502;
+    res.status(status).json({error:error.message,code:error.code||'TOPUP_CATALOG_FAILED'});
+  }
+});
+
+app.post('/api/admin/users/:email/esim-topups',adminAuth.requireAdmin,adminAuth.requireRole('super_admin'),adminAuth.requirePermission('esim.manage',{requireTwoFactor:true}),requireProviderCapacity,rateLimit('admin_esim_topup',60*60*1000,20,req=>req.admin.email),async(req,res)=>{
+  const email=String(req.params.email||'').trim().toLowerCase(),packageCode=String(req.body?.packageCode||'').trim(),requestId=String(req.body?.requestId||'').trim();
+  if(!/^[A-Za-z0-9_-]{3,80}$/.test(packageCode))return res.status(400).json({error:'Некоректний пакет'});
+  if(!/^[A-Za-z0-9_-]{16,80}$/.test(requestId))return res.status(400).json({error:'Некоректний ідентифікатор операції'});
+  if(req.body?.confirmProviderCharge!==true)return res.status(400).json({error:'Підтвердіть списання вартості пакета з балансу eSIM Access. З клієнта кошти не списуються.'});
+  const user=getUser(email);
+  if(!user)return res.status(404).json({error:'Користувача не знайдено'});
+  const operationKey=`${email}:${requestId}`,lockKey=`topup:${user.esim?.iccid||email}`;
+  let claimed=false;
+  if(esimAdminActionsInProgress.has(lockKey))return res.status(409).json({error:'Для цієї eSIM уже виконується поповнення. Дочекайтеся завершення та оновіть сторінку.'});
+  esimAdminActionsInProgress.add(lockKey);
+  try{
+    const esim=await providerManagedEsimForTopup(email,user);
+    const selected=(await listPackages({type:'TOPUP',iccid:esim.iccid,packageCode})).map(safeAdminTopupPackage).filter(Boolean).find(item=>item.packageCode===packageCode);
+    if(!selected||!packageAllowed(selected))return res.status(404).json({error:'Цей пакет більше не сумісний з eSIM. Оновіть список.',code:'TOPUP_NOT_AVAILABLE'});
+    claimed=await storage.claimExternalEvent('admin-esim-topup',operationKey,'topup');
+    if(!claimed)return res.status(409).json({error:'Цю операцію вже виконано або вона ще виконується. Оновіть дані клієнта — повторного списання не було.',code:'TOPUP_ALREADY_SUBMITTED'});
+    const transactionId=`adm-${requestId.replace(/[^A-Za-z0-9]/g,'').slice(0,40)}`;
+    const topup=await topupEsim({esimTranNo:esim.esimTranNo,iccid:esim.iccid,packageCode,transactionId});
+    const current=getUser(email)||user,now=new Date().toISOString(),fallbackGb=selected.unlimited?null:selected.dataLimitGb;
+    const dataLimitGb=topup.totalGb??fallbackGb??current.esim?.dataLimitGb??null;
+    const usedGb=topup.usedGb??(fallbackGb!=null?0:current.esim?.usedGb??null);
+    const remainingGb=topup.remainingGb??(fallbackGb!=null?fallbackGb:current.esim?.remainingGb??null);
+    const nextEsim={...current.esim,...esim,...(topup.iccid?{iccid:topup.iccid}:{}),dataLimitGb,usedGb,remainingGb,...(dataLimitGb!=null?{totalBytes:Math.round(Number(dataLimitGb)*(1024**3))}:{}),...(usedGb!=null?{usedBytes:Math.round(Number(usedGb)*(1024**3))}:{}),...(remainingGb!=null?{remainingBytes:Math.round(Number(remainingGb)*(1024**3))}:{}),...(topup.expiredTime?{expiredTime:topup.expiredTime}:{}),status:'active',esimStatus:'IN_USE',lastTopupAt:now,lastTopupPackageCode:packageCode,lastUpdateTime:now,lastPushAlertThreshold:null};
+    const grant={id:`grant_${crypto.randomUUID()}`,type:'admin_topup',packageCode,packageName:selected.name,dataLimitGb:selected.dataLimitGb,durationDays:selected.durationDays,providerCostUsd:selected.providerCostUsd,priceCents:0,currency:'usd',grantedAt:now,grantedBy:req.admin.email,iccidEnding:String(nextEsim.iccid||'').slice(-4)};
+    const purchaseId=`admin_topup_${requestId}`;
+    saveUser(email,{status:'active',esim:nextEsim,esimGrants:[grant,...(current.esimGrants||[])].slice(0,100)});
+    upsertPurchase(email,purchaseId,{kind:'admin_esim_topup',packageCode,packageName:selected.name,dataLimitGb:selected.dataLimitGb,durationDays:selected.durationDays,amountCents:0,currency:'usd',paymentStatus:'not_required',fulfillmentStatus:'provisioned',providerTransactionId:topup.transactionId||transactionId,paidAt:null,fulfilledAt:now,createdBy:req.admin.email});
+    await storage.saveNow('users.json',getAllUsers());
+    await storage.finishExternalEvent('admin-esim-topup',operationKey,'completed');claimed=false;
+    refreshGoogleWallet(email);
+    auditStore.log({adminEmail:req.admin.email,action:'existing_esim_topped_up',target:email,details:{packageCode,packageName:selected.name,dataLimitGb:selected.dataLimitGb,durationDays:selected.durationDays,providerCostUsd:selected.providerCostUsd,customerCharged:false,newQrRequired:false,iccidEnding:String(nextEsim.iccid||'').slice(-4),requestId}});
+    sendToEmail(email,{title:'Інтернет додано до вашої eSIM',body:`Пакет ${selected.name} додано до вже встановленої eSIM. Новий QR-код і повторне встановлення не потрібні.`,url:'/usage.html',tag:`admin-topup-${requestId.slice(-12)}`}).catch(()=>{});
+    res.json({ok:true,message:'Пакет додано до встановленої eSIM. Новий QR-код не потрібен, з клієнта кошти не списувалися.',topup:{packageCode,packageName:selected.name,dataLimitGb:selected.dataLimitGb,durationDays:selected.durationDays,remainingGb:nextEsim.remainingGb,expiredTime:nextEsim.expiredTime||null}});
+  }catch(error){
+    if(claimed)await storage.finishExternalEvent('admin-esim-topup',operationKey,'failed',error.message).catch(()=>{});
+    recordDiagnostic(req,{email,source:'esim_access',type:'admin_esim_topup',action:'topup',outcome:'failed',severity:'error',message:error.message,errorCode:error.code||'ESIM_TOPUP_FAILED',context:{packageCode,requestId}});
+    const status=Number(error.status)>=400?Number(error.status):502;
+    res.status(status).json({error:error.message,code:error.code||'ESIM_TOPUP_FAILED'});
+  }finally{esimAdminActionsInProgress.delete(lockKey);}
 });
 
 app.patch('/api/admin/users/:email/esim-usage',adminAuth.requireAdmin,adminAuth.requireRole('super_admin'),adminAuth.requirePermission('esim.manage',{requireTwoFactor:true}),async(req,res)=>{

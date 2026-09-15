@@ -177,3 +177,42 @@ test('support-link usage is updated manually without querying a fake provider or
   assert.match(page,/Якщо інтернет закінчився — введіть 0/);
   assert.match(inventory,/provider==='support-link'\)actions\.canSync=false/);
 });
+
+test('Super Admin can add a compatible package to the installed eSIM without a new QR or Stripe charge', () => {
+  const server=read('server.js'),page=read('admin-client.html');
+  const start=server.indexOf("app.get('/api/admin/users/:email/esim-topups'");
+  const end=server.indexOf("app.patch('/api/admin/users/:email/esim-usage'");
+  const routes=server.slice(start,end);
+  assert.ok(start>0&&end>start);
+  assert.match(routes,/requireRole\('super_admin'\)/);
+  assert.match(routes,/requirePermission\('esim\.manage',\{requireTwoFactor:true\}\)/);
+  assert.match(routes,/listPackages\(\{type:'TOPUP',iccid:esim\.iccid/);
+  assert.match(routes,/confirmProviderCharge!==true/);
+  assert.match(routes,/claimExternalEvent\('admin-esim-topup'/);
+  assert.match(routes,/topupEsim\(\{esimTranNo:esim\.esimTranNo,iccid:esim\.iccid,packageCode,transactionId\}/);
+  assert.match(routes,/customerCharged:false/);
+  assert.match(routes,/newQrRequired:false/);
+  assert.match(routes,/type:'admin_topup'/);
+  assert.doesNotMatch(routes,/provisionEsim|createCustomPackageCheckout|Stripe/);
+  assert.match(page,/Додати пакет без нового QR/);
+  assert.match(page,/Клієнт нічого не платить, Stripe не використовується/);
+  assert.match(page,/confirmProviderCharge:true/);
+});
+
+test('support-issued profile must be linked to the provider API before a real top-up', () => {
+  const server=read('server.js');
+  const helper=server.slice(server.indexOf('async function providerManagedEsimForTopup'),server.indexOf("app.get('/api/account/esim/qr-image'"));
+  assert.match(helper,/user\.esim\.provider !== 'support-link'/);
+  assert.match(helper,/recoverEsim\(\{ iccid:user\.esim\.iccid/);
+  assert.match(helper,/PROVIDER_PROFILE_NOT_LINKED/);
+  assert.match(helper,/API\/reseller account/);
+});
+
+test('customer top-up checkout returns the existing-eSIM Stripe session without an undefined reward reference', () => {
+  const server=read('server.js');
+  const route=server.slice(server.indexOf("app.post('/api/account/esim/topups/checkout'"),server.indexOf("app.get('/api/push/public-key'"));
+  assert.match(route,/providerManagedEsimForTopup/);
+  assert.match(route,/changeMode:'topup_existing'/);
+  assert.match(route,/res\.json\(\{url:session\.url\}\)/);
+  assert.doesNotMatch(route,/rewardApplied:reward/);
+});
