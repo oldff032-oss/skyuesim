@@ -2331,6 +2331,7 @@ app.post('/api/admin/esims/import-provider-profile',adminAuth.requireAdmin,admin
 app.post('/api/admin/esims/:id/sync',adminAuth.requireAdmin,adminAuth.requirePermission('esim.retry'),async(req,res)=>{
   const id=String(req.params.id||''),record=findEsimInventoryRecord(id);
   if(!record)return res.status(404).json({error:'eSIM не знайдено'});
+  if(record.profile?.provider==='support-link')return res.json({ok:true,manualRequired:true,record:esimInventory.publicRecord(record),message:'Цей профіль виданий підтримкою поза API-кабінетом. Змініть залишок у центрі клієнта вручну.'});
   if(esimAdminActionsInProgress.has(id))return res.status(409).json({error:'Для цієї eSIM уже виконується інша дія'});
   if(!record.profile?.iccid)return res.status(409).json({error:'Для синхронізації потрібен ICCID'});
   esimAdminActionsInProgress.add(id);
@@ -2813,6 +2814,7 @@ app.post('/api/admin/users/:email/resync-esim', adminAuth.requireAdmin, adminAut
   const email = req.params.email;
   const user = getUser(email);
   if (!user?.esim?.orderNo) return res.status(404).json({ error: 'Активну eSIM не знайдено' });
+  if(user.esim.provider==='support-link')return res.json({ok:true,manualRequired:true,usedGb:user.esim.usedGb??0,totalGb:user.esim.dataLimitGb??null,remainingGb:user.esim.remainingGb??null,message:'Профіль підтримки не підключений до API. Вкажіть залишок вручну.'});
   try {
     const usage = await checkUsage(user.esim.orderNo);
     const usedBytes = Math.max(0, Math.trunc(Number(usage.usedBytes) || 0));
@@ -2830,6 +2832,22 @@ app.post('/api/admin/users/:email/resync-esim', adminAuth.requireAdmin, adminAut
     auditStore.log({ adminEmail: req.admin.email, action: 'esim_usage_resynced', target: email });
     res.json({ ok: true, usedGb, totalGb, remainingGb });
   } catch (error) { res.status(502).json({ error: error.message }); }
+});
+
+app.patch('/api/admin/users/:email/esim-usage',adminAuth.requireAdmin,adminAuth.requireRole('super_admin'),adminAuth.requirePermission('esim.manage',{requireTwoFactor:true}),async(req,res)=>{
+  const email=String(req.params.email||'').trim().toLowerCase(),user=getUser(email);
+  if(!user?.esim)return res.status(404).json({error:'У користувача немає eSIM'});
+  if(user.esim.provider!=='support-link')return res.status(409).json({error:'Ручний залишок дозволено лише для профілів, виданих підтримкою поза API.'});
+  const totalGb=Number(user.esim.dataLimitGb),remainingInput=Number(req.body?.remainingGb);
+  if(!Number.isFinite(totalGb)||totalGb<=0)return res.status(409).json({error:'Спочатку вкажіть загальний обсяг пакета.'});
+  if(!Number.isFinite(remainingInput)||remainingInput<0||remainingInput>totalGb)return res.status(400).json({error:`Залишок має бути від 0 до ${totalGb} GB.`});
+  const remainingGb=remainingInput,usedGb=Math.max(0,totalGb-remainingGb),usedBytes=Math.round(usedGb*(1024**3)),totalBytes=Math.round(totalGb*(1024**3)),remainingBytes=Math.round(remainingGb*(1024**3)),exhausted=remainingGb===0,now=new Date().toISOString(),history=[...(user.esim.usageHistory||[])],day=now.slice(0,10),snapshot={day,usedBytes,totalBytes,remainingBytes,usedGb,remainingGb,totalGb,manual:true};
+  const index=history.findIndex(item=>item.day===day);if(index>=0)history[index]=snapshot;else history.push(snapshot);
+  const esim={...user.esim,usedGb,usedBytes,totalBytes,remainingGb,remainingBytes,usageHistory:history.slice(-31),status:exhausted?'used_up':'active',esimStatus:exhausted?'USED_UP':'IN_USE',providerStatus:exhausted?'USED_UP':'IN_USE',lastUpdateTime:now,manualUsageUpdatedAt:now,manualUsageUpdatedBy:req.admin.email};
+  saveUser(email,{esim});await storage.saveNow('users.json',getAllUsers());refreshGoogleWallet(email);
+  auditStore.log({adminEmail:req.admin.email,action:'support_esim_usage_adjusted',target:email,details:{iccidEnding:String(esim.iccid||'').slice(-4),totalGb,usedGb,remainingGb,exhausted}});
+  sendToEmail(email,{title:exhausted?'Пакет інтернету завершено':'Залишок інтернету оновлено',body:exhausted?`Використано ${totalGb} із ${totalGb} GB. Пакет вичерпано.`:`Залишилося ${remainingGb} із ${totalGb} GB.`,url:'/usage.html',tag:`manual-usage-${String(esim.iccid||'support').slice(-8)}`}).catch(()=>{});
+  res.json({ok:true,totalGb,usedGb,remainingGb,exhausted,message:exhausted?'Пакет позначено вичерпаним. У користувача буде показано повне використання.':'Залишок оновлено в застосунку користувача.'});
 });
 
 app.post('/api/admin/users/:email/resend-esim-instructions', adminAuth.requireAdmin, adminAuth.requireRole('super_admin', 'admin', 'support'), adminAuth.requirePermission('activation_code.read'), async (req, res) => {

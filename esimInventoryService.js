@@ -65,6 +65,7 @@ function capabilities(state, source) {
 function publicRecord(record) {
   const state = profileState(record.profile, record.stateOverride);
   const actions = capabilities(state, record.source);
+  if(record.profile?.provider==='support-link')actions.canSync=false;
   actions.canReplace = actions.canReplace && !record.replacementIssuedAt && Boolean(record.profile?.packageCode || ['basic', 'standard', 'unlimited'].includes(record.plan));
   return {
     id: record.id,

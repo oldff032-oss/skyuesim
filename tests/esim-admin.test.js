@@ -163,3 +163,17 @@ test('Super Admin can import an exact support replacement without creating anoth
   assert.doesNotMatch(route,/provisionEsim|\/esim\/order|confirmProviderCharge/);
   assert.match(provider,/async function recoverEsimByOrderNo/);
 });
+
+test('support-link usage is updated manually without querying a fake provider order', () => {
+  const server=read('server.js'),page=read('admin-client.html'),inventory=read('esimInventoryService.js');
+  const route=server.slice(server.indexOf("app.patch('/api/admin/users/:email/esim-usage'"),server.indexOf("app.post('/api/admin/users/:email/resend-esim-instructions'"));
+  assert.match(route,/requireRole\('super_admin'\)/);
+  assert.match(route,/requirePermission\('esim\.manage',\{requireTwoFactor:true\}\)/);
+  assert.match(route,/provider!=='support-link'/);
+  assert.match(route,/remainingGb===0/);
+  assert.match(route,/support_esim_usage_adjusted/);
+  assert.doesNotMatch(route,/checkUsage|provisionEsim|topupEsim/);
+  assert.match(page,/Вказати залишок вручну/);
+  assert.match(page,/Якщо інтернет закінчився — введіть 0/);
+  assert.match(inventory,/provider==='support-link'\)actions\.canSync=false/);
+});
