@@ -3451,6 +3451,17 @@ app.get('/api/usage', requireUserSession, async (req, res) => {
     }
     if (user.status === 'blocked') return res.status(403).json({ error: 'Акаунт заблоковано' });
 
+    // A replacement delivered by support can be installed from its protected
+    // link, but it is not necessarily attached to our eSIM Access API account.
+    // SUPPORT-* is an internal identifier and must never be queried as a real
+    // provider order number.
+    if(user.esim.provider==='support-link'||String(user.esim.orderNo).startsWith('SUPPORT-')){
+      const usedBytes=user.esim.usedBytes!=null?Math.max(0,Math.trunc(Number(user.esim.usedBytes)||0)):Math.max(0,Math.round(Number(user.esim.usedGb||0)*(1024**3)));
+      const totalBytes=user.esim.totalBytes!=null?Math.max(0,Math.trunc(Number(user.esim.totalBytes)||0)):(user.esim.dataLimitGb==null?null:Math.max(0,Math.round(Number(user.esim.dataLimitGb)*(1024**3))));
+      const remainingBytes=user.esim.remainingBytes!=null?Math.max(0,Math.trunc(Number(user.esim.remainingBytes)||0)):(totalBytes==null?null:Math.max(0,totalBytes-usedBytes));
+      return res.json({usedBytes,totalBytes,remainingBytes,usedGb:usedBytes/(1024**3),totalGb:totalBytes==null?null:totalBytes/(1024**3),remainingGb:remainingBytes==null?null:remainingBytes/(1024**3),source:'support_link_saved',stale:true,providerManagedExternally:true,esimStatus:user.esim.esimStatus||user.esim.status||null,apn:user.esim.apn||null,expiredTime:user.esim.expiredTime||null,activateTime:user.esim.activateTime||null,lastUpdateTime:user.esim.lastUpdateTime||user.esim.assignedAt||null,warning:'Профіль виданий підтримкою поза API-кабінетом. Показано останні збережені дані; точне використання перевіряйте на сторінці підтримки.'});
+    }
+
     const usage = await checkUsage(user.esim.orderNo);
     const usedBytes = Math.max(0, Math.trunc(Number(usage.usedBytes) || 0));
     const providerTotalBytes = usage.totalBytes == null ? null : Math.max(0, Math.trunc(Number(usage.totalBytes) || 0));

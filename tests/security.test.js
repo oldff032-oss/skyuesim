@@ -276,6 +276,9 @@ test('usage fallback does not reference webhook-only state', () => {
   const route = server.slice(server.indexOf("app.get('/api/usage'"), server.indexOf("app.get('/api/billing'"));
   assert.doesNotMatch(route, /inboundId|finishExternalEvent\('resend'/);
   assert.match(route, /const cached=cachedUser\?\.esim/);
+  assert.match(route, /provider==='support-link'/);
+  assert.match(route, /source:'support_link_saved'/);
+  assert.ok(route.indexOf("provider==='support-link'") < route.indexOf('checkUsage(user.esim.orderNo)'));
 });
 
 test('client control center consolidates safe admin work and Super Admin eSIM actions',()=>{
