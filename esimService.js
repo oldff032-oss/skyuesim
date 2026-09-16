@@ -548,4 +548,65 @@ async function manageProfile(iccid, action) {
   await esimAccessRequest('/api/v1/open/esim/' + action, {esimTranNo:current.esimTranNo});
   return {accepted:true};
 }
-module.exports = { provisionEsim, checkUsage, recoverEsim, recoverEsimByOrderNo, topupEsim, listPackages, findRenewalTopup, cancelEsim, revokeEsim, suspendEsim, unsuspendEsim, listAllocatedEsims, listOwnedProfiles, manageProfile, profileToEsim };
+
+// Support may issue a replacement through a p.qrsim.net share link without
+// attaching the profile to this reseller API account. The share page's own
+// "Check Usage" button uses a tokenized read-only eSIM Access endpoint. Read
+// that same endpoint server-side so the customer app can still show real data.
+async function checkSupportLinkUsage(supportInstallUrl) {
+  let shareUrl;
+  try { shareUrl = new URL(String(supportInstallUrl || '').trim()); }
+  catch { throw new EsimAccessError('A valid support share URL is required.', { code:'SUPPORT_USAGE_URL_INVALID' }); }
+  if (shareUrl.protocol !== 'https:' || shareUrl.hostname.toLowerCase() !== 'p.qrsim.net' || shareUrl.username || shareUrl.password) {
+    throw new EsimAccessError('Only an official p.qrsim.net support link can be used for usage checks.', { code:'SUPPORT_USAGE_URL_INVALID' });
+  }
+
+  let pageResponse;
+  try {
+    pageResponse = await fetch(shareUrl, { headers:{ Accept:'text/html' }, redirect:'error', signal:AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
+  } catch (error) {
+    throw new EsimAccessError(error?.name === 'TimeoutError' ? 'Support usage page timed out.' : `Support usage page error: ${error.message}`, { code:'SUPPORT_USAGE_PAGE_FAILED' });
+  }
+  if (!pageResponse.ok) throw new EsimAccessError(`Support usage page returned HTTP ${pageResponse.status}.`, { code:'SUPPORT_USAGE_PAGE_FAILED', status:pageResponse.status });
+  const declaredLength = Number(pageResponse.headers.get('content-length') || 0);
+  if (declaredLength > 750000) throw new EsimAccessError('Support usage page is unexpectedly large.', { code:'SUPPORT_USAGE_PAGE_INVALID' });
+  const html = await pageResponse.text();
+  if (!html || html.length > 750000) throw new EsimAccessError('Support usage page is invalid.', { code:'SUPPORT_USAGE_PAGE_INVALID' });
+  const input = html.match(/<input\b(?=[^>]*\bid\s*=\s*["']queryUsageAPI["'])[^>]*>/i)?.[0] || '';
+  const encodedEndpoint = input.match(/\bvalue\s*=\s*["']([^"']+)["']/i)?.[1] || '';
+  const decodedEndpoint = encodedEndpoint.replace(/&amp;/gi,'&').replace(/&#38;/g,'&').replace(/&quot;/gi,'"').replace(/&#39;/g,"'");
+  let usageUrl;
+  try { usageUrl = new URL(decodedEndpoint); }
+  catch { throw new EsimAccessError('Support page did not provide a usage endpoint.', { code:'SUPPORT_USAGE_ENDPOINT_MISSING' }); }
+  if (usageUrl.protocol !== 'https:' || usageUrl.hostname.toLowerCase() !== 'api.esimaccess.com' || usageUrl.pathname !== '/api/v1/h5/share/order/queryUsage' || !usageUrl.searchParams.get('token')) {
+    throw new EsimAccessError('Support page returned an untrusted usage endpoint.', { code:'SUPPORT_USAGE_ENDPOINT_INVALID' });
+  }
+
+  let usageResponse;
+  try {
+    usageResponse = await fetch(usageUrl, { headers:{ Accept:'application/json' }, redirect:'error', signal:AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
+  } catch (error) {
+    throw new EsimAccessError(error?.name === 'TimeoutError' ? 'Support usage request timed out.' : `Support usage request error: ${error.message}`, { code:'SUPPORT_USAGE_REQUEST_FAILED' });
+  }
+  const raw = await usageResponse.text();
+  let payload;
+  try { payload = raw ? JSON.parse(raw) : null; }
+  catch { throw new EsimAccessError('Support usage endpoint returned invalid JSON.', { code:'SUPPORT_USAGE_RESPONSE_INVALID', status:usageResponse.status }); }
+  if (!usageResponse.ok || !isSuccess(payload) || !payload?.obj) {
+    throw new EsimAccessError(`Support usage error: ${apiMessage(payload)}`, { code:apiCode(payload) || 'SUPPORT_USAGE_FAILED', status:usageResponse.status, payload });
+  }
+  const totalBytes = bytes(payload.obj.totalVolume);
+  const usedBytes = bytes(payload.obj.dataUsage ?? payload.obj.orderUsage);
+  if (totalBytes == null || usedBytes == null) throw new EsimAccessError('Support usage response did not include traffic values.', { code:'SUPPORT_USAGE_VALUES_MISSING' });
+  return {
+    usedBytes:Math.max(0, usedBytes),
+    totalBytes:Math.max(0, totalBytes),
+    remainingBytes:Math.max(0, totalBytes - usedBytes),
+    iccid:payload.obj.iccid || null,
+    expiredTime:payload.obj.expiredTime || null,
+    totalDuration:payload.obj.totalDuration ?? null,
+    dataType:payload.obj.dataType ?? null,
+    lastUpdateTime:new Date().toISOString(),
+  };
+}
+module.exports = { provisionEsim, checkUsage, checkSupportLinkUsage, recoverEsim, recoverEsimByOrderNo, topupEsim, listPackages, findRenewalTopup, cancelEsim, revokeEsim, suspendEsim, unsuspendEsim, listAllocatedEsims, listOwnedProfiles, manageProfile, profileToEsim };

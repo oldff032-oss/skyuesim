@@ -159,6 +159,7 @@ test('Super Admin can import an exact support replacement without creating anoth
   assert.match(route,/type:'support_replacement'/);
   assert.match(route,/saveUser\(targetEmail/);
   assert.match(route,/support_profile_assigned/);
+  assert.match(route,/support_usage_link_updated/);
   assert.match(route,/priceCents:0/);
   assert.doesNotMatch(route,/provisionEsim|\/esim\/order|confirmProviderCharge/);
   assert.match(provider,/async function recoverEsimByOrderNo/);
@@ -173,9 +174,42 @@ test('support-link usage is updated manually without querying a fake provider or
   assert.match(route,/remainingGb===0/);
   assert.match(route,/support_esim_usage_adjusted/);
   assert.doesNotMatch(route,/checkUsage|provisionEsim|topupEsim/);
-  assert.match(page,/Вказати залишок вручну/);
+  assert.match(page,/Вказати вручну/);
   assert.match(page,/Якщо інтернет закінчився — введіть 0/);
   assert.match(inventory,/provider==='support-link'\)actions\.canSync=false/);
+});
+
+test('support share link supplies real usage to both admin and customer screens', () => {
+  const server=read('server.js'),provider=read('esimService.js'),page=read('admin-client.html');
+  const adminRoute=server.slice(server.indexOf("app.post('/api/admin/users/:email/resync-esim'"),server.indexOf("app.get('/api/admin/users/:email/esim-topups'"));
+  const customerRoute=server.slice(server.indexOf("app.get('/api/usage'"),server.indexOf("app.get('/api/billing'"));
+  assert.match(provider,/async function checkSupportLinkUsage/);
+  assert.match(provider,/hostname\.toLowerCase\(\) !== 'p\.qrsim\.net'/);
+  assert.match(provider,/usageUrl\.hostname\.toLowerCase\(\) !== 'api\.esimaccess\.com'/);
+  assert.match(provider,/\/api\/v1\/h5\/share\/order\/queryUsage/);
+  assert.match(provider,/SUPPORT_USAGE_VALUES_MISSING/);
+  assert.match(adminRoute,/checkSupportLinkUsage\(user\.esim\.supportInstallUrl\)/);
+  assert.match(adminRoute,/persistSupportLinkUsage/);
+  assert.match(customerRoute,/checkSupportLinkUsage\(user\.esim\.supportInstallUrl\)/);
+  assert.match(customerRoute,/source:'support_link_saved'/);
+  assert.match(page,/Перевірити залишок/);
+  assert.match(page,/Вказати вручну/);
+});
+
+test('support share usage parser accepts only the official token endpoint', async t => {
+  const service=require('../esimService'),originalFetch=global.fetch,calls=[];
+  t.after(()=>{global.fetch=originalFetch});
+  global.fetch=async url=>{
+    calls.push(String(url));
+    if(calls.length===1)return new Response('<input value="https://api.esimaccess.com/api/v1/h5/share/order/queryUsage?token=safe%2Btoken" id="queryUsageAPI">',{status:200,headers:{'content-type':'text/html'}});
+    return new Response(JSON.stringify({success:true,obj:{iccid:'8943108170002370489',totalVolume:10737418240,dataUsage:2684354560,expiredTime:'2027-01-01T00:00:00Z',totalDuration:30,dataType:1}}),{status:200,headers:{'content-type':'application/json'}});
+  };
+  const usage=await service.checkSupportLinkUsage('https://p.qrsim.net/0123456789abcdef0123456789abcdef');
+  assert.equal(calls.length,2);
+  assert.equal(new URL(calls[1]).hostname,'api.esimaccess.com');
+  assert.equal(usage.totalBytes,10737418240);
+  assert.equal(usage.usedBytes,2684354560);
+  assert.equal(usage.remainingBytes,8053063680);
 });
 
 test('Super Admin can add a compatible package to the installed eSIM without a new QR or Stripe charge', () => {
