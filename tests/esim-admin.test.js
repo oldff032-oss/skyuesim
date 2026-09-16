@@ -215,7 +215,7 @@ test('support share usage parser accepts only the official token endpoint', asyn
 test('Super Admin can add a compatible package to the installed eSIM without a new QR or Stripe charge', () => {
   const server=read('server.js'),page=read('admin-client.html');
   const start=server.indexOf("app.get('/api/admin/users/:email/esim-topups'");
-  const end=server.indexOf("app.patch('/api/admin/users/:email/esim-usage'");
+  const end=server.indexOf("app.get('/api/admin/users/:email/esim-replacement-packages'");
   const routes=server.slice(start,end);
   assert.ok(start>0&&end>start);
   assert.match(routes,/requireRole\('super_admin'\)/);
@@ -231,6 +231,47 @@ test('Super Admin can add a compatible package to the installed eSIM without a n
   assert.match(page,/Додати пакет без нового QR/);
   assert.match(page,/Клієнт нічого не платить, Stripe не використовується/);
   assert.match(page,/confirmProviderCharge:true/);
+});
+
+test('Super Admin can replace an exhausted eSIM with any available package and a verified new QR', () => {
+  const server=read('server.js'),page=read('admin-client.html');
+  const start=server.indexOf("app.get('/api/admin/users/:email/esim-replacement-packages'");
+  const end=server.indexOf("app.patch('/api/admin/users/:email/esim-usage'");
+  const routes=server.slice(start,end);
+  assert.ok(start>0&&end>start);
+  assert.match(routes,/requireRole\('super_admin'\)/);
+  assert.match(routes,/requirePermission\('esim\.manage',\{requireTwoFactor:true\}\)/);
+  assert.match(routes,/confirmProviderCharge!==true/);
+  assert.match(routes,/confirmReplaceInstalledEsim!==true/);
+  assert.match(routes,/confirmationEmail!==email/);
+  assert.match(routes,/listPackages\(\{packageCode\}\)/);
+  assert.match(routes,/claimExternalEvent\('admin-esim-package-replacement'/);
+  assert.match(routes,/await provisionEsim/);
+  assert.match(routes,/REPLACEMENT_QR_NOT_READY/);
+  assert.match(routes,/await revokeEsim/);
+  assert.ok(routes.indexOf('await provisionEsim')<routes.indexOf('await revokeEsim'));
+  assert.ok(routes.indexOf('REPLACEMENT_QR_NOT_READY')<routes.indexOf('await revokeEsim'));
+  assert.ok(routes.indexOf("await storage.saveNow('users.json'",routes.indexOf('await provisionEsim'))<routes.indexOf('await revokeEsim'));
+  assert.match(routes,/provider!=='support-link'/);
+  assert.match(routes,/type:'admin_package_replacement'/);
+  assert.match(routes,/customerCharged:false/);
+  assert.match(routes,/emailTemplates\.esimInstructions/);
+  assert.match(routes,/sendToEmail\(email/);
+  assert.doesNotMatch(routes,/createCheckout|createCustomPackageCheckout|refundPayment/);
+  assert.match(page,/Замінити пакет \+ новий QR/);
+  assert.match(page,/спочатку система створить і перевірить новий QR/);
+  assert.match(page,/confirmReplaceInstalledEsim:true/);
+  assert.match(page,/confirmationEmail/);
+});
+
+test('replacement activation email includes the new package and safe installation order', () => {
+  const templates=require('../emailTemplates');
+  const html=templates.esimInstructions({activationCode:'LPA:1$example$secret',packageName:'Europe 10 GB',location:'Europe',dataLimitGb:10,durationDays:30,replacement:true});
+  assert.match(html,/Europe 10 GB/);
+  assert.match(html,/10 ГБ/);
+  assert.match(html,/спочатку встановіть і перевірте нову eSIM/);
+  assert.match(html,/LPA:1\$example\$secret/);
+  assert.match(html,/Відкрити новий QR-код/);
 });
 
 test('support-issued profile must be linked to the provider API before a real top-up', () => {

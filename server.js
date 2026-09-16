@@ -1243,6 +1243,16 @@ function safeAdminTopupPackage(item) {
   };
 }
 
+function safeAdminReplacementPackage(item) {
+  const safe = safeTravelPackage(item);
+  if (!safe) return null;
+  const providerCostUsd = Number(item?.price || 0) / 10000;
+  return {
+    ...safe,
+    providerCostUsd:Number.isFinite(providerCostUsd) && providerCostUsd > 0 ? +providerCostUsd.toFixed(4) : null,
+  };
+}
+
 async function providerManagedEsimForTopup(email, user) {
   if (!user?.esim?.iccid) {
     const error = new Error('У користувача немає встановленої eSIM для поповнення.');
@@ -2947,6 +2957,87 @@ app.post('/api/admin/users/:email/esim-topups',adminAuth.requireAdmin,adminAuth.
   }finally{esimAdminActionsInProgress.delete(lockKey);}
 });
 
+app.get('/api/admin/users/:email/esim-replacement-packages',adminAuth.requireAdmin,adminAuth.requireRole('super_admin'),adminAuth.requirePermission('esim.manage',{requireTwoFactor:true}),async(req,res)=>{
+  const email=String(req.params.email||'').trim().toLowerCase(),user=getUser(email),query=String(req.query?.q||'').trim().toLowerCase().slice(0,80);
+  if(!user)return res.status(404).json({error:'Користувача не знайдено'});
+  if(!user.esim)return res.status(409).json({error:'У користувача немає поточної eSIM для заміни'});
+  try{
+    let packages=(await listPackages({})).map(safeAdminReplacementPackage).filter(Boolean).filter(packageAllowed);
+    if(query)packages=packages.filter(item=>`${item.name} ${item.location} ${item.packageCode}`.toLowerCase().includes(query));
+    packages.sort((a,b)=>a.location.localeCompare(b.location,'uk')||(a.dataLimitGb??Infinity)-(b.dataLimitGb??Infinity)||a.durationDays-b.durationDays||(a.providerCostUsd??Infinity)-(b.providerCostUsd??Infinity));
+    res.json({packages:packages.slice(0,5000),customerCharged:false,newQrRequired:true,current:{packageName:user.esim.packageName||user.esim.plan||user.plan||'Поточна eSIM',iccidEnding:String(user.esim.iccid||'').slice(-4),provider:user.esim.provider||'esim-access'}});
+  }catch(error){
+    recordDiagnostic(req,{email,source:'esim_access',type:'admin_esim_package_replacement',action:'catalog',outcome:'failed',severity:'warning',message:error.message,errorCode:error.code||'REPLACEMENT_CATALOG_FAILED'});
+    const status=Number(error.status)>=400?Number(error.status):502;
+    res.status(status).json({error:error.message,code:error.code||'REPLACEMENT_CATALOG_FAILED'});
+  }
+});
+
+app.post('/api/admin/users/:email/replace-esim-package',adminAuth.requireAdmin,adminAuth.requireRole('super_admin'),adminAuth.requirePermission('esim.manage',{requireTwoFactor:true}),requireProviderCapacity,rateLimit('admin_esim_package_replacement',60*60*1000,10,req=>req.admin.email),async(req,res)=>{
+  const email=String(req.params.email||'').trim().toLowerCase(),packageCode=String(req.body?.packageCode||'').trim(),requestId=String(req.body?.requestId||'').trim(),confirmationEmail=String(req.body?.confirmationEmail||'').trim().toLowerCase();
+  if(!/^[A-Za-z0-9_-]{3,80}$/.test(packageCode))return res.status(400).json({error:'Некоректний пакет'});
+  if(!/^[A-Za-z0-9_-]{16,80}$/.test(requestId))return res.status(400).json({error:'Некоректний ідентифікатор операції'});
+  if(req.body?.confirmProviderCharge!==true)return res.status(400).json({error:'Підтвердіть списання вартості нового профілю з балансу eSIM Access. З клієнта кошти не списуються.'});
+  if(req.body?.confirmReplaceInstalledEsim!==true)return res.status(400).json({error:'Підтвердіть закриття старої eSIM після створення і перевірки нового QR-коду.'});
+  if(confirmationEmail!==email)return res.status(400).json({error:'Email підтвердження не збігається з акаунтом клієнта'});
+  const user=getUser(email);
+  if(!user)return res.status(404).json({error:'Користувача не знайдено'});
+  if(user.status==='blocked')return res.status(409).json({error:'Акаунт користувача заблоковано'});
+  if(!user.esim)return res.status(409).json({error:'У користувача немає поточної eSIM для заміни'});
+  const oldProfile={...user.esim},operationKey=`${email}:${requestId}`,lockKey=`replace-package:${oldProfile.iccid||email}`;
+  let claimed=false,newProfile=null,oldRevoked=false,oldRevokeError=null,emailDelivered=false;
+  if(esimAdminActionsInProgress.has(lockKey))return res.status(409).json({error:'Для цього клієнта вже виконується заміна eSIM. Дочекайтеся завершення та оновіть сторінку.'});
+  esimAdminActionsInProgress.add(lockKey);
+  try{
+    const selected=(await listPackages({packageCode})).map(safeAdminReplacementPackage).filter(Boolean).find(item=>item.packageCode===packageCode);
+    if(!selected||!packageAllowed(selected))return res.status(404).json({error:'Цей пакет більше не доступний. Оновіть каталог.',code:'REPLACEMENT_PACKAGE_NOT_AVAILABLE'});
+    claimed=await storage.claimExternalEvent('admin-esim-package-replacement',operationKey,'replace');
+    if(!claimed)return res.status(409).json({error:'Цю операцію вже виконано або вона ще виконується. Оновіть дані клієнта — повторного списання не було.',code:'REPLACEMENT_ALREADY_SUBMITTED'});
+    const current=getUser(email);
+    if(!current?.esim||String(current.esim.iccid||'')!==String(oldProfile.iccid||''))throw Object.assign(new Error('Поточна eSIM клієнта змінилася. Оновіть сторінку.'),{status:409,code:'REPLACEMENT_STATE_CHANGED'});
+    const transactionId=`admrpl-${requestId.replace(/[^A-Za-z0-9_-]/g,'').slice(0,40)}`;
+    newProfile=await provisionEsim({email,plan:'custom',packageCode:selected.packageCode,dataLimitGb:selected.dataLimitGb,transactionId});
+    if(!newProfile?.iccid||(!newProfile.activationCode&&!newProfile.qrCodeUrl))throw Object.assign(new Error('Провайдер створив профіль, але не повернув готовий новий QR-код. Стару eSIM не закрито.'),{code:'REPLACEMENT_QR_NOT_READY'});
+    const oldState=esimInventory.profileState(oldProfile),providerManaged=oldProfile.provider!=='support-link'&&Boolean(oldProfile.esimTranNo||oldProfile.iccid),alreadyClosed=['revoked','cancelled','expired'].includes(oldState),externalSupportProfile=!providerManaged&&!alreadyClosed,revokeNeeded=providerManaged&&!alreadyClosed;
+    if(alreadyClosed)oldRevoked=true;
+    const now=new Date().toISOString(),history=[...(current.esimHistory||[])],newProfileId=esimInventory.profileId(newProfile);
+    history.unshift({plan:current.plan||oldProfile.plan||null,esim:{...oldProfile,lifecycleState:'replaced',status:oldRevoked?'revoked':'replaced'},replacedAt:now,replacedByIccid:newProfile.iccid,reason:'admin_package_replacement',providerRevokePending:revokeNeeded});
+    const grant={id:`grant_${crypto.randomUUID()}`,type:'admin_package_replacement',packageCode:selected.packageCode,packageName:selected.name,dataLimitGb:selected.dataLimitGb,durationDays:selected.durationDays,providerCostUsd:selected.providerCostUsd,priceCents:0,currency:'usd',grantedAt:now,grantedBy:req.admin.email,sourceIccidEnding:String(oldProfile.iccid||'').slice(-4),iccidEnding:String(newProfile.iccid||'').slice(-4)};
+    const nextEsim={...newProfile,plan:'custom',packageCode:selected.packageCode,packageName:selected.name,location:selected.location,dataLimitGb:selected.dataLimitGb,durationDays:selected.durationDays,inventoryProfileId:newProfileId,grantType:'admin_package_replacement',priceCents:0,assignedAt:now,assignedBy:req.admin.email,replacesIccidEnding:String(oldProfile.iccid||'').slice(-4),oldProfileRevokePending:revokeNeeded};
+    saveUser(email,{status:'active',plan:'custom',esim:nextEsim,esimHistory:history.slice(0,20),esimGrants:[grant,...(current.esimGrants||[])].slice(0,100),lastEsimProvisionError:null,lastEsimReplacementAt:now});
+    upsertPurchase(email,`admin_replacement_${requestId}`,{kind:'admin_esim_package_replacement',packageCode:selected.packageCode,packageName:selected.name,location:selected.location,dataLimitGb:selected.dataLimitGb,durationDays:selected.durationDays,amountCents:0,currency:'usd',paymentStatus:'not_required',fulfillmentStatus:'provisioned',providerCostUsd:selected.providerCostUsd,providerTransactionId:newProfile.transactionId||transactionId,esimOrderNo:newProfile.orderNo||null,esimTranNo:newProfile.esimTranNo||null,iccid:newProfile.iccid,paidAt:null,fulfilledAt:now,createdBy:req.admin.email});
+    // Persist the working new QR before changing the old provider profile. A
+    // storage failure here therefore leaves the old eSIM untouched.
+    await storage.saveNow('users.json',getAllUsers());
+    if(revokeNeeded){
+      try{await revokeEsim({esimTranNo:oldProfile.esimTranNo||'',iccid:oldProfile.iccid||''});oldRevoked=true;}
+      catch(error){oldRevokeError=error.message;}
+    }
+    history[0]={...history[0],esim:{...history[0].esim,status:oldRevoked?'revoked':'replaced'},providerRevokePending:Boolean(oldRevokeError)};
+    const persistedCurrent=getUser(email)||{},persistedEsim={...(persistedCurrent.esim||nextEsim),oldProfileRevokePending:Boolean(oldRevokeError)};
+    saveUser(email,{esim:persistedEsim,esimHistory:history.slice(0,20)});
+    const oldPurchase=purchaseForProfile(current,oldProfile);
+    if(oldPurchase)upsertPurchase(email,oldPurchase.id,{esimLifecycleState:'replaced',esimReplacedAt:now,replacedByIccid:newProfile.iccid,providerRevokePending:Boolean(oldRevokeError)});
+    await storage.saveNow('users.json',getAllUsers());
+    await storage.finishExternalEvent('admin-esim-package-replacement',operationKey,'completed');claimed=false;
+    refreshGoogleWallet(email);
+    recordEsimAssignment({profileId:newProfileId,sourceProfileId:esimInventory.profileId(oldProfile),action:'package_replaced_with_new_qr',fromEmail:email,toEmail:email,adminEmail:req.admin.email});
+    auditStore.log({adminEmail:req.admin.email,action:'esim_package_replaced_with_new_qr',target:email,details:{packageCode:selected.packageCode,packageName:selected.name,providerCostUsd:selected.providerCostUsd,customerCharged:false,newQrRequired:true,oldRevoked,externalSupportProfile,oldRevokeError,oldIccidEnding:String(oldProfile.iccid||'').slice(-4),newIccidEnding:String(newProfile.iccid||'').slice(-4),requestId}});
+    try{await sendEmail({to:email,subject:'Нова eSIM і пакет готові до активації — Signal',html:emailTemplates.esimInstructions({activationCode:newProfile.activationCode,packageName:selected.name,location:selected.location,dataLimitGb:selected.dataLimitGb,durationDays:selected.durationDays,replacement:true})});emailDelivered=true;}catch(error){recordDiagnostic(req,{email,source:'email',type:'admin_esim_package_replacement',action:'activation_email',outcome:'failed',severity:'warning',message:error.message,errorCode:'REPLACEMENT_EMAIL_FAILED'});}
+    sendToEmail(email,{title:'Нова eSIM готова до встановлення',body:`Ми додали пакет ${selected.name}. Відкрийте «Моя eSIM», встановіть новий профіль і лише після успішного підключення видаліть старий.`,url:'/esim-management.html',tag:`admin-replacement-${requestId.slice(-12)}`}).catch(()=>{});
+    const warnings=[];
+    if(oldRevokeError)warnings.push('Новий QR вже видано, але провайдер не підтвердив закриття старого профілю. Система позначила його для перевірки.');
+    if(externalSupportProfile)warnings.push('Старий профіль, виданий підтримкою поза API, прибрано із застосунку. Після перевірки нового підключення клієнт має видалити старий профіль у налаштуваннях телефону.');
+    if(!emailDelivered)warnings.push('Новий QR доступний у застосунку, але email не вдалося доставити. Надішліть інструкцію повторно з центру клієнта.');
+    res.json({ok:true,message:'Новий пакет видано. Новий QR-код уже доступний у застосунку клієнта, а стару eSIM закрито після успішного створення нової.',warning:warnings.join(' '),profileId:newProfileId,emailDelivered,oldRevoked,customerCharged:false,newQrRequired:true});
+  }catch(error){
+    if(claimed)await storage.finishExternalEvent('admin-esim-package-replacement',operationKey,'failed',error.message).catch(()=>{});
+    recordDiagnostic(req,{email,source:'esim_access',type:'admin_esim_package_replacement',action:'replace',outcome:'failed',severity:'error',message:error.message,errorCode:error.code||'ESIM_PACKAGE_REPLACEMENT_FAILED',context:{packageCode,requestId,newProfileCreated:Boolean(newProfile?.iccid)}});
+    const status=Number(error.status)>=400?Number(error.status):502;
+    res.status(status).json({error:error.message,code:error.code||'ESIM_PACKAGE_REPLACEMENT_FAILED'});
+  }finally{esimAdminActionsInProgress.delete(lockKey);}
+});
+
 app.patch('/api/admin/users/:email/esim-usage',adminAuth.requireAdmin,adminAuth.requireRole('super_admin'),adminAuth.requirePermission('esim.manage',{requireTwoFactor:true}),async(req,res)=>{
   const email=String(req.params.email||'').trim().toLowerCase(),user=getUser(email);
   if(!user?.esim)return res.status(404).json({error:'У користувача немає eSIM'});
@@ -2968,7 +3059,7 @@ app.post('/api/admin/users/:email/resend-esim-instructions', adminAuth.requireAd
   const esim = getUser(email)?.esim;
   if (!esim?.activationCode) return res.status(404).json({ error: 'Код активації eSIM не знайдено' });
   try {
-    await sendEmail({ to: email, subject: 'Інструкція встановлення eSIM — Signal', html: emailTemplates.esimInstructions({activationCode:esim.activationCode}) });
+    await sendEmail({ to: email, subject: 'Інструкція встановлення eSIM — Signal', html: emailTemplates.esimInstructions({activationCode:esim.activationCode,packageName:esim.packageName,location:esim.location,dataLimitGb:esim.dataLimitGb,durationDays:esim.durationDays}) });
     auditStore.log({ adminEmail: req.admin.email, action: 'esim_instructions_resent', target: email });
     res.json({ ok: true });
   } catch (error) { res.status(502).json({ error: error.message }); }
