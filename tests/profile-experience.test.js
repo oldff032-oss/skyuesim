@@ -49,10 +49,17 @@ test('profile v3 and its mobile centers are connected and cacheable offline',()=
 });
 
 test('profile photo upload is compressed on device and saved through the protected profile endpoint',()=>{
-  const profile=read('profile.html'),server=read('server.js'),auth=read('authService.js');
-  assert.match(profile,/accept="image\/\*"/);
+  const profile=read('profile.html'),server=read('server.js'),auth=read('authService.js'),worker=read('sw.js'),heicWorker=read('vendor/heic-worker-1.5.2.js');
+  assert.match(profile,/accept="image\/\*,\.heic,\.heif"/);
   assert.match(profile,/canvas\.toDataURL\('image\/jpeg'/);
   assert.match(profile,/25\*1024\*1024/);
+  assert.match(profile,/createImageBitmap\(file,\{imageOrientation:'from-image'\}\)/);
+  assert.match(profile,/new Worker\('\/vendor\/heic-worker-1\.5\.2\.js',\{type:'module'\}\)/);
+  assert.match(profile,/function isHeicFile\(file\)/);
+  assert.match(heicWorker,/import buildLibheif from '\.\/libheif-1\.22\.2\.js'/);
+  assert.match(worker,/\/vendor\/heic-worker-1\.5\.2\.js/);
+  assert.match(worker,/\/vendor\/libheif-1\.22\.2\.js/);
+  assert.ok(fs.statSync(path.join(root,'vendor','libheif-1.22.2.js')).size>3_000_000);
   assert.match(profile,/xpFetch\('\/api\/account\/profile',\{method:'PUT'/);
   assert.match(server,/app\.put\('\/api\/account\/profile',\s*requireUserSession/);
   assert.match(auth,/avatarDataUrl/);

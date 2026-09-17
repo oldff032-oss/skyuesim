@@ -7,14 +7,15 @@
 <body class="xp-page">
   <main class="xp-wrap profile-v3-wrap">
     <header class="xp-head profile-v3-head"><img class="xp-logo" src="signal-premium-logo.png" alt="Signal"><b>Профіль</b><span class="xp-head-spacer"></span><a id="notificationButton" class="xp-icon-button profile-v3-bell" href="notifications.html" aria-label="Сповіщення"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg><span id="badge" class="xp-notification-dot" aria-live="polite" hidden></span></a></header>
-    <input id="avatarInput" type="file" accept="image/*" hidden>
+    <input id="avatarInput" type="file" accept="image/*,.heic,.heif" hidden>
     <div id="content"><div class="xp-skeleton profile-v3-skeleton"></div><div class="xp-skeleton" style="height:230px;margin-top:16px"></div></div>
   </main>
   <nav class="bottomnav" aria-label="Головна навігація"><a href="dashboard.html" aria-label="Головна"><span class="nav-icon"><svg class="nav-art nav-vector" viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 10.5 12 3l8.5 7.5"/><path d="M5.5 9.3V21h13V9.3M9.5 21v-6h5v6"/></svg></span></a><a href="plans.html" aria-label="Тарифи"><span class="nav-icon"><svg class="nav-art nav-vector" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3.5 12h17M12 3c2.5 2.6 3.8 5.6 3.8 9S14.5 18.4 12 21M12 3C9.5 5.6 8.2 8.6 8.2 12s1.3 6.4 3.8 9"/></svg></span></a><a href="usage.html" aria-label="Витрати"><span class="nav-icon"><svg class="nav-art nav-vector" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V5M16 20v-8M22 20V3M2 20h21"/></svg></span></a><a href="profile.html" class="active" aria-label="Профіль"><span class="nav-icon"><svg class="nav-art nav-vector" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="7.5" r="3.5"/><path d="M5 21c.4-4.6 2.8-7 7-7s6.6 2.4 7 7"/></svg></span></a></nav>
   <script src="config.js"></script><script src="experience.js"></script>
   <script>
     const content=document.getElementById('content'),badge=document.getElementById('badge'),notificationButton=document.getElementById('notificationButton'),avatarInput=document.getElementById('avatarInput');
-    let currentProfile=null,photoBusy=false;
+    let currentProfile=null,photoBusy=false,heicWorker=null,heicSequence=0;
+    const heicJobs=new Map();
     const icon=name=>({
       sim:'<svg viewBox="0 0 24 24"><path d="M7 3h7l4 4v14H7zM10 11h5v6h-5z"/></svg>',
       tiers:'<svg viewBox="0 0 24 24"><path d="m12 3 8 4-8 4-8-4 8-4Z"/><path d="m4 12 8 4 8-4M4 17l8 4 8-4"/></svg>',
@@ -77,13 +78,33 @@
       try{const [data,notifications,deck]=await Promise.all([xpFetch('/api/account/profile-overview'),xpFetch('/api/account/notifications'),xpFetch('/api/account/home-deck')]);setNotificationBadge(notifications.unread);renderProfile(data,notifications,deck)}
       catch(error){content.innerHTML=`<div class="xp-empty xp-panel"><i>↻</i><h2>Профіль не завантажився</h2><p class="xp-muted">${xpEsc(error.message)}</p><button class="xp-btn secondary" style="margin-top:14px" onclick="loadProfile()">Спробувати ще раз</button></div>`}
     }
-    async function decodePhoto(file){
-      if(!file||!String(file.type||'').startsWith('image/'))throw new Error('Оберіть фотографію з галереї');
-      if(file.size>25*1024*1024)throw new Error('Фото завелике. Максимальний розмір — 25 МБ');
+    async function openPhoto(file){
+      if('createImageBitmap'in window){try{return await createImageBitmap(file,{imageOrientation:'from-image'})}catch{}}
       const url=URL.createObjectURL(file),image=new Image();
-      try{await new Promise((resolve,reject)=>{image.onload=resolve;image.onerror=()=>reject(new Error('Цей формат фото не підтримується вашим телефоном'));image.src=url});const side=Math.min(image.naturalWidth,image.naturalHeight),sx=(image.naturalWidth-side)/2,sy=(image.naturalHeight-side)/2;
-        for(const size of [720,600,512,420]){const canvas=document.createElement('canvas');canvas.width=size;canvas.height=size;const context=canvas.getContext('2d',{alpha:false});context.imageSmoothingEnabled=true;context.imageSmoothingQuality='high';context.fillStyle='#0a1020';context.fillRect(0,0,size,size);context.drawImage(image,sx,sy,side,side,0,0,size,size);for(const quality of [.88,.8,.7,.6]){const result=canvas.toDataURL('image/jpeg',quality);if(result.length<=680000)return result;}}
-      }finally{URL.revokeObjectURL(url)}
+      try{await new Promise((resolve,reject)=>{image.onload=resolve;image.onerror=()=>reject(new Error('PHOTO_DECODE_FAILED'));image.src=url});return image}finally{URL.revokeObjectURL(url)}
+    }
+    async function isHeicFile(file){const brand=new TextDecoder().decode(await file.slice(8,12).arrayBuffer()).replace('\0',' ').trim();return ['mif1','msf1','heic','heix','hevc','hevx'].includes(brand)}
+    function getHeicWorker(){
+      if(heicWorker)return heicWorker;
+      heicWorker=new Worker('/vendor/heic-worker-1.5.2.js',{type:'module'});
+      heicWorker.onmessage=event=>{const job=heicJobs.get(event.data?.id);if(!job)return;clearTimeout(job.timer);heicJobs.delete(event.data.id);event.data.error?job.reject(new Error(event.data.error)):job.resolve(event.data.imageData)};
+      heicWorker.onerror=()=>{for(const job of heicJobs.values()){clearTimeout(job.timer);job.reject(new Error('HEIC worker failed'))}heicJobs.clear();heicWorker?.terminate();heicWorker=null};
+      return heicWorker;
+    }
+    async function convertHeic(file){
+      try{if(!await isHeicFile(file))return null;const buffer=await file.arrayBuffer(),id=`photo_${Date.now()}_${++heicSequence}`,imageData=await new Promise((resolve,reject)=>{const timer=setTimeout(()=>{heicJobs.delete(id);reject(new Error('HEIC conversion timeout'))},60000);heicJobs.set(id,{resolve,reject,timer});getHeicWorker().postMessage({id,buffer},[buffer])});const canvas=document.createElement('canvas');canvas.width=imageData.width;canvas.height=imageData.height;const context=canvas.getContext('2d',{alpha:false});if(!context)throw new Error('Canvas unavailable');context.putImageData(imageData,0,0);const result=await new Promise((resolve,reject)=>canvas.toBlob(blob=>blob?resolve(blob):reject(new Error('JPEG conversion failed')),'image/jpeg',.9));canvas.width=1;canvas.height=1;return result}
+      catch(error){console.warn('HEIC conversion failed',error);throw new Error('Не вдалося відкрити HEIC/HEIF фото. Спробуйте інший знімок або зробіть скриншот фото')}
+    }
+    async function decodePhoto(file){
+      const fileName=String(file?.name||'').toLowerCase(),mime=String(file?.type||'').toLowerCase(),isHeic=/\.(heic|heif)$/.test(fileName)||['image/heic','image/heif','image/heic-sequence','image/heif-sequence'].includes(mime);
+      if(!file||(!mime.startsWith('image/')&&!isHeic))throw new Error('Оберіть фотографію з галереї');
+      if(mime==='image/svg+xml'||fileName.endsWith('.svg'))throw new Error('SVG не можна використовувати як фото профілю');
+      if(file.size>25*1024*1024)throw new Error('Фото завелике. Максимальний розмір — 25 МБ');
+      let source=file,image;
+      try{if(isHeic)source=await convertHeic(file)||file;try{image=await openPhoto(source)}catch{if(source===file){source=await convertHeic(file);if(source)image=await openPhoto(source)}if(!image)throw new Error('Цей формат фото не підтримується вашим телефоном')}
+        const width=image.naturalWidth||image.width,height=image.naturalHeight||image.height;if(!width||!height)throw new Error('Не вдалося визначити розмір фото');const side=Math.min(width,height),sx=(width-side)/2,sy=(height-side)/2;
+        for(const size of [720,600,512,420]){const canvas=document.createElement('canvas');canvas.width=size;canvas.height=size;const context=canvas.getContext('2d',{alpha:false});if(!context)throw new Error('Не вдалося підготувати фото на цьому пристрої');context.imageSmoothingEnabled=true;context.imageSmoothingQuality='high';context.fillStyle='#0a1020';context.fillRect(0,0,size,size);context.drawImage(image,sx,sy,side,side,0,0,size,size);for(const quality of [.88,.8,.7,.6]){const result=canvas.toDataURL('image/jpeg',quality);if(result.length<=680000)return result;}}
+      }finally{if(typeof image?.close==='function')image.close()}
       throw new Error('Не вдалося підготувати фото. Оберіть інший знімок');
     }
     async function saveProfilePhoto(avatarDataUrl){if(photoBusy)return;photoBusy=true;document.body.classList.add('profile-photo-saving');try{await xpFetch('/api/account/profile',{method:'PUT',body:JSON.stringify({avatarDataUrl})});xpToast(avatarDataUrl?'Фото профілю оновлено':'Фото профілю прибрано');await loadProfile()}catch(error){xpToast(error.message)}finally{photoBusy=false;document.body.classList.remove('profile-photo-saving');avatarInput.value=''}}

@@ -36,6 +36,8 @@ const SHELL_FILES = [
   '/style.css',
   '/experience.css',
   '/experience.js',
+  '/vendor/heic-worker-1.5.2.js',
+  '/vendor/libheif-1.22.2.js',
   '/pwa.js',
   '/config.js',
   '/i18n.js',
