@@ -5,36 +5,93 @@
   <title>Профіль — Signal</title><link rel="stylesheet" href="style.css"><link rel="stylesheet" href="experience.css"><link rel="manifest" href="/manifest.json"><script src="pwa.js"></script>
 </head>
 <body class="xp-page">
-  <main class="xp-wrap">
-    <header class="xp-head"><img class="xp-logo" src="signal-premium-logo.png" alt="Signal"><b>Профіль</b><span class="xp-head-spacer"></span><a class="xp-icon-button" href="notifications.html" aria-label="Сповіщення"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg><span id="badge" class="xp-notification-dot" hidden></span></a></header>
-    <div id="content"><div class="xp-skeleton"></div><div class="xp-skeleton" style="height:250px;margin-top:16px"></div></div>
+  <main class="xp-wrap profile-v3-wrap">
+    <header class="xp-head profile-v3-head"><img class="xp-logo" src="signal-premium-logo.png" alt="Signal"><b>Профіль</b><span class="xp-head-spacer"></span><a id="notificationButton" class="xp-icon-button profile-v3-bell" href="notifications.html" aria-label="Сповіщення"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg><span id="badge" class="xp-notification-dot" aria-live="polite" hidden></span></a></header>
+    <input id="avatarInput" type="file" accept="image/*" hidden>
+    <div id="content"><div class="xp-skeleton profile-v3-skeleton"></div><div class="xp-skeleton" style="height:230px;margin-top:16px"></div></div>
   </main>
   <nav class="bottomnav" aria-label="Головна навігація"><a href="dashboard.html" aria-label="Головна"><span class="nav-icon"><svg class="nav-art nav-vector" viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 10.5 12 3l8.5 7.5"/><path d="M5.5 9.3V21h13V9.3M9.5 21v-6h5v6"/></svg></span></a><a href="plans.html" aria-label="Тарифи"><span class="nav-icon"><svg class="nav-art nav-vector" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3.5 12h17M12 3c2.5 2.6 3.8 5.6 3.8 9S14.5 18.4 12 21M12 3C9.5 5.6 8.2 8.6 8.2 12s1.3 6.4 3.8 9"/></svg></span></a><a href="usage.html" aria-label="Витрати"><span class="nav-icon"><svg class="nav-art nav-vector" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V5M16 20v-8M22 20V3M2 20h21"/></svg></span></a><a href="profile.html" class="active" aria-label="Профіль"><span class="nav-icon"><svg class="nav-art nav-vector" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="7.5" r="3.5"/><path d="M5 21c.4-4.6 2.8-7 7-7s6.6 2.4 7 7"/></svg></span></a></nav>
   <script src="config.js"></script><script src="experience.js"></script>
   <script>
+    const content=document.getElementById('content'),badge=document.getElementById('badge'),notificationButton=document.getElementById('notificationButton'),avatarInput=document.getElementById('avatarInput');
+    let currentProfile=null,photoBusy=false;
     const icon=name=>({
-      bell:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg>',
-      history:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 12a8 8 0 1 0 2.3-5.7L4 8.6V4M4 8.6h4.6M12 7v5l3 2"/></svg>',
-      savings:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 19V9m5 10V5m5 14v-7m5 7V3"/></svg>',
-      family:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="8" cy="8" r="3"/><circle cx="17" cy="9" r="2.3"/><path d="M2.5 20a5.5 5.5 0 0 1 11 0M14 15.5a4.5 4.5 0 0 1 6.5 4"/></svg>',
-      sim:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M7 3h7l4 4v14H7zM10 11h5v6h-5z"/></svg>',
-      card:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M3 10h18"/></svg>',
-      help:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M9.7 9a2.5 2.5 0 1 1 3.4 2.3c-.9.4-1.1 1-1.1 1.8M12 17h.01"/></svg>',
-      settings:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M12 2v3m0 14v3M2 12h3m14 0h3M4.9 4.9 7 7m10 10 2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1"/></svg>'
+      sim:'<svg viewBox="0 0 24 24"><path d="M7 3h7l4 4v14H7zM10 11h5v6h-5z"/></svg>',
+      tiers:'<svg viewBox="0 0 24 24"><path d="m12 3 8 4-8 4-8-4 8-4Z"/><path d="m4 12 8 4 8-4M4 17l8 4 8-4"/></svg>',
+      usage:'<svg viewBox="0 0 24 24"><path d="M4 20V11M9.3 20V7M14.7 20v-5M20 20V3"/></svg>',
+      card:'<svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M3 10h18"/></svg>',
+      crown:'<svg viewBox="0 0 24 24"><path d="m3 7 4.5 4L12 4l4.5 7L21 7l-2 11H5L3 7Z"/><path d="M6 21h12"/></svg>',
+      passport:'<svg viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="2"/><circle cx="12" cy="11" r="3"/><path d="M9 11h6M12 8c1 2 1 4 0 6M8 17h8"/></svg>',
+      family:'<svg viewBox="0 0 24 24"><circle cx="8" cy="8" r="3"/><circle cx="17" cy="9" r="2.3"/><path d="M2.5 20a5.5 5.5 0 0 1 11 0M14 15.5a4.5 4.5 0 0 1 6.5 4"/></svg>',
+      help:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.7 9a2.5 2.5 0 1 1 3.4 2.3c-.9.4-1.1 1-1.1 1.8M12 17h.01"/></svg>',
+      shield:'<svg viewBox="0 0 24 24"><path d="M12 3 20 6v5c0 5.1-3.1 8.5-8 10-4.9-1.5-8-4.9-8-10V6l8-3Z"/><path d="m9 12 2 2 4-5"/></svg>',
+      theme:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3m0 14v3M2 12h3m14 0h3M4.9 4.9 7 7m10 10 2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1"/></svg>',
+      savings:'<svg viewBox="0 0 24 24"><path d="M4 19V9m5 10V5m5 14v-7m5 7V3"/></svg>',
+      planner:'<svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.3-5.7L4 8.6V4M4 8.6h4.6M12 7v5l3 2"/></svg>',
+      bell:'<svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg>',
+      camera:'<svg viewBox="0 0 24 24"><path d="M8 7 9.5 5h5L16 7h3a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h3Z"/><circle cx="12" cy="13" r="4"/></svg>'
     })[name]||'';
-    const row=(href,name,title,subtitle)=>`<a class="xp-menu-item" href="${href}"><span class="xp-menu-icon">${icon(name)}</span><span class="xp-menu-copy"><b>${title}</b><span>${subtitle}</span></span><span class="xp-menu-arrow">›</span></a>`;
-    const metric=(value,label)=>`<div class="xp-stat-mini"><strong>${xpEsc(value)}</strong><span>${label}</span></div>`;
-    const statusLabel=value=>({active:'Активна',ready:'Готова',available:'Готова',pending:'Готується',provisioning:'Готується',suspended:'Призупинена',expired:'Завершена',revoked:'Відкликана'}[String(value||'').toLowerCase()]||'Перевіряється');
-    async function loadProfile(){
-      content.innerHTML='<div class="xp-skeleton"></div><div class="xp-skeleton" style="height:250px;margin-top:16px"></div>';
-      try{
-        const [data,notifications,deck]=await Promise.all([xpFetch('/api/account/profile-overview'),xpFetch('/api/account/notifications'),xpFetch('/api/account/home-deck')]);
-        badge.hidden=!notifications.unread;if(notifications.unread)badge.textContent=notifications.unread>9?'9+':notifications.unread;
-        const i=data.identity,s=data.stats,a=deck.active||{},avatar=i.avatarDataUrl?`style="background-image:url('${i.avatarDataUrl.replace(/'/g,'%27')}')"`:'';
-        content.innerHTML=`<section class="xp-panel xp-profile-shell"><div class="xp-profile-hero"><div class="xp-avatar" ${avatar}>${i.avatarDataUrl?'':xpEsc((i.displayName||'?')[0].toUpperCase())}</div><div class="xp-profile-copy"><span class="xp-profile-kicker">SIGNAL TRAVELER</span><h1>${xpEsc(i.displayName)}</h1><p>${xpEsc(i.email)}</p><span class="xp-badge" style="display:inline-block;margin-top:8px">${xpEsc(s.tier)}</span></div></div><a class="xp-profile-plan" href="esim-management.html"><span class="xp-menu-icon">${icon('sim')}</span><span><small>АКТИВНИЙ ПАКЕТ</small><b>${xpEsc(a.title||data.plan.name||'Моя eSIM')}</b><em>${xpEsc(a.dataLabel||(data.plan.remainingGb==null?'Безліміт':`${data.plan.remainingGb} GB`))} · ${xpEsc(a.daysLabel||statusLabel(data.plan.status))}</em></span><strong>${xpEsc(statusLabel(a.status||data.plan.status))}</strong></a><div class="xp-stat-grid">${metric(s.points,'POINTS')}${metric(s.countries,'КРАЇНИ')}${metric(s.familyEsims,'ДЛЯ БЛИЗЬКИХ')}${metric(s.activeFamilyTrips,'ПОЇЗДКИ')}</div></section><section class="xp-smart-card" style="margin-top:14px"><small>${xpEsc(data.smart.eyebrow)}</small><h2>${xpEsc(data.smart.title)}</h2><p>${xpEsc(data.smart.message)}</p><a class="xp-btn" href="${xpEsc(data.smart.action.url)}">${xpEsc(data.smart.action.label)}</a></section><div class="xp-section-kicker">ЗВ’ЯЗОК</div><section class="xp-panel xp-menu">${row('esim-management.html','sim','Моя eSIM','Встановлення, відновлення та поточний статус')}${row('plans.html','card','Тарифи й пакети','Обрати пакет або додати інтернет')}${row('usage.html','savings','Використання інтернету','Залишок, прогноз і витрати')}${row('wallet-pass.html','card','Travel Pass','Google Wallet та офлайн-доступ')}</section><div class="xp-section-kicker">ПОДОРОЖІ Й ПЕРЕВАГИ</div><section class="xp-panel xp-menu">${row('savings.html','savings','Моя економія','Витрати Signal та орієнтовна вигода')}${row('signal-club.html','savings','Signal Club','Points, рівень і доступні знижки')}${row('signal-passport.html','history','Signal Passport','Країни, штампи та історія подорожей')}${row('family-center.html','family','Сімейний центр','eSIM близьких і спільні поїздки')}${row('travel-assistant.html','history','Планувальник подорожі','Дати, напрямок і нагадування')}</section><div class="xp-section-kicker">АКАУНТ І НАЛАШТУВАННЯ</div><section class="xp-panel xp-menu">${row('account-settings.html','settings','Акаунт і безпека','Фото, ім’я, PIN, Face ID та сесії')}${row('payments.html','card','Оплата й підписка','Картка, чеки та історія оплат')}${row('notifications.html','bell','Сповіщення',notifications.unread?`${notifications.unread} непрочитаних`:'Усе прочитано')}${row('language.html','settings','Мова та вигляд','Українська, English і тема')}</section><div class="xp-section-kicker">ДОПОМОГА</div><section class="xp-panel xp-menu">${row('support.html','help','Підтримка','Звернення й відповіді команди')}${row('app-tools.html','help','Допомога з підключенням','Мережа, APN і безпечна діагностика')}${row('activity.html','history','Історія активності','Покупки, eSIM, підтримка й Points')}</section><button id="logout" class="xp-btn danger" style="margin-top:16px">Вийти з акаунта</button>`;
-        logout.onclick=()=>{localStorage.removeItem('signal_session_token');localStorage.removeItem('signal_email');location.href='login.html'};
-      }catch(error){content.innerHTML=`<div class="xp-empty xp-panel"><i>↻</i><h2>Профіль не завантажився</h2><p class="xp-muted">${xpEsc(error.message)}</p><button class="xp-btn secondary" style="margin-top:14px" onclick="loadProfile()">Спробувати ще раз</button></div>`;}
+    const row=(href,name,title,subtitle)=>`<a class="xp-menu-item profile-v3-row" href="${href}"><span class="xp-menu-icon">${icon(name)}</span><span class="xp-menu-copy"><b>${title}</b><span>${subtitle}</span></span><span class="xp-menu-arrow">›</span></a>`;
+    const quick=(href,name,title,subtitle)=>`<a class="profile-v3-quick" href="${href}"><span class="profile-v3-quick-icon">${icon(name)}</span><span><b>${title}</b><small>${subtitle}</small></span><i>›</i></a>`;
+    const statusLabel=value=>({active:'Активна',ready:'Готова',available:'Готова',pending:'Готується',provisioning:'Готується',suspended:'Призупинена',expired:'Завершена',revoked:'Відкликана',used_up:'Використана'}[String(value||'').toLowerCase()]||'Перевіряється');
+    const localData=value=>String(value||'').replace(/\sGB\b/i,' ГБ').replace('.',',');
+    function setNotificationBadge(unread){
+      const count=Math.max(0,Number(unread)||0),hasUnread=count>0;
+      badge.hidden=!hasUnread;
+      badge.textContent=hasUnread?(count>99?'99+':String(count)):'';
+      notificationButton.classList.toggle('has-unread',hasUnread);
+      notificationButton.setAttribute('aria-label',hasUnread?`Сповіщення: ${count} непрочитаних`:'Сповіщення');
     }
+    async function refreshNotificationBadge(){try{const notifications=await xpFetch('/api/account/notifications');setNotificationBadge(notifications.unread);return notifications}catch{return {unread:0,items:[]}}}
+    function renderProfile(data,notifications,deck){
+      currentProfile=data;
+      const i=data.identity||{},s=data.stats||{},a=deck.active||{},percent=Math.max(0,Math.min(100,Number(a.remainingPercent??100))),ringValue=a.totalLabel==='Безлімітний інтернет'?'∞':`${Math.round(percent)}%`,hasPhoto=Boolean(i.avatarDataUrl),name=i.displayName||'Signal Traveler';
+      content.innerHTML=`
+        <section class="profile-v3-hero">
+          <div class="profile-v3-photo-column">
+            <div class="profile-v3-avatar-wrap"><div id="currentAvatar" class="profile-v3-avatar" role="img" aria-label="Фото профілю">${hasPhoto?'':xpEsc(name[0].toUpperCase())}</div><label class="profile-v3-camera" for="avatarInput" aria-label="Змінити фото">${icon('camera')}</label></div>
+            <label class="profile-v3-photo-button" for="avatarInput">Змінити фото</label>
+            ${hasPhoto?'<button class="profile-v3-photo-remove" type="button" onclick="removeProfilePhoto()">Прибрати</button>':''}
+          </div>
+          <div class="profile-v3-identity"><h1>${xpEsc(name)}</h1><p>${xpEsc(i.email)}</p><a class="profile-v3-tier" href="signal-club.html">◇&nbsp; ${xpEsc(s.tier)} · ${xpEsc(s.points)} Points <span>›</span></a><small>Подорожуй більше. Живи яскравіше.</small></div>
+          <div class="profile-v3-globe" aria-hidden="true"><i></i><span>БІЛЬШЕ<br>СВОБОДИ<br>В ПОДОРОЖАХ</span></div>
+        </section>
+        <a class="profile-v3-package" href="esim-management.html">
+          <div class="profile-v3-ring" style="--remaining:${percent}"><span><strong>${xpEsc(ringValue)}</strong><small>ЗАЛИШИЛОСЬ</small></span></div>
+          <div class="profile-v3-package-copy"><small>АКТИВНИЙ ПАКЕТ</small><h2>${xpEsc(a.title||data.plan?.name||'Моя eSIM')}</h2><strong>${xpEsc(localData(a.dataLabel||(data.plan?.remainingGb==null?'Безліміт':`${data.plan.remainingGb} GB`)))} <span>залишилось</span></strong><p>${xpEsc(a.daysLabel||statusLabel(data.plan?.status))}</p></div>
+          <div class="profile-v3-package-state"><b>●&nbsp; ${xpEsc(statusLabel(a.status||data.plan?.status))}</b><span>›</span></div>
+          <svg class="profile-v3-map" viewBox="0 0 180 110" aria-hidden="true"><path d="M19 69 34 56l17 2 10-14 23 5 13-18 18 8 7 14 24 4 17 18-14 14-30-5-20 12-19-8-14 8-20-8Z"/><path d="M65 86 78 99M113 84l8 17M91 49l5-20"/><circle cx="98" cy="58" r="3"/><circle cx="132" cy="72" r="2.5"/></svg>
+        </a>
+        <section class="profile-v3-quick-grid" aria-label="Швидкі дії">${quick('esim-management.html','sim','Моя eSIM','Керування eSIM')}${quick('plans.html','tiers','Тарифи','Обрати пакет')}${quick('usage.html','usage','Використання','Трафік і статистика')}${quick('wallet-pass.html','card','Travel Pass','Google Wallet')}</section>
+        <div class="xp-section-kicker profile-v3-kicker">НАЛАШТУВАННЯ</div>
+        <section class="xp-panel xp-menu profile-v3-menu">${row('signal-club.html','crown','Signal Club','Бонуси, рівні та переваги')}${row('signal-passport.html','passport','Passport','Країни, штампи й історія')}${row('family-center.html','family','Сім’я','eSIM для близьких')}</section>
+        <div class="xp-section-kicker profile-v3-kicker">ДОПОМОГА ТА ІНШЕ</div>
+        <section class="xp-panel xp-menu profile-v3-menu">${row('support.html','help','Підтримка','Звернення й відповіді')}${row('account-settings.html','shield','Акаунт і безпека','Фото, PIN, Face ID та сесії')}${row('payments.html','card','Оплата й підписка','Картка, чеки та історія оплат')}${row('language.html','theme','Мова та вигляд','Українська, English і тема')}</section>
+        <details class="profile-v3-more"><summary>Ще сервіси <span>⌄</span></summary><section class="xp-panel xp-menu profile-v3-menu">${row('savings.html','savings','Моя економія','Орієнтовна вигода в подорожах')}${row('travel-assistant.html','planner','Планувальник подорожі','Дати, напрямок і нагадування')}${row('notifications.html','bell','Сповіщення',notifications.unread?`${notifications.unread} непрочитаних`:'Усе прочитано')}${row('app-tools.html','help','Допомога з підключенням','Мережа, APN і діагностика')}${row('activity.html','planner','Історія активності','Покупки, eSIM, підтримка й Points')}</section></details>
+        <button id="logout" class="profile-v3-logout" type="button">Вийти з акаунта</button>`;
+      const avatar=document.getElementById('currentAvatar');if(hasPhoto)avatar.style.backgroundImage=`url("${i.avatarDataUrl}")`;
+      document.getElementById('logout').onclick=()=>{localStorage.removeItem('signal_session_token');localStorage.removeItem('signal_email');location.href='login.html'};
+    }
+    async function loadProfile(){
+      content.innerHTML='<div class="xp-skeleton profile-v3-skeleton"></div><div class="xp-skeleton" style="height:230px;margin-top:16px"></div>';
+      try{const [data,notifications,deck]=await Promise.all([xpFetch('/api/account/profile-overview'),xpFetch('/api/account/notifications'),xpFetch('/api/account/home-deck')]);setNotificationBadge(notifications.unread);renderProfile(data,notifications,deck)}
+      catch(error){content.innerHTML=`<div class="xp-empty xp-panel"><i>↻</i><h2>Профіль не завантажився</h2><p class="xp-muted">${xpEsc(error.message)}</p><button class="xp-btn secondary" style="margin-top:14px" onclick="loadProfile()">Спробувати ще раз</button></div>`}
+    }
+    async function decodePhoto(file){
+      if(!file||!String(file.type||'').startsWith('image/'))throw new Error('Оберіть фотографію з галереї');
+      if(file.size>25*1024*1024)throw new Error('Фото завелике. Максимальний розмір — 25 МБ');
+      const url=URL.createObjectURL(file),image=new Image();
+      try{await new Promise((resolve,reject)=>{image.onload=resolve;image.onerror=()=>reject(new Error('Цей формат фото не підтримується вашим телефоном'));image.src=url});const side=Math.min(image.naturalWidth,image.naturalHeight),sx=(image.naturalWidth-side)/2,sy=(image.naturalHeight-side)/2;
+        for(const size of [720,600,512,420]){const canvas=document.createElement('canvas');canvas.width=size;canvas.height=size;const context=canvas.getContext('2d',{alpha:false});context.imageSmoothingEnabled=true;context.imageSmoothingQuality='high';context.fillStyle='#0a1020';context.fillRect(0,0,size,size);context.drawImage(image,sx,sy,side,side,0,0,size,size);for(const quality of [.88,.8,.7,.6]){const result=canvas.toDataURL('image/jpeg',quality);if(result.length<=680000)return result;}}
+      }finally{URL.revokeObjectURL(url)}
+      throw new Error('Не вдалося підготувати фото. Оберіть інший знімок');
+    }
+    async function saveProfilePhoto(avatarDataUrl){if(photoBusy)return;photoBusy=true;document.body.classList.add('profile-photo-saving');try{await xpFetch('/api/account/profile',{method:'PUT',body:JSON.stringify({avatarDataUrl})});xpToast(avatarDataUrl?'Фото профілю оновлено':'Фото профілю прибрано');await loadProfile()}catch(error){xpToast(error.message)}finally{photoBusy=false;document.body.classList.remove('profile-photo-saving');avatarInput.value=''}}
+    async function removeProfilePhoto(){if(!confirm('Прибрати фото профілю?'))return;await saveProfilePhoto(null)}
+    avatarInput.addEventListener('change',async()=>{const file=avatarInput.files?.[0];if(!file)return;try{document.body.classList.add('profile-photo-saving');const prepared=await decodePhoto(file),avatar=document.getElementById('currentAvatar');if(avatar){avatar.textContent='';avatar.style.backgroundImage=`url("${prepared}")`;}document.body.classList.remove('profile-photo-saving');await saveProfilePhoto(prepared)}catch(error){document.body.classList.remove('profile-photo-saving');avatarInput.value='';xpToast(error.message)}});
+    document.addEventListener('visibilitychange',()=>{if(!document.hidden)refreshNotificationBadge()});
+    window.addEventListener('focus',refreshNotificationBadge);
+    setInterval(refreshNotificationBadge,60000);
     loadProfile();
   </script>
 </body>

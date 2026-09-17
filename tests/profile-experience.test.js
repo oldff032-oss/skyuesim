@@ -33,17 +33,39 @@ test('profile, notifications, activity, savings and family endpoints require a c
   assert.match(server,/app\.post\('\/api\/account\/notifications\/:id\/read',requireUserSession/);
 });
 
-test('profile 2.0 and its mobile centers are connected and cacheable offline',()=>{
+test('profile v3 and its mobile centers are connected and cacheable offline',()=>{
   const profile=read('profile.html'),worker=read('sw.js'),dashboard=read('dashboard.html');
   for(const page of ['notifications.html','activity.html','savings.html','family-center.html']){assert.match(profile,new RegExp(page.replace('.','\\.')));assert.match(worker,new RegExp(page.replace('.','\\.')));assert.match(read(page),/viewport-fit=cover/);}
   assert.match(dashboard,/\/api\/account\/home-deck/);
   assert.match(dashboard,/href="notifications\.html"/);
   assert.match(profile,/\/api\/account\/home-deck/);
   assert.match(profile,/АКТИВНИЙ ПАКЕТ/);
-  assert.match(profile,/ПОДОРОЖІ Й ПЕРЕВАГИ/);
+  assert.match(profile,/profile-v3-hero/);
+  assert.match(profile,/profile-v3-quick-grid/);
+  assert.match(profile,/ДОПОМОГА ТА ІНШЕ/);
   assert.match(profile,/loadProfile\(\)/);
   assert.match(read('family-trip.html'),/data-member/);
   assert.match(read('family-trip.html'),/Додати близьку людину/);
+});
+
+test('profile photo upload is compressed on device and saved through the protected profile endpoint',()=>{
+  const profile=read('profile.html'),server=read('server.js'),auth=read('authService.js');
+  assert.match(profile,/accept="image\/\*"/);
+  assert.match(profile,/canvas\.toDataURL\('image\/jpeg'/);
+  assert.match(profile,/25\*1024\*1024/);
+  assert.match(profile,/xpFetch\('\/api\/account\/profile',\{method:'PUT'/);
+  assert.match(server,/app\.put\('\/api\/account\/profile',\s*requireUserSession/);
+  assert.match(auth,/avatarDataUrl/);
+});
+
+test('profile bell hides at zero and shows a live numeric unread count',()=>{
+  const profile=read('profile.html'),styles=read('experience.css');
+  assert.match(profile,/function setNotificationBadge\(unread\)/);
+  assert.match(profile,/badge\.hidden=!hasUnread/);
+  assert.match(profile,/count>99\?'99\+'/);
+  assert.match(profile,/setInterval\(refreshNotificationBadge,60000\)/);
+  assert.match(profile,/visibilitychange/);
+  assert.match(styles,/\.profile-v3-bell \.xp-notification-dot\[hidden\]\{display:none\}/);
 });
 
 test('savings is explicitly estimated instead of promising an exact roaming saving',()=>{
