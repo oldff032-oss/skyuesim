@@ -479,10 +479,17 @@ async function checkUsage(input) {
   try {
     let profileResponse;
     if (requestedIccid) {
-      // eSIM Access documents /esim/list + ICCID as the canonical source for
-      // totalVolume and orderUsage. Do not combine it with another endpoint:
-      // after a top-up that can mix counters from different package states.
-      profileResponse = await esimAccessRequest('/api/v1/open/esim/list', { iccid:requestedIccid, pager:{ pageNum:1, pageSize:20 } });
+      // Newer eSIM Access accounts expose the documented /list route, while
+      // some existing reseller accounts return HTTP 404 for it and only
+      // expose /query. Use exactly one successful response and still require
+      // an exact ICCID/esimTranNo match below, so counters can never be mixed.
+      try {
+        profileResponse = await esimAccessRequest('/api/v1/open/esim/list', { iccid:requestedIccid, pager:{ pageNum:1, pageSize:20 } });
+      } catch (error) {
+        if (Number(error.status) !== 404) throw error;
+        log('usage_list_unavailable_using_query', { iccid:mask(requestedIccid), status:error.status, code:error.code });
+        profileResponse = await queryProfiles({ iccid:requestedIccid, pageNum:1, pageSize:20 });
+      }
     } else profileResponse = await queryOrderProfiles(orderNo);
     const profiles = profileResponse?.obj?.esimList || [];
     profile = profiles.find((item) => requestedTranNo && String(item?.esimTranNo || '') === requestedTranNo)

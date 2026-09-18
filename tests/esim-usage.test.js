@@ -48,6 +48,24 @@ test('official ICCID profile is the only usage source and is not mixed with anot
   assert.equal(calls.length,1);
 });
 
+test('legacy reseller accounts fall back to the compatible query route when list returns 404', async t => {
+  const originalFetch=global.fetch,calls=[];
+  t.after(()=>{global.fetch=originalFetch});
+  global.fetch=async (url,options={})=>{
+    calls.push({url:String(url),body:JSON.parse(options.body||'{}')});
+    if(calls.length===1)return new Response(JSON.stringify({success:false,errorCode:'404',errorMsg:'path: /api/v1/open/esim/list'}),{status:404,headers:{'content-type':'application/json'}});
+    return response({success:true,obj:{esimList:[{orderNo:'ORDER-LEGACY',esimTranNo:'TRAN-LEGACY',iccid:'8943000000000000007',orderUsage:7441033216,totalVolume:42949672960,esimStatus:'IN_USE'}]}});
+  };
+  const usage=await service.checkUsage({orderNo:'ORDER-LEGACY',esimTranNo:'TRAN-LEGACY',iccid:'8943000000000000007'});
+  assert.equal(calls.length,2);
+  assert.match(calls[0].url,/\/api\/v1\/open\/esim\/list$/);
+  assert.match(calls[1].url,/\/api\/v1\/open\/esim\/query$/);
+  assert.equal(calls[1].body.iccid,'8943000000000000007');
+  assert.equal(usage.usedBytes,7441033216);
+  assert.equal(usage.totalBytes,42949672960);
+  assert.equal(usage.source,'profile_api');
+});
+
 test('usage lookup rejects a response that does not contain the requested ICCID', async t => {
   const originalFetch=global.fetch;
   t.after(()=>{global.fetch=originalFetch});
