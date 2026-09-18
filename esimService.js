@@ -476,76 +476,40 @@ async function checkUsage(input) {
   }
 
   let profile = null;
-  let profileQueryError = null;
   try {
     let profileResponse;
     if (requestedIccid) {
-      // eSIM Access documents /esim/list + ICCID as the canonical usage
-      // lookup. Keep /query as a compatibility fallback for older accounts.
-      try {
-        profileResponse = await esimAccessRequest('/api/v1/open/esim/list', { iccid:requestedIccid, pager:{ pageNum:1, pageSize:20 } });
-      } catch {
-        profileResponse = await queryProfiles({ iccid:requestedIccid });
-      }
+      // eSIM Access documents /esim/list + ICCID as the canonical source for
+      // totalVolume and orderUsage. Do not combine it with another endpoint:
+      // after a top-up that can mix counters from different package states.
+      profileResponse = await esimAccessRequest('/api/v1/open/esim/list', { iccid:requestedIccid, pager:{ pageNum:1, pageSize:20 } });
     } else profileResponse = await queryOrderProfiles(orderNo);
     const profiles = profileResponse?.obj?.esimList || [];
     profile = profiles.find((item) => requestedTranNo && String(item?.esimTranNo || '') === requestedTranNo)
       || profiles.find((item) => requestedIccid && String(item?.iccid || '') === requestedIccid)
-      || profiles[0]
+      || (!requestedTranNo && !requestedIccid ? profiles[0] : null)
       || null;
   } catch (error) {
-    profileQueryError = error;
-    // A stored esimTranNo can still query usage even when an old order number
-    // is no longer returned by the profile endpoint.
-    if (!requestedTranNo) throw error;
+    error.usageLookupFailed = true;
+    throw error;
   }
 
-  if (!profile && !requestedTranNo) {
-    throw new EsimAccessError(`No eSIM profile found for ${orderNo || requestedIccid}.`, { code:'PROFILE_NOT_FOUND' });
+  if (!profile) {
+    throw new EsimAccessError(`No exact eSIM profile found for ${requestedIccid || requestedTranNo || orderNo}.`, { code:'PROFILE_NOT_FOUND' });
   }
 
-  const profileView = profile || { orderNo, esimTranNo:requestedTranNo, iccid:requestedIccid };
-  const fallbackUsage = bytes(profile?.orderUsage);
-  const fallbackTotal = bytes(profile?.totalVolume) ?? bytes(profile?.packageList?.[0]?.volume);
-  const esimTranNo = requestedTranNo || String(profile?.esimTranNo || '').trim();
-  if (!esimTranNo) {
-    log('usage_using_profile_fallback', { orderNo:mask(orderNo), iccid:mask(requestedIccid), reason:'missing esimTranNo' });
-    return usageResult(fallbackUsage, fallbackTotal, profileView, null, {
-      source:'profile_fallback', live:false, stale:true,
-      warning:'Провайдер не повернув ідентифікатор профілю. Показано останні дані профілю.',
-    });
+  const usedBytes = bytes(profile.orderUsage);
+  const packageTotalBytes = Array.isArray(profile.packageList)
+    ? profile.packageList.reduce((sum,item) => sum + (bytes(item?.volume) || 0), 0)
+    : 0;
+  const totalBytes = bytes(profile.totalVolume) ?? (packageTotalBytes || null);
+  if (usedBytes == null || totalBytes == null) {
+    throw new EsimAccessError('The provider profile did not include a complete traffic counter.', { code:'USAGE_VALUES_MISSING' });
   }
-
-  try {
-    const usageResponse = await esimAccessRequest('/api/v1/open/esim/usage/query', { esimTranNoList:[esimTranNo] });
-    const root = usageResponse?.obj;
-    const records = Array.isArray(root) ? root : (root?.esimList || root?.esimUsageList || root?.list || root?.usageList || [root]);
-    const usage = records.find((item) => String(item?.esimTranNo || '') === esimTranNo)
-      || records.find((item) => requestedIccid && String(item?.iccid || '') === requestedIccid)
-      || records.find(Boolean);
-    if (!usage) throw new EsimAccessError('Usage endpoint returned no record.', { code:'USAGE_NOT_FOUND' });
-    const liveUsed = bytes(usage.dataUsage) ?? bytes(usage.orderUsage) ?? bytes(usage.usedVolume);
-    const liveTotal = bytes(usage.totalData) ?? bytes(usage.totalVolume) ?? bytes(usage.packageList?.[0]?.volume);
-    if (liveUsed == null) throw new EsimAccessError('Usage endpoint returned no traffic counter.', { code:'USAGE_VALUES_MISSING' });
-    return usageResult(liveUsed, liveTotal ?? fallbackTotal, profileView, usage, {
-      source:'usage_api', live:true, stale:false,
-      syncedAt:new Date().toISOString(),
-    });
-  } catch (error) {
-    log('usage_endpoint_failed_using_profile_counter', { orderNo:mask(orderNo), esimTranNo:mask(esimTranNo), code:error.code, message:error.message });
-    if (profile && fallbackUsage != null) {
-      return usageResult(fallbackUsage, fallbackTotal, profileView, null, {
-        source:'profile_api', live:true, stale:false,
-        syncedAt:new Date().toISOString(),
-      });
-    }
-    return usageResult(fallbackUsage, fallbackTotal, profileView, null, {
-      source:'profile_fallback', live:false, stale:true,
-      syncedAt:new Date().toISOString(),
-      errorCode:error.code || profileQueryError?.code || null,
-      warning:'Оператор не підтвердив свіжий лічильник трафіку. Показано останні збережені дані; повторіть перевірку пізніше.',
-    });
-  }
+  return usageResult(usedBytes, totalBytes, profile, profile, {
+    source:'profile_api', live:true, stale:false,
+    syncedAt:new Date().toISOString(),
+  });
 }
 
 function usageResult(usedBytes, totalBytes, profile, usageDetails = null, metadata = {}) {

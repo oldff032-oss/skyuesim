@@ -153,6 +153,22 @@ function cachedEsimUsage(user,warning='Оператор тимчасово не 
   return{usedBytes,totalBytes,remainingBytes,usedGb:usedBytes/(1024**3),totalGb:totalBytes==null?null:totalBytes/(1024**3),remainingGb:remainingBytes==null?null:remainingBytes/(1024**3),source:esim.usageSource||'cached',stale:true,live:false,esimStatus:esim.esimStatus||esim.status||null,serviceEnded:Boolean(esim.serviceEnded),serviceEndedReason:esim.serviceEndedReason||null,apn:esim.apn||null,expiredTime:esim.expiredTime||null,activateTime:esim.activateTime||null,lastUpdateTime:esim.lastProviderUsageAt||esim.lastUpdateTime||esim.assignedAt||null,providerUpdatedAt:esim.lastProviderUsageAt||esim.lastUpdateTime||null,syncedAt:esim.lastUsageSyncAt||null,warning};
 }
 
+function mergeTopupUsage(profile,topup,packageInfo={},now=new Date().toISOString()){
+  const current=cachedEsimUsage({esim:profile}),addedGb=packageInfo.unlimited?null:Number(packageInfo.dataLimitGb),addedBytes=Number.isFinite(addedGb)&&addedGb>0?Math.round(addedGb*(1024**3)):null;
+  const expectedTotalBytes=current.totalBytes!=null&&addedBytes!=null?current.totalBytes+addedBytes:null;
+  const providerTotalBytes=topup.totalGb==null?null:Math.max(0,Math.round(Number(topup.totalGb)*(1024**3)));
+  const providerUsedBytes=topup.usedGb==null?null:Math.max(0,Math.round(Number(topup.usedGb)*(1024**3)));
+  // A fixed-data top-up is cumulative. If the immediate response only echoes
+  // the added package volume, retain the mathematically safe cumulative value
+  // until /esim/list confirms the same (or a larger) total.
+  const providerTotalIsCumulative=expectedTotalBytes==null||providerTotalBytes!=null&&providerTotalBytes>=expectedTotalBytes;
+  const totalBytes=providerTotalIsCumulative&&providerTotalBytes!=null?providerTotalBytes:(expectedTotalBytes??providerTotalBytes??current.totalBytes);
+  const usedBytes=providerTotalIsCumulative&&providerUsedBytes!=null?Math.min(providerUsedBytes,totalBytes??providerUsedBytes):Math.min(current.usedBytes,totalBytes??current.usedBytes);
+  const remainingBytes=totalBytes==null?null:Math.max(0,totalBytes-usedBytes);
+  const pendingTopupConfirmation=expectedTotalBytes==null?null:{expectedMinimumTotalBytes:expectedTotalBytes,addedBytes,providerTransactionId:topup.transactionId||null,createdAt:now};
+  return{...profile,...(topup.iccid?{iccid:topup.iccid}:{}),dataLimitGb:totalBytes==null?null:totalBytes/(1024**3),usedGb:usedBytes/(1024**3),remainingGb:remainingBytes==null?null:remainingBytes/(1024**3),totalBytes,usedBytes,remainingBytes,...(topup.expiredTime?{expiredTime:topup.expiredTime}:{}),status:'active',esimStatus:'IN_USE',serviceEnded:false,serviceEndedReason:null,lastTopupAt:now,lastTopupPackageCode:packageInfo.packageCode||null,lastUpdateTime:now,lastProviderUsageAt:now,lastUsageSyncAt:now,usageSource:'topup_response',usageStale:!providerTotalIsCumulative,lastUsageSyncError:providerTotalIsCumulative?null:'Оператор ще підтверджує сумарний обсяг після поповнення.',pendingTopupConfirmation,lastPushAlertThreshold:null};
+}
+
 async function syncEsimUsageForUser(email,{force=false}={}){
   const user=getUser(email);
   if(!user?.esim)throw Object.assign(new Error('Активну eSIM не знайдено'),{code:'ESIM_NOT_FOUND',status:404});
@@ -169,19 +185,22 @@ async function syncEsimUsageForUser(email,{force=false}={}){
   }
   const usage=await checkUsage({orderNo:profile.orderNo,esimTranNo:profile.esimTranNo,iccid:profile.iccid});
   const cached=cachedEsimUsage(user),candidateUsed=usage.usedBytes==null?null:Math.max(0,Math.trunc(Number(usage.usedBytes)||0));
-  const providerTotal=usage.totalBytes==null?null:Math.max(0,Math.trunc(Number(usage.totalBytes)||0));
-  let usedBytes=usage.stale?(candidateUsed==null?cached.usedBytes:Math.max(cached.usedBytes,candidateUsed)):(candidateUsed??cached.usedBytes);
-  const totalBytes=providerTotal??cached.totalBytes,providerState=String(usage.esimStatus||profile.esimStatus||'').trim().toUpperCase(),effectiveExpiredTime=usage.expiredTime??profile.expiredTime??null,expiryMs=effectiveExpiredTime?new Date(effectiveExpiredTime).getTime():NaN;
+  const providerTotal=usage.totalBytes==null?null:Math.max(0,Math.trunc(Number(usage.totalBytes)||0)),expectedTopupTotal=Math.max(0,Math.trunc(Number(profile.pendingTopupConfirmation?.expectedMinimumTotalBytes)||0));
+  const providerTotalRegressed=providerTotal!=null&&cached.totalBytes!=null&&providerTotal<cached.totalBytes;
+  const topupNotConfirmed=expectedTopupTotal>0&&(providerTotal==null||providerTotal<expectedTopupTotal);
+  const counterStale=Boolean(usage.stale||providerTotalRegressed||topupNotConfirmed);
+  let usedBytes=counterStale?cached.usedBytes:(candidateUsed??cached.usedBytes);
+  const totalBytes=counterStale?(cached.totalBytes??providerTotal):(providerTotal??cached.totalBytes),providerState=String(counterStale?(profile.esimStatus||'IN_USE'):(usage.esimStatus||profile.esimStatus||'')).trim().toUpperCase(),effectiveExpiredTime=counterStale?(profile.expiredTime||null):(usage.expiredTime??profile.expiredTime??null),expiryMs=effectiveExpiredTime?new Date(effectiveExpiredTime).getTime():NaN;
   const providerUsedUp=['USED_UP','EXHAUSTED','DEPLETED'].includes(providerState),providerExpired=providerState==='EXPIRED'||(Number.isFinite(expiryMs)&&expiryMs<=Date.now());
   if(providerUsedUp&&totalBytes!=null)usedBytes=totalBytes;
   let remainingBytes=totalBytes==null?null:Math.max(0,totalBytes-usedBytes);
   if((providerUsedUp||providerExpired)&&totalBytes!=null)remainingBytes=0;
   const usedGb=usedBytes/(1024**3),totalGb=totalBytes==null?null:totalBytes/(1024**3),remainingGb=remainingBytes==null?null:remainingBytes/(1024**3),serviceEnded=providerUsedUp||providerExpired,serviceEndedReason=providerUsedUp?'used_up':providerExpired?'expired':null;
-  const syncedAt=usage.syncedAt||new Date().toISOString(),providerUpdatedAt=usage.providerUpdatedAt||usage.lastUpdateTime||profile.lastProviderUsageAt||null,day=syncedAt.slice(0,10),history=[...(profile.usageHistory||[])],snapshot={day,usedBytes,totalBytes,remainingBytes,usedGb,totalGb,remainingGb,source:usage.source||'usage_api',providerUpdatedAt};
+  const syncedAt=usage.syncedAt||new Date().toISOString(),providerUpdatedAt=usage.providerUpdatedAt||usage.lastUpdateTime||profile.lastProviderUsageAt||null,day=syncedAt.slice(0,10),history=[...(profile.usageHistory||[])],snapshot={day,usedBytes,totalBytes,remainingBytes,usedGb,totalGb,remainingGb,source:usage.source||'profile_api',providerUpdatedAt};
   const existingIndex=history.findIndex(item=>item.day===day);if(existingIndex>=0)history[existingIndex]=snapshot;else history.push(snapshot);
-  const exhausted=providerUsedUp||(totalBytes>0&&remainingBytes===0),nextStatus=providerExpired?'expired':exhausted?'used_up':profile.status,nextEsim={...profile,usedBytes,totalBytes,remainingBytes,usedGb,dataLimitGb:totalGb,remainingGb,apn:usage.apn??profile.apn,expiredTime:usage.expiredTime??profile.expiredTime,activateTime:usage.activateTime??profile.activateTime,lastUpdateTime:providerUpdatedAt||profile.lastUpdateTime,lastProviderUsageAt:providerUpdatedAt,lastUsageSyncAt:syncedAt,usageSource:usage.source||'usage_api',usageStale:Boolean(usage.stale),lastUsageSyncError:usage.stale?(usage.warning||'Provider usage is stale'):null,usageHistory:history.slice(-31),status:nextStatus,esimStatus:providerExpired?'EXPIRED':exhausted?'USED_UP':(usage.esimStatus||profile.esimStatus),serviceEnded,serviceEndedReason};
+  const exhausted=providerUsedUp||(totalBytes>0&&remainingBytes===0),nextStatus=providerExpired?'expired':exhausted?'used_up':profile.status,warning=topupNotConfirmed?'Оператор ще не підтвердив сумарний обсяг після поповнення. Показано останню підтверджену відповідь поповнення.':providerTotalRegressed?'Оператор повернув менший загальний обсяг, ніж уже підтверджено. Старі дані не перезаписано.':usage.warning||null,nextEsim={...profile,usedBytes,totalBytes,remainingBytes,usedGb,dataLimitGb:totalGb,remainingGb,apn:usage.apn??profile.apn,expiredTime:usage.expiredTime??profile.expiredTime,activateTime:usage.activateTime??profile.activateTime,lastUpdateTime:providerUpdatedAt||profile.lastUpdateTime,lastProviderUsageAt:providerUpdatedAt,lastUsageSyncAt:syncedAt,usageSource:usage.source||'profile_api',usageStale:counterStale,lastUsageSyncError:counterStale?(warning||'Provider usage is stale'):null,usageHistory:history.slice(-31),status:nextStatus,esimStatus:providerExpired?'EXPIRED':exhausted?'USED_UP':(usage.esimStatus||profile.esimStatus),serviceEnded,serviceEndedReason,...(!topupNotConfirmed?{pendingTopupConfirmation:null}:{})};
   saveUser(email,{esim:nextEsim});refreshGoogleWallet(email);
-  return{usedBytes,totalBytes,remainingBytes,usedGb,totalGb,remainingGb,source:nextEsim.usageSource,stale:Boolean(usage.stale),live:usage.live===true,warning:usage.warning||null,errorCode:usage.errorCode||null,esimStatus:nextEsim.esimStatus,serviceEnded,serviceEndedReason,apn:nextEsim.apn||null,expiredTime:nextEsim.expiredTime||null,activateTime:nextEsim.activateTime||null,lastUpdateTime:providerUpdatedAt,providerUpdatedAt,syncedAt};
+  return{usedBytes,totalBytes,remainingBytes,usedGb,totalGb,remainingGb,source:nextEsim.usageSource,stale:counterStale,live:usage.live===true,warning,errorCode:usage.errorCode||null,esimStatus:nextEsim.esimStatus,serviceEnded,serviceEndedReason,apn:nextEsim.apn||null,expiredTime:nextEsim.expiredTime||null,activateTime:nextEsim.activateTime||null,lastUpdateTime:providerUpdatedAt,providerUpdatedAt,syncedAt};
 }
 const SUPPORT_MAX_FILES=5,SUPPORT_MAX_FILE_BYTES=2*1024*1024,SUPPORT_MAX_TOTAL_BYTES=8*1024*1024;
 function attachmentError(message){return Object.assign(new Error(message),{code:'INVALID_ATTACHMENT'});}
@@ -2977,11 +2996,8 @@ app.post('/api/admin/users/:email/esim-topups',adminAuth.requireAdmin,adminAuth.
     if(!claimed)return res.status(409).json({error:'Цю операцію вже виконано або вона ще виконується. Оновіть дані клієнта — повторного списання не було.',code:'TOPUP_ALREADY_SUBMITTED'});
     const transactionId=`adm-${requestId.replace(/[^A-Za-z0-9]/g,'').slice(0,40)}`;
     const topup=await topupEsim({esimTranNo:esim.esimTranNo,iccid:esim.iccid,packageCode,transactionId});
-    const current=getUser(email)||user,now=new Date().toISOString(),fallbackGb=selected.unlimited?null:selected.dataLimitGb;
-    const dataLimitGb=topup.totalGb??fallbackGb??current.esim?.dataLimitGb??null;
-    const usedGb=topup.usedGb??(fallbackGb!=null?0:current.esim?.usedGb??null);
-    const remainingGb=topup.remainingGb??(fallbackGb!=null?fallbackGb:current.esim?.remainingGb??null);
-    const nextEsim={...current.esim,...esim,...(topup.iccid?{iccid:topup.iccid}:{}),dataLimitGb,usedGb,remainingGb,...(dataLimitGb!=null?{totalBytes:Math.round(Number(dataLimitGb)*(1024**3))}:{}),...(usedGb!=null?{usedBytes:Math.round(Number(usedGb)*(1024**3))}:{}),...(remainingGb!=null?{remainingBytes:Math.round(Number(remainingGb)*(1024**3))}:{}),...(topup.expiredTime?{expiredTime:topup.expiredTime}:{}),status:'active',esimStatus:'IN_USE',lastTopupAt:now,lastTopupPackageCode:packageCode,lastUpdateTime:now,lastProviderUsageAt:now,lastUsageSyncAt:now,usageSource:'topup_response',usageStale:false,lastUsageSyncError:null,lastPushAlertThreshold:null};
+    const current=getUser(email)||user,now=new Date().toISOString();
+    const nextEsim=mergeTopupUsage({...current.esim,...esim},topup,{...selected,packageCode},now);
     const grant={id:`grant_${crypto.randomUUID()}`,type:'admin_topup',packageCode,packageName:selected.name,dataLimitGb:selected.dataLimitGb,durationDays:selected.durationDays,providerCostUsd:selected.providerCostUsd,priceCents:0,currency:'usd',grantedAt:now,grantedBy:req.admin.email,iccidEnding:String(nextEsim.iccid||'').slice(-4)};
     const purchaseId=`admin_topup_${requestId}`;
     saveUser(email,{status:'active',esim:nextEsim,esimGrants:[grant,...(current.esimGrants||[])].slice(0,100)});
@@ -2991,7 +3007,7 @@ app.post('/api/admin/users/:email/esim-topups',adminAuth.requireAdmin,adminAuth.
     refreshGoogleWallet(email);
     auditStore.log({adminEmail:req.admin.email,action:'existing_esim_topped_up',target:email,details:{packageCode,packageName:selected.name,dataLimitGb:selected.dataLimitGb,durationDays:selected.durationDays,providerCostUsd:selected.providerCostUsd,customerCharged:false,newQrRequired:false,iccidEnding:String(nextEsim.iccid||'').slice(-4),requestId}});
     sendToEmail(email,{title:'Інтернет додано до вашої eSIM',body:`Пакет ${selected.name} додано до вже встановленої eSIM. Новий QR-код і повторне встановлення не потрібні.`,url:'/usage.html',tag:`admin-topup-${requestId.slice(-12)}`}).catch(()=>{});
-    res.json({ok:true,message:'Пакет додано до встановленої eSIM. Новий QR-код не потрібен, з клієнта кошти не списувалися.',topup:{packageCode,packageName:selected.name,dataLimitGb:selected.dataLimitGb,durationDays:selected.durationDays,remainingGb:nextEsim.remainingGb,expiredTime:nextEsim.expiredTime||null}});
+    res.json({ok:true,message:'Пакет додано до встановленої eSIM. Новий QR-код не потрібен, з клієнта кошти не списувалися.',topup:{packageCode,packageName:selected.name,dataLimitGb:selected.dataLimitGb,durationDays:selected.durationDays,totalGb:nextEsim.dataLimitGb,usedGb:nextEsim.usedGb,remainingGb:nextEsim.remainingGb,providerConfirmationPending:Boolean(nextEsim.pendingTopupConfirmation),expiredTime:nextEsim.expiredTime||null}});
   }catch(error){
     if(claimed)await storage.finishExternalEvent('admin-esim-topup',operationKey,'failed',error.message).catch(()=>{});
     recordDiagnostic(req,{email,source:'esim_access',type:'admin_esim_topup',action:'topup',outcome:'failed',severity:'error',message:error.message,errorCode:error.code||'ESIM_TOPUP_FAILED',context:{packageCode,requestId}});
