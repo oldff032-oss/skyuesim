@@ -138,7 +138,8 @@ function walletCard(user = {}) {
   const trip=user.travelMode?.enabled===false?null:user.travelMode||null,tripStartDate=trip?.startDate||null,tripEndDate=trip?.endDate||null,startMs=tripStartDate?new Date(`${tripStartDate}T00:00:00Z`).getTime():null,endMs=tripEndDate?new Date(`${tripEndDate}T23:59:59Z`).getTime():null;
   const daysUntilTrip=Number.isFinite(startMs)?Math.ceil((startMs-nowMs)/86400000):null,tripStatus=!Number.isFinite(startMs)?'not_planned':nowMs<startMs?'upcoming':Number.isFinite(endMs)&&nowMs>endMs?'completed':'in_progress';
   const hasEsim=Boolean(esim.orderNo||esim.iccid||esim.esimTranNo),hasActivation=Boolean(esim.activationCode||esim.qrCodeUrl),expiresBeforeTrip=Number.isFinite(validMs)&&Number.isFinite(endMs)&&validMs<endMs;
-  const status=user.status==='blocked'?'blocked':Number.isFinite(validMs)&&validMs<nowMs?'expired':hasEsim?'active':'planned';
+  const providerState=String(esim.esimStatus||esim.status||'').toUpperCase(),usedUp=esim.serviceEndedReason==='used_up'||providerState==='USED_UP'||(totalGb!=null&&remainingGb<=0);
+  const status=user.status==='blocked'?'blocked':usedUp?'used_up':esim.serviceEndedReason==='expired'||providerState==='EXPIRED'||Number.isFinite(validMs)&&validMs<nowMs?'expired':hasEsim?'active':'planned';
   const esimReadiness=!hasEsim?'not_ready':expiresBeforeTrip?'attention':hasActivation||status==='active'?'ready':'attention';
   const usagePercent=totalGb!=null&&totalGb>0?Math.min(100,Math.max(0,usedGb/totalGb*100)):null;
   const dataStatus=remainingGb==null?'unlimited':remainingGb<=0?'empty':remainingGb<1?'critical':remainingGb<3?'low':'healthy';

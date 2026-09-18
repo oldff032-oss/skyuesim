@@ -92,6 +92,8 @@
         let usageWarning = data.esim.lastUsageSyncError || '';
         let providerUpdatedAt = data.esim.lastProviderUsageAt || lastUpdateTime;
         let syncedAt = data.esim.lastUsageSyncAt || null;
+        let serviceEnded = Boolean(data.esim.serviceEnded);
+        let serviceEndedReason = data.esim.serviceEndedReason || null;
 
         // Тягнемо СВІЖІ дані використання з eSIM Access (не з кешу)
         try{
@@ -113,11 +115,14 @@
             usageWarning = usageData.warning || '';
             providerUpdatedAt = usageData.providerUpdatedAt || usageData.lastUpdateTime || providerUpdatedAt;
             syncedAt = usageData.syncedAt || syncedAt;
+            serviceEnded = Boolean(usageData.serviceEnded);
+            serviceEndedReason = usageData.serviceEndedReason || null;
           }
         }catch(e){ /* якщо не вдалось оновити — показуємо останнє відоме значення */ }
 
         const pct = totalBytes ? Math.min(100, Math.round((usedBytes / totalBytes) * 100)) : 0;
         const isLow = totalBytes && pct >= 80;
+        const endedHtml=serviceEnded?`<div class="card" style="border-color:rgba(255,92,118,.55);background:rgba(112,24,46,.2)"><b style="color:#ff8ca1">${serviceEndedReason==='expired'?'Термін пакета завершився':'Інтернет у пакеті закінчився'}</b><p class="muted" style="margin-top:7px">${serviceEndedReason==='expired'?'Невикористаний залишок більше недоступний після завершення строку дії.':'Провайдер позначив пакет як повністю використаний.'} Можна додати сумісний пакет без перевстановлення eSIM або отримати новий QR.</p><a class="btn" href="esim-topup.html" style="margin-top:12px">Додати інтернет</a></div>`:'';
         let trafficAlertHtml = '';
         if(limitGb){
           try{
@@ -173,6 +178,7 @@
         }catch(e){}
 
         content.innerHTML = `
+          ${endedHtml}
           ${trafficAlertHtml || (isLow ? `<div class="card" style="border-color:var(--danger);"><p style="color:var(--danger); font-size:13px; display:flex; align-items:center; gap:8px;">⚠️ Використано понад 80% трафіку тарифу</p></div>` : '')}
 
           <div class="card">
