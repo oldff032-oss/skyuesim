@@ -138,9 +138,43 @@ function persistSupportLinkUsage(email,user,usage){
   if(expectedIccid&&reportedIccid&&expectedIccid!==reportedIccid){const error=new Error('Посилання підтримки належить іншому ICCID. Дані не оновлено.');error.code='SUPPORT_USAGE_ICCID_MISMATCH';throw error;}
   const usedBytes=Math.max(0,Math.trunc(Number(usage.usedBytes)||0)),totalBytes=Math.max(0,Math.trunc(Number(usage.totalBytes)||0)),remainingBytes=Math.max(0,totalBytes-usedBytes),usedGb=usedBytes/(1024**3),totalGb=totalBytes/(1024**3),remainingGb=remainingBytes/(1024**3),now=usage.lastUpdateTime||new Date().toISOString(),day=now.slice(0,10),history=[...(user.esim.usageHistory||[])],snapshot={day,usedBytes,totalBytes,remainingBytes,usedGb,totalGb,remainingGb,source:'support_short_url'};
   const existingIndex=history.findIndex(item=>item.day===day);if(existingIndex>=0)history[existingIndex]=snapshot;else history.push(snapshot);
-  const exhausted=totalBytes>0&&remainingBytes===0,esim={...user.esim,usedBytes,totalBytes,remainingBytes,usedGb,dataLimitGb:totalGb,remainingGb,expiredTime:usage.expiredTime||user.esim.expiredTime||null,lastUpdateTime:now,usageHistory:history.slice(-31),usageSource:'support_short_url',lastSupportUsageSyncAt:now,status:exhausted?'used_up':'active',esimStatus:exhausted?'USED_UP':'IN_USE'};
+  const syncedAt=new Date().toISOString(),exhausted=totalBytes>0&&remainingBytes===0,esim={...user.esim,usedBytes,totalBytes,remainingBytes,usedGb,dataLimitGb:totalGb,remainingGb,expiredTime:usage.expiredTime||user.esim.expiredTime||null,lastUpdateTime:now,lastProviderUsageAt:now,lastUsageSyncAt:syncedAt,usageStale:false,lastUsageSyncError:null,usageHistory:history.slice(-31),usageSource:'support_short_url',lastSupportUsageSyncAt:syncedAt,status:exhausted?'used_up':'active',esimStatus:exhausted?'USED_UP':'IN_USE'};
   saveUser(email,{status:user.status==='blocked'?'blocked':'active',esim});refreshGoogleWallet(email);
-  return{usedBytes,totalBytes,remainingBytes,usedGb,totalGb,remainingGb,source:'support_short_url',stale:false,providerManagedExternally:true,esimStatus:esim.esimStatus,apn:esim.apn||null,expiredTime:esim.expiredTime||null,activateTime:esim.activateTime||null,lastUpdateTime:now};
+  return{usedBytes,totalBytes,remainingBytes,usedGb,totalGb,remainingGb,source:'support_short_url',stale:false,live:true,providerManagedExternally:true,esimStatus:esim.esimStatus,apn:esim.apn||null,expiredTime:esim.expiredTime||null,activateTime:esim.activateTime||null,lastUpdateTime:now,providerUpdatedAt:now,syncedAt};
+}
+
+function cachedEsimUsage(user,warning='Оператор тимчасово не оновив дані. Показано останній успішно збережений залишок.'){
+  const esim=user?.esim||{},usedBytes=esim.usedBytes!=null?Math.max(0,Math.trunc(Number(esim.usedBytes)||0)):Math.max(0,Math.round(Number(esim.usedGb||0)*(1024**3)));
+  const totalBytes=esim.totalBytes!=null?Math.max(0,Math.trunc(Number(esim.totalBytes)||0)):(esim.dataLimitGb==null?null:Math.max(0,Math.round(Number(esim.dataLimitGb)*(1024**3))));
+  const remainingBytes=esim.remainingBytes!=null?Math.max(0,Math.trunc(Number(esim.remainingBytes)||0)):(totalBytes==null?null:Math.max(0,totalBytes-usedBytes));
+  return{usedBytes,totalBytes,remainingBytes,usedGb:usedBytes/(1024**3),totalGb:totalBytes==null?null:totalBytes/(1024**3),remainingGb:remainingBytes==null?null:remainingBytes/(1024**3),source:esim.usageSource||'cached',stale:true,live:false,esimStatus:esim.esimStatus||esim.status||null,apn:esim.apn||null,expiredTime:esim.expiredTime||null,activateTime:esim.activateTime||null,lastUpdateTime:esim.lastProviderUsageAt||esim.lastUpdateTime||esim.assignedAt||null,providerUpdatedAt:esim.lastProviderUsageAt||esim.lastUpdateTime||null,syncedAt:esim.lastUsageSyncAt||null,warning};
+}
+
+async function syncEsimUsageForUser(email,{force=false}={}){
+  const user=getUser(email);
+  if(!user?.esim)throw Object.assign(new Error('Активну eSIM не знайдено'),{code:'ESIM_NOT_FOUND',status:404});
+  const profile=user.esim;
+  if(!force&&profile.lastUsageSyncAt&&Date.now()-new Date(profile.lastUsageSyncAt).getTime()<25*60*1000)return cachedEsimUsage(user,'Показано останні дані. Наступна автоматична перевірка виконується раз на 30 хвилин.');
+  if(profile.provider==='support-link'||String(profile.orderNo||'').startsWith('SUPPORT-')){
+    if(!profile.supportInstallUrl)return cachedEsimUsage(user,'Для автоматичної перевірки потрібне повне посилання підтримки. Показано останні збережені дані.');
+    try{return persistSupportLinkUsage(email,user,await checkSupportLinkUsage(profile.supportInstallUrl));}
+    catch(error){
+      const syncedAt=new Date().toISOString();
+      saveUser(email,{esim:{...profile,lastUsageSyncAt:syncedAt,usageStale:true,lastUsageSyncError:error.message}});
+      return cachedEsimUsage(getUser(email),`Провайдер не підтвердив свіжі дані: ${error.message}`);
+    }
+  }
+  const usage=await checkUsage({orderNo:profile.orderNo,esimTranNo:profile.esimTranNo,iccid:profile.iccid});
+  const cached=cachedEsimUsage(user),candidateUsed=usage.usedBytes==null?null:Math.max(0,Math.trunc(Number(usage.usedBytes)||0));
+  const providerTotal=usage.totalBytes==null?null:Math.max(0,Math.trunc(Number(usage.totalBytes)||0));
+  const usedBytes=usage.stale?(candidateUsed==null?cached.usedBytes:Math.max(cached.usedBytes,candidateUsed)):(candidateUsed??cached.usedBytes);
+  const totalBytes=providerTotal??cached.totalBytes;
+  const remainingBytes=totalBytes==null?null:Math.max(0,totalBytes-usedBytes),usedGb=usedBytes/(1024**3),totalGb=totalBytes==null?null:totalBytes/(1024**3),remainingGb=remainingBytes==null?null:remainingBytes/(1024**3);
+  const syncedAt=usage.syncedAt||new Date().toISOString(),providerUpdatedAt=usage.providerUpdatedAt||usage.lastUpdateTime||profile.lastProviderUsageAt||null,day=syncedAt.slice(0,10),history=[...(profile.usageHistory||[])],snapshot={day,usedBytes,totalBytes,remainingBytes,usedGb,totalGb,remainingGb,source:usage.source||'usage_api',providerUpdatedAt};
+  const existingIndex=history.findIndex(item=>item.day===day);if(existingIndex>=0)history[existingIndex]=snapshot;else history.push(snapshot);
+  const exhausted=totalBytes>0&&remainingBytes===0,nextEsim={...profile,usedBytes,totalBytes,remainingBytes,usedGb,dataLimitGb:totalGb,remainingGb,apn:usage.apn??profile.apn,expiredTime:usage.expiredTime??profile.expiredTime,activateTime:usage.activateTime??profile.activateTime,lastUpdateTime:providerUpdatedAt||profile.lastUpdateTime,lastProviderUsageAt:providerUpdatedAt,lastUsageSyncAt:syncedAt,usageSource:usage.source||'usage_api',usageStale:Boolean(usage.stale),lastUsageSyncError:usage.stale?(usage.warning||'Provider usage is stale'):null,usageHistory:history.slice(-31),status:exhausted?'used_up':profile.status,esimStatus:exhausted?'USED_UP':(usage.esimStatus||profile.esimStatus)};
+  saveUser(email,{esim:nextEsim});refreshGoogleWallet(email);
+  return{usedBytes,totalBytes,remainingBytes,usedGb,totalGb,remainingGb,source:nextEsim.usageSource,stale:Boolean(usage.stale),live:usage.live===true,warning:usage.warning||null,errorCode:usage.errorCode||null,esimStatus:nextEsim.esimStatus,apn:nextEsim.apn||null,expiredTime:nextEsim.expiredTime||null,activateTime:nextEsim.activateTime||null,lastUpdateTime:providerUpdatedAt,providerUpdatedAt,syncedAt};
 }
 const SUPPORT_MAX_FILES=5,SUPPORT_MAX_FILE_BYTES=2*1024*1024,SUPPORT_MAX_TOTAL_BYTES=8*1024*1024;
 function attachmentError(message){return Object.assign(new Error(message),{code:'INVALID_ATTACHMENT'});}
@@ -417,6 +451,26 @@ async function processOperationalJobs(){
       }catch(error){const attempts=Number(job.attempts||0)+1,retryable=!error.nonRetryable&&attempts<Number(job.maxAttempts||3);operationsStore.updateJob(job.id,{status:retryable?'pending':'failed',retryable,error:error.message,nextAttemptAt:retryable?new Date(Date.now()+Math.min(30*60*1000,2**attempts*60000)).toISOString():null,completedAt:retryable?null:new Date().toISOString()});}
     }
   }finally{operationalJobsRunning=false;}
+}
+
+const ESIM_USAGE_SYNC_INTERVAL_MS=30*60*1000;
+let usageSyncCycleRunning=false;
+async function syncAllActiveEsimUsage(){
+  if(usageSyncCycleRunning)return;usageSyncCycleRunning=true;
+  let checked=0,updated=0,stale=0,failed=0;
+  try{
+    const candidates=Object.entries(getAllUsers()).filter(([,user])=>user?.esim&&user.status!=='blocked'&&Boolean(user.esim.orderNo||user.esim.esimTranNo||user.esim.iccid||user.esim.supportInstallUrl));
+    for(const [email] of candidates){
+      checked+=1;
+      try{const result=await syncEsimUsageForUser(email);if(result.stale)stale+=1;else updated+=1;}
+      catch(error){
+        failed+=1;const user=getUser(email);if(user?.esim)saveUser(email,{esim:{...user.esim,lastUsageSyncAt:new Date().toISOString(),usageStale:true,lastUsageSyncError:error.message}});
+        console.error('[esim usage scheduler]',email,error.message);
+      }
+    }
+    if(checked)await storage.saveNow('users.json',getAllUsers());
+    console.log('[esim usage scheduler]',{checked,updated,stale,failed});
+  }finally{usageSyncCycleRunning=false;}
 }
 
 async function deliverPurchaseReceipt(email, purchaseId, defaults = {}, suppliedReceiptUrl = null) {
@@ -2867,38 +2921,20 @@ app.post('/api/admin/referrals/:email/credit-reward', adminAuth.requireAdmin, ad
 });
 
 app.post('/api/admin/users/:email/resync-esim', adminAuth.requireAdmin, adminAuth.requireRole('super_admin', 'admin'), adminAuth.requirePermission('esim.retry'), async (req, res) => {
-  const email = req.params.email;
+  const email = String(req.params.email||'').trim().toLowerCase();
   const user = getUser(email);
-  if (!user?.esim?.orderNo) return res.status(404).json({ error: 'Активну eSIM не знайдено' });
-  if(user.esim.provider==='support-link'){
-    if(!user.esim.supportInstallUrl)return res.status(409).json({error:'Для цього профілю не збережено повне посилання підтримки. Імпортуйте його повторно або використайте ручний залишок.',code:'SUPPORT_USAGE_LINK_MISSING'});
-    try{
-      const usage=await checkSupportLinkUsage(user.esim.supportInstallUrl),result=persistSupportLinkUsage(email,user,usage);
-      await storage.saveNow('users.json',getAllUsers());
-      auditStore.log({adminEmail:req.admin.email,action:'support_link_usage_resynced',target:email,details:{iccidEnding:String(user.esim.iccid||'').slice(-4),usedBytes:result.usedBytes,totalBytes:result.totalBytes,remainingBytes:result.remainingBytes}});
-      return res.json({ok:true,...result,message:`Реальний залишок оновлено: ${result.remainingGb.toFixed(2)} GB із ${result.totalGb.toFixed(2)} GB.`});
-    }catch(error){
-      recordDiagnostic(req,{email,source:'esim_access_share',type:'support_link_usage',action:'admin_sync',outcome:'failed',severity:'warning',message:error.message,errorCode:error.code||'SUPPORT_USAGE_FAILED'});
-      return res.status(Number(error.status)>=400?Number(error.status):502).json({error:`Не вдалося перевірити залишок через посилання підтримки: ${error.message}`,code:error.code||'SUPPORT_USAGE_FAILED',manualAvailable:true});
-    }
-  }
+  if (!user?.esim) return res.status(404).json({ error: 'Активну eSIM не знайдено' });
   try {
-    const usage = await checkUsage(user.esim.orderNo);
-    const usedBytes = Math.max(0, Math.trunc(Number(usage.usedBytes) || 0));
-    const providerTotalBytes = usage.totalBytes == null ? null : Math.max(0, Math.trunc(Number(usage.totalBytes) || 0));
-    const fallbackTotalBytes = user.esim.dataLimitGb == null ? null : Math.round(Number(user.esim.dataLimitGb) * (1024 ** 3));
-    const totalBytes = providerTotalBytes ?? fallbackTotalBytes;
-    const remainingBytes = totalBytes == null ? null : Math.max(0, totalBytes - usedBytes);
-    // Keep raw integer bytes as the source of truth. GB values remain only for
-    // compatibility with older clients and are never rounded to two decimals.
-    const usedGb = usedBytes / (1024 ** 3);
-    const totalGb = totalBytes == null ? null : totalBytes / (1024 ** 3);
-    const remainingGb = remainingBytes == null ? null : remainingBytes / (1024 ** 3);
-    saveUser(email, { esim: { ...user.esim, usedBytes, totalBytes, remainingBytes, usedGb, dataLimitGb: totalGb, remainingGb, lastUpdateTime: usage.lastUpdateTime || new Date().toISOString() } });
-    refreshGoogleWallet(email);
-    auditStore.log({ adminEmail: req.admin.email, action: 'esim_usage_resynced', target: email });
-    res.json({ ok: true, usedGb, totalGb, remainingGb });
-  } catch (error) { res.status(502).json({ error: error.message }); }
+    const result=await syncEsimUsageForUser(email,{force:true});
+    await storage.saveNow('users.json',getAllUsers());
+    auditStore.log({adminEmail:req.admin.email,action:'esim_usage_resynced',target:email,details:{source:result.source,stale:result.stale,usedBytes:result.usedBytes,totalBytes:result.totalBytes,remainingBytes:result.remainingBytes}});
+    const remaining=result.remainingGb==null?'безліміт':`${result.remainingGb.toFixed(2)} GB`;
+    const message=result.stale?`Оператор ще не віддав свіжий лічильник. Збережений залишок: ${remaining}.`:`Трафік підтверджено провайдером. Залишок: ${remaining}.`;
+    res.json({ok:true,...result,message});
+  } catch (error) {
+    recordDiagnostic(req,{email,source:'esim_access',type:'esim_usage',action:'admin_sync',outcome:'failed',severity:'warning',message:error.message,errorCode:error.code||'USAGE_SYNC_FAILED'});
+    res.status(Number(error.status)>=400?Number(error.status):502).json({error:error.message,code:error.code||'USAGE_SYNC_FAILED'});
+  }
 });
 
 app.get('/api/admin/users/:email/esim-topups',adminAuth.requireAdmin,adminAuth.requireRole('super_admin'),adminAuth.requirePermission('esim.manage',{requireTwoFactor:true}),async(req,res)=>{
@@ -2938,7 +2974,7 @@ app.post('/api/admin/users/:email/esim-topups',adminAuth.requireAdmin,adminAuth.
     const dataLimitGb=topup.totalGb??fallbackGb??current.esim?.dataLimitGb??null;
     const usedGb=topup.usedGb??(fallbackGb!=null?0:current.esim?.usedGb??null);
     const remainingGb=topup.remainingGb??(fallbackGb!=null?fallbackGb:current.esim?.remainingGb??null);
-    const nextEsim={...current.esim,...esim,...(topup.iccid?{iccid:topup.iccid}:{}),dataLimitGb,usedGb,remainingGb,...(dataLimitGb!=null?{totalBytes:Math.round(Number(dataLimitGb)*(1024**3))}:{}),...(usedGb!=null?{usedBytes:Math.round(Number(usedGb)*(1024**3))}:{}),...(remainingGb!=null?{remainingBytes:Math.round(Number(remainingGb)*(1024**3))}:{}),...(topup.expiredTime?{expiredTime:topup.expiredTime}:{}),status:'active',esimStatus:'IN_USE',lastTopupAt:now,lastTopupPackageCode:packageCode,lastUpdateTime:now,lastPushAlertThreshold:null};
+    const nextEsim={...current.esim,...esim,...(topup.iccid?{iccid:topup.iccid}:{}),dataLimitGb,usedGb,remainingGb,...(dataLimitGb!=null?{totalBytes:Math.round(Number(dataLimitGb)*(1024**3))}:{}),...(usedGb!=null?{usedBytes:Math.round(Number(usedGb)*(1024**3))}:{}),...(remainingGb!=null?{remainingBytes:Math.round(Number(remainingGb)*(1024**3))}:{}),...(topup.expiredTime?{expiredTime:topup.expiredTime}:{}),status:'active',esimStatus:'IN_USE',lastTopupAt:now,lastTopupPackageCode:packageCode,lastUpdateTime:now,lastProviderUsageAt:now,lastUsageSyncAt:now,usageSource:'topup_response',usageStale:false,lastUsageSyncError:null,lastPushAlertThreshold:null};
     const grant={id:`grant_${crypto.randomUUID()}`,type:'admin_topup',packageCode,packageName:selected.name,dataLimitGb:selected.dataLimitGb,durationDays:selected.durationDays,providerCostUsd:selected.providerCostUsd,priceCents:0,currency:'usd',grantedAt:now,grantedBy:req.admin.email,iccidEnding:String(nextEsim.iccid||'').slice(-4)};
     const purchaseId=`admin_topup_${requestId}`;
     saveUser(email,{status:'active',esim:nextEsim,esimGrants:[grant,...(current.esimGrants||[])].slice(0,100)});
@@ -3047,7 +3083,7 @@ app.patch('/api/admin/users/:email/esim-usage',adminAuth.requireAdmin,adminAuth.
   if(!Number.isFinite(remainingInput)||remainingInput<0||remainingInput>totalGb)return res.status(400).json({error:`Залишок має бути від 0 до ${totalGb} GB.`});
   const remainingGb=remainingInput,usedGb=Math.max(0,totalGb-remainingGb),usedBytes=Math.round(usedGb*(1024**3)),totalBytes=Math.round(totalGb*(1024**3)),remainingBytes=Math.round(remainingGb*(1024**3)),exhausted=remainingGb===0,now=new Date().toISOString(),history=[...(user.esim.usageHistory||[])],day=now.slice(0,10),snapshot={day,usedBytes,totalBytes,remainingBytes,usedGb,remainingGb,totalGb,manual:true};
   const index=history.findIndex(item=>item.day===day);if(index>=0)history[index]=snapshot;else history.push(snapshot);
-  const esim={...user.esim,usedGb,usedBytes,totalBytes,remainingGb,remainingBytes,usageHistory:history.slice(-31),status:exhausted?'used_up':'active',esimStatus:exhausted?'USED_UP':'IN_USE',providerStatus:exhausted?'USED_UP':'IN_USE',lastUpdateTime:now,manualUsageUpdatedAt:now,manualUsageUpdatedBy:req.admin.email};
+  const esim={...user.esim,usedGb,usedBytes,totalBytes,remainingGb,remainingBytes,usageHistory:history.slice(-31),status:exhausted?'used_up':'active',esimStatus:exhausted?'USED_UP':'IN_USE',providerStatus:exhausted?'USED_UP':'IN_USE',lastUpdateTime:now,lastUsageSyncAt:now,usageSource:'manual_admin',usageStale:false,lastUsageSyncError:null,manualUsageUpdatedAt:now,manualUsageUpdatedBy:req.admin.email};
   saveUser(email,{esim});await storage.saveNow('users.json',getAllUsers());refreshGoogleWallet(email);
   auditStore.log({adminEmail:req.admin.email,action:'support_esim_usage_adjusted',target:email,details:{iccidEnding:String(esim.iccid||'').slice(-4),totalGb,usedGb,remainingGb,exhausted}});
   sendToEmail(email,{title:exhausted?'Пакет інтернету завершено':'Залишок інтернету оновлено',body:exhausted?`Використано ${totalGb} із ${totalGb} GB. Пакет вичерпано.`:`Залишилося ${remainingGb} із ${totalGb} GB.`,url:'/usage.html',tag:`manual-usage-${String(esim.iccid||'support').slice(-8)}`}).catch(()=>{});
@@ -3668,70 +3704,16 @@ app.get('/api/usage', requireUserSession, async (req, res) => {
   const cachedUser = getUser(email);
   try {
     const user = cachedUser;
-    if (!user || !user.esim?.orderNo) {
+    if (!user || !user.esim) {
       return res.status(404).json({ error: 'Немає активної eSIM для цього користувача' });
     }
     if (user.status === 'blocked') return res.status(403).json({ error: 'Акаунт заблоковано' });
-
-    // A replacement delivered by support can be installed from its protected
-    // link, but it is not necessarily attached to our eSIM Access API account.
-    // SUPPORT-* is an internal identifier and must never be queried as a real
-    // provider order number.
-    if(user.esim.provider==='support-link'||String(user.esim.orderNo).startsWith('SUPPORT-')){
-      if(user.esim.supportInstallUrl){
-        try{
-          const liveUsage=await checkSupportLinkUsage(user.esim.supportInstallUrl),result=persistSupportLinkUsage(email,user,liveUsage);
-          await storage.saveNow('users.json',getAllUsers());
-          return res.json(result);
-        }catch(error){recordDiagnostic(req,{email,source:'esim_access_share',type:'support_link_usage',action:'customer_sync',outcome:'failed',severity:'warning',message:error.message,errorCode:error.code||'SUPPORT_USAGE_FAILED'});}
-      }
-      const usedBytes=user.esim.usedBytes!=null?Math.max(0,Math.trunc(Number(user.esim.usedBytes)||0)):Math.max(0,Math.round(Number(user.esim.usedGb||0)*(1024**3)));
-      const totalBytes=user.esim.totalBytes!=null?Math.max(0,Math.trunc(Number(user.esim.totalBytes)||0)):(user.esim.dataLimitGb==null?null:Math.max(0,Math.round(Number(user.esim.dataLimitGb)*(1024**3))));
-      const remainingBytes=user.esim.remainingBytes!=null?Math.max(0,Math.trunc(Number(user.esim.remainingBytes)||0)):(totalBytes==null?null:Math.max(0,totalBytes-usedBytes));
-      return res.json({usedBytes,totalBytes,remainingBytes,usedGb:usedBytes/(1024**3),totalGb:totalBytes==null?null:totalBytes/(1024**3),remainingGb:remainingBytes==null?null:remainingBytes/(1024**3),source:'support_link_saved',stale:true,providerManagedExternally:true,esimStatus:user.esim.esimStatus||user.esim.status||null,apn:user.esim.apn||null,expiredTime:user.esim.expiredTime||null,activateTime:user.esim.activateTime||null,lastUpdateTime:user.esim.lastUpdateTime||user.esim.assignedAt||null,warning:user.esim.supportInstallUrl?'Провайдер тимчасово не оновив дані. Показано останній успішно збережений залишок.':'Для автоматичної перевірки потрібне повне посилання підтримки. Показано останні збережені дані.'});
-    }
-
-    const usage = await checkUsage(user.esim.orderNo);
-    const usedBytes = Math.max(0, Math.trunc(Number(usage.usedBytes) || 0));
-    const providerTotalBytes = usage.totalBytes == null ? null : Math.max(0, Math.trunc(Number(usage.totalBytes) || 0));
-    const fallbackTotalBytes = user.esim.dataLimitGb == null ? null : Math.round(Number(user.esim.dataLimitGb) * (1024 ** 3));
-    const totalBytes = providerTotalBytes ?? fallbackTotalBytes;
-    const remainingBytes = totalBytes == null ? null : Math.max(0, totalBytes - usedBytes);
-    const usedGb = usedBytes / (1024 ** 3);
-    const totalGb = totalBytes == null ? null : totalBytes / (1024 ** 3);
-    const remainingGb = remainingBytes == null ? null : remainingBytes / (1024 ** 3);
-
-    // Зберігаємо оновлені дані, щоб дашборд теж їх бачив без повторного запиту
-    const history = [...(user.esim.usageHistory || [])];
-    const day = new Date().toISOString().slice(0, 10);
-    const snapshot = { day, usedBytes, totalBytes, remainingBytes, usedGb, remainingGb, totalGb };
-    const existingIndex = history.findIndex((item) => item.day === day);
-    if (existingIndex >= 0) history[existingIndex] = snapshot;
-    else history.push(snapshot);
-    const usageHistory = history.slice(-31);
-    saveUser(email, {
-      esim: {
-        ...user.esim,
-        usedGb,
-        usedBytes,
-        dataLimitGb: totalGb,
-        totalBytes,
-        apn: usage.apn ?? user.esim.apn,
-        expiredTime: usage.expiredTime ?? user.esim.expiredTime,
-        activateTime: usage.activateTime ?? user.esim.activateTime,
-        lastUpdateTime: usage.lastUpdateTime ?? user.esim.lastUpdateTime,
-        remainingGb,
-        remainingBytes,
-        usageHistory,
-      },
-    });
-    refreshGoogleWallet(email);
-
-    res.json({ usedBytes, totalBytes, remainingBytes, usedGb, totalGb, remainingGb, source:'esim_access_operator', esimStatus: usage.esimStatus, apn: usage.apn, expiredTime: usage.expiredTime, activateTime: usage.activateTime, lastUpdateTime: usage.lastUpdateTime });
+    const result=await syncEsimUsageForUser(email,{force:true});
+    await storage.saveNow('users.json',getAllUsers());
+    res.json(result);
   } catch (err) {
     console.error(err);
-    const cached=cachedUser?.esim;
-    if(cached&&cached.usedBytes!=null)return res.json({usedBytes:cached.usedBytes,totalBytes:cached.totalBytes??null,remainingBytes:cached.remainingBytes??null,usedGb:cached.usedGb??0,totalGb:cached.dataLimitGb??null,remainingGb:cached.remainingGb??null,source:'cached',stale:true,lastUpdateTime:cached.lastUpdateTime||cached.updatedAt||null,warning:'Оператор тимчасово недоступний. Показано останні відомі дані.'});
+    if(cachedUser?.esim)return res.json(cachedEsimUsage(cachedUser));
     res.status(502).json({ error: 'Не вдалося отримати дані оператора eSIM' });
   }
 });
@@ -3803,6 +3785,10 @@ storage.init().then(() => Promise.all([
   processOperationalJobs().catch(error=>console.error('[operations worker]',error.message));
   const operationsTimer=setInterval(()=>processOperationalJobs().catch(error=>console.error('[operations worker]',error.message)),30*1000);
   operationsTimer.unref?.();
+  const initialUsageSyncTimer=setTimeout(()=>syncAllActiveEsimUsage().catch(error=>console.error('[esim usage scheduler]',error.message)),15*1000);
+  initialUsageSyncTimer.unref?.();
+  const usageSyncTimer=setInterval(()=>syncAllActiveEsimUsage().catch(error=>console.error('[esim usage scheduler]',error.message)),ESIM_USAGE_SYNC_INTERVAL_MS);
+  usageSyncTimer.unref?.();
   runDailySuperAdminReport().catch(error=>console.error('[daily report]',error.message));
   const dailyReportTimer=setInterval(()=>runDailySuperAdminReport().catch(error=>console.error('[daily report]',error.message)),30*60*1000);
   dailyReportTimer.unref?.();

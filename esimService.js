@@ -1,7 +1,7 @@
 // eSIM Access integration for Node.js 24+ (CommonJS).
 // Keep the public API stable for server.js:
 //   provisionEsim({ email, plan })
-//   checkUsage(orderNo)
+//   checkUsage({ orderNo, esimTranNo, iccid })
 
 // dotenv is already loaded by server.js. Loading it here is convenient for
 // direct use, but it must not prevent the service from being imported alone.
@@ -462,50 +462,103 @@ async function listAllocatedEsims() {
   return profiles;
 }
 
-async function checkUsage(orderNo) {
-  if (!orderNo || typeof orderNo !== 'string') {
-    throw new EsimAccessError('An eSIM orderNo is required.', { code: 'ORDER_NUMBER_REQUIRED' });
+async function checkUsage(input) {
+  const identifiers = typeof input === 'string' ? { orderNo:input } : (input || {});
+  const orderNo = String(identifiers.orderNo || '').trim();
+  const requestedTranNo = String(identifiers.esimTranNo || '').trim();
+  const requestedIccid = String(identifiers.iccid || '').trim();
+  if (!orderNo && !requestedTranNo && !requestedIccid) {
+    throw new EsimAccessError('An eSIM orderNo, esimTranNo or ICCID is required.', { code: 'ESIM_ID_REQUIRED' });
   }
 
   if (isConfiguredMockMode() || orderNo.startsWith('MOCK-')) {
-    return { usedBytes: 0, totalBytes: null, esimStatus: 'active', apn: 'mock.apn', expiredTime: null, activateTime: null };
+    return { usedBytes:0, totalBytes:null, esimStatus:'active', apn:'mock.apn', expiredTime:null, activateTime:null, source:'mock', live:true, stale:false, syncedAt:new Date().toISOString() };
   }
 
-  const profileResponse = await queryOrderProfiles(orderNo);
-  const profile = profileResponse?.obj?.esimList?.[0];
-  if (!profile) {
-    throw new EsimAccessError(`No eSIM profile found for order ${orderNo}.`, { code: 'PROFILE_NOT_FOUND' });
+  let profile = null;
+  let profileQueryError = null;
+  try {
+    let profileResponse;
+    if (requestedIccid) {
+      // eSIM Access documents /esim/list + ICCID as the canonical usage
+      // lookup. Keep /query as a compatibility fallback for older accounts.
+      try {
+        profileResponse = await esimAccessRequest('/api/v1/open/esim/list', { iccid:requestedIccid, pager:{ pageNum:1, pageSize:20 } });
+      } catch {
+        profileResponse = await queryProfiles({ iccid:requestedIccid });
+      }
+    } else profileResponse = await queryOrderProfiles(orderNo);
+    const profiles = profileResponse?.obj?.esimList || [];
+    profile = profiles.find((item) => requestedTranNo && String(item?.esimTranNo || '') === requestedTranNo)
+      || profiles.find((item) => requestedIccid && String(item?.iccid || '') === requestedIccid)
+      || profiles[0]
+      || null;
+  } catch (error) {
+    profileQueryError = error;
+    // A stored esimTranNo can still query usage even when an old order number
+    // is no longer returned by the profile endpoint.
+    if (!requestedTranNo) throw error;
   }
 
-  const fallbackUsage = bytes(profile.orderUsage) ?? 0;
-  const fallbackTotal = bytes(profile.totalVolume) ?? bytes(profile.packageList?.[0]?.volume);
-  const esimTranNo = profile.esimTranNo;
+  if (!profile && !requestedTranNo) {
+    throw new EsimAccessError(`No eSIM profile found for ${orderNo || requestedIccid}.`, { code:'PROFILE_NOT_FOUND' });
+  }
+
+  const profileView = profile || { orderNo, esimTranNo:requestedTranNo, iccid:requestedIccid };
+  const fallbackUsage = bytes(profile?.orderUsage);
+  const fallbackTotal = bytes(profile?.totalVolume) ?? bytes(profile?.packageList?.[0]?.volume);
+  const esimTranNo = requestedTranNo || String(profile?.esimTranNo || '').trim();
   if (!esimTranNo) {
-    log('usage_using_profile_fallback', { orderNo: mask(orderNo), reason: 'missing esimTranNo' });
-    return usageResult(fallbackUsage, fallbackTotal, profile);
+    log('usage_using_profile_fallback', { orderNo:mask(orderNo), iccid:mask(requestedIccid), reason:'missing esimTranNo' });
+    return usageResult(fallbackUsage, fallbackTotal, profileView, null, {
+      source:'profile_fallback', live:false, stale:true,
+      warning:'Провайдер не повернув ідентифікатор профілю. Показано останні дані профілю.',
+    });
   }
 
   try {
-    const usageResponse = await esimAccessRequest('/api/v1/open/esim/usage/query', { esimTranNoList: [esimTranNo] });
-    const usage = usageResponse?.obj?.[0] || usageResponse?.obj?.esimList?.[0] || usageResponse?.obj?.list?.[0] || usageResponse?.obj;
-    if (!usage) throw new EsimAccessError('Usage endpoint returned no record.', { code: 'USAGE_NOT_FOUND' });
-    return usageResult(bytes(usage.dataUsage) ?? fallbackUsage, bytes(usage.totalData) ?? fallbackTotal, profile, usage);
+    const usageResponse = await esimAccessRequest('/api/v1/open/esim/usage/query', { esimTranNoList:[esimTranNo] });
+    const root = usageResponse?.obj;
+    const records = Array.isArray(root) ? root : (root?.esimList || root?.esimUsageList || root?.list || root?.usageList || [root]);
+    const usage = records.find((item) => String(item?.esimTranNo || '') === esimTranNo)
+      || records.find((item) => requestedIccid && String(item?.iccid || '') === requestedIccid)
+      || records.find(Boolean);
+    if (!usage) throw new EsimAccessError('Usage endpoint returned no record.', { code:'USAGE_NOT_FOUND' });
+    const liveUsed = bytes(usage.dataUsage) ?? bytes(usage.orderUsage) ?? bytes(usage.usedVolume);
+    const liveTotal = bytes(usage.totalData) ?? bytes(usage.totalVolume) ?? bytes(usage.packageList?.[0]?.volume);
+    if (liveUsed == null) throw new EsimAccessError('Usage endpoint returned no traffic counter.', { code:'USAGE_VALUES_MISSING' });
+    return usageResult(liveUsed, liveTotal ?? fallbackTotal, profileView, usage, {
+      source:'usage_api', live:true, stale:false,
+      syncedAt:new Date().toISOString(),
+    });
   } catch (error) {
-    // Usage is delayed by the carrier and should not make the dashboard unavailable.
-    log('usage_endpoint_failed_using_profile_fallback', { orderNo: mask(orderNo), code: error.code, message: error.message });
-    return usageResult(fallbackUsage, fallbackTotal, profile);
+    log('usage_endpoint_failed_using_profile_counter', { orderNo:mask(orderNo), esimTranNo:mask(esimTranNo), code:error.code, message:error.message });
+    if (profile && fallbackUsage != null) {
+      return usageResult(fallbackUsage, fallbackTotal, profileView, null, {
+        source:'profile_api', live:true, stale:false,
+        syncedAt:new Date().toISOString(),
+      });
+    }
+    return usageResult(fallbackUsage, fallbackTotal, profileView, null, {
+      source:'profile_fallback', live:false, stale:true,
+      syncedAt:new Date().toISOString(),
+      errorCode:error.code || profileQueryError?.code || null,
+      warning:'Оператор не підтвердив свіжий лічильник трафіку. Показано останні збережені дані; повторіть перевірку пізніше.',
+    });
   }
 }
 
-function usageResult(usedBytes, totalBytes, profile, usageDetails = null) {
+function usageResult(usedBytes, totalBytes, profile, usageDetails = null, metadata = {}) {
   return {
-    usedBytes: usedBytes ?? 0,
+    usedBytes: usedBytes ?? null,
     totalBytes: totalBytes ?? null,
     esimStatus: profile.esimStatus || profile.smdpStatus || null,
     apn: profile.apn || null,
     expiredTime: profile.expiredTime || null,
     activateTime: profile.activateTime || null,
-    lastUpdateTime: usageDetails?.lastUpdateTime || profile.lastUpdateTime || null,
+    lastUpdateTime: usageDetails?.lastUpdateTime || usageDetails?.lastDataUsageUpdateTime || profile.lastUpdateTime || null,
+    providerUpdatedAt: usageDetails?.lastUpdateTime || usageDetails?.lastDataUsageUpdateTime || profile.lastUpdateTime || null,
+    ...metadata,
   };
 }
 
