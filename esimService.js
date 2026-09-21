@@ -268,8 +268,12 @@ function profileUsageCounters(profile = {}) {
   const explicitRemaining=minBytes(profile.remain,profile.remaining,profile.remainVolume,profile.remainingVolume,profile.remainingData,profile.remainingBytes,profile.dataRemain,packageRemainingTotal);
   const explicitUsed=maxBytes(profile.dataUsage,profile.orderUsage,profile.usedVolume,profile.usedData,profile.usedBytes,profile.usage,packageUsedTotal);
   let usedBytes=explicitUsed,remainingBytes=explicitRemaining,counterSource='missing';
-  if(totalBytes!=null&&explicitRemaining!=null){remainingBytes=Math.min(totalBytes,explicitRemaining);usedBytes=Math.max(0,totalBytes-remainingBytes);counterSource=packageRemainingTotal!=null&&explicitRemaining===packageRemainingTotal?'package.remaining':'profile.remaining';}
-  else if(totalBytes!=null&&explicitUsed!=null){usedBytes=Math.min(totalBytes,explicitUsed);remainingBytes=Math.max(0,totalBytes-usedBytes);counterSource=packageUsedTotal!=null&&explicitUsed===packageUsedTotal?'package.used':'profile.used';}
+  // `remain` can stay at the original allowance while `orderUsage` already
+  // contains the carrier's newer counter (the console labels it Real-time).
+  // Consumption is cumulative for one ICCID, so an explicit used counter must
+  // win over a conflicting remaining counter.
+  if(totalBytes!=null&&explicitUsed!=null){usedBytes=Math.min(totalBytes,explicitUsed);remainingBytes=Math.max(0,totalBytes-usedBytes);counterSource=packageUsedTotal!=null&&explicitUsed===packageUsedTotal?'package.used':'profile.used';}
+  else if(totalBytes!=null&&explicitRemaining!=null){remainingBytes=Math.min(totalBytes,explicitRemaining);usedBytes=Math.max(0,totalBytes-remainingBytes);counterSource=packageRemainingTotal!=null&&explicitRemaining===packageRemainingTotal?'package.remaining':'profile.remaining';}
   const counterUpdatedAt=profile.lastDataUsageUpdateTime||profile.usageUpdateTime||profile.lastUsageUpdateTime||profile.lastUpdateTime||profile.updateTime||null;
   return{usedBytes,totalBytes,remainingBytes,counterSource,counterUpdatedAt,hasUsageTimestamp:Boolean(counterUpdatedAt)};
 }
@@ -573,17 +577,22 @@ async function checkUsage(input) {
     throw new EsimAccessError(`No exact eSIM profile found for ${requestedIccid || requestedTranNo || orderNo}.`, { code:'PROFILE_NOT_FOUND' });
   }
 
-  // The provider's H5/share page exposes the same real-time counter shown in
-  // its dashboard. Prefer it when available: the reseller usage endpoint can
-  // return a successful but frozen zero counter for an otherwise active eSIM.
+  // eSIM Access may update its profile, dedicated usage, and H5/share counters
+  // at different times. They all identify this exact profile, so compare all
+  // available counters instead of accepting the first successful zero.
+  const candidates=[];
+  const counters=profileUsageCounters(profile);
+  if(counters.usedBytes!=null&&counters.totalBytes!=null)candidates.push({
+    usedBytes:counters.usedBytes,totalBytes:counters.totalBytes,details:profile,
+    source:'profile_api',counterSource:counters.counterSource,counterUpdatedAt:counters.counterUpdatedAt,hasUsageTimestamp:counters.hasUsageTimestamp,
+  });
+
   const shareUrl=trustedProfileShareUrl(profile);
   if(shareUrl){
     try{
       const live=await checkSupportLinkUsage(shareUrl);
       if(requestedIccid&&live.iccid&&String(live.iccid)!==requestedIccid)throw new EsimAccessError('Live usage link returned another ICCID.',{code:'USAGE_ICCID_MISMATCH'});
-      return usageResult(live.usedBytes,live.totalBytes,profile,live,{
-        source:'share_usage_api',live:true,stale:false,syncedAt:new Date().toISOString(),counterSource:'share.dataUsage',counterUpdatedAt:live.lastUpdateTime||null,hasUsageTimestamp:Boolean(live.lastUpdateTime),
-      });
+      candidates.push({usedBytes:live.usedBytes,totalBytes:live.totalBytes,details:live,source:'share_usage_api',counterSource:'share.dataUsage',counterUpdatedAt:live.lastUpdateTime||null,hasUsageTimestamp:Boolean(live.lastUpdateTime)});
     }catch(error){
       log('share_usage_failed_using_profile_counter',{iccid:mask(requestedIccid),code:error.code,message:error.message});
     }
@@ -593,22 +602,20 @@ async function checkUsage(input) {
   if(profileTranNo){
     try{
       const realtime=await queryRealtimeUsage(profileTranNo);
-      return usageResult(realtime.usedBytes,realtime.totalBytes,profile,realtime.details,{
-        source:'realtime_usage_api',live:true,stale:false,syncedAt:new Date().toISOString(),
-        counterSource:`realtime.${realtime.counterSource}`,counterUpdatedAt:realtime.counterUpdatedAt,hasUsageTimestamp:realtime.hasUsageTimestamp,
-      });
+      candidates.push({usedBytes:realtime.usedBytes,totalBytes:realtime.totalBytes,details:realtime.details,source:'realtime_usage_api',counterSource:`realtime.${realtime.counterSource}`,counterUpdatedAt:realtime.counterUpdatedAt,hasUsageTimestamp:realtime.hasUsageTimestamp});
     }catch(error){
       log('realtime_usage_failed_using_fallback',{esimTranNo:mask(profileTranNo),code:error.code,status:error.status,message:error.message});
     }
   }
 
-  const counters=profileUsageCounters(profile),{usedBytes,totalBytes}=counters;
-  if (usedBytes == null || totalBytes == null) {
+  if (!candidates.length) {
     throw new EsimAccessError('The provider profile did not include a complete traffic counter.', { code:'USAGE_VALUES_MISSING' });
   }
-  return usageResult(usedBytes, totalBytes, profile, profile, {
-    source:'profile_api', live:true, stale:false,
-    syncedAt:new Date().toISOString(),counterSource:counters.counterSource,counterUpdatedAt:counters.counterUpdatedAt,hasUsageTimestamp:counters.hasUsageTimestamp,
+  const selected=candidates.reduce((best,item)=>item.usedBytes>best.usedBytes?item:best);
+  const totalBytes=Math.max(...candidates.map(item=>item.totalBytes));
+  const usedBytes=Math.min(totalBytes,selected.usedBytes);
+  return usageResult(usedBytes,totalBytes,profile,selected.details,{
+    source:selected.source,live:true,stale:false,syncedAt:new Date().toISOString(),counterSource:selected.counterSource,counterUpdatedAt:selected.counterUpdatedAt,hasUsageTimestamp:selected.hasUsageTimestamp,
   });
 }
 
@@ -723,7 +730,7 @@ async function checkSupportLinkUsage(supportInstallUrl) {
     expiredTime:payload.obj.expiredTime || null,
     totalDuration:payload.obj.totalDuration ?? null,
     dataType:payload.obj.dataType ?? null,
-    lastUpdateTime:new Date().toISOString(),
+    lastUpdateTime:payload.obj.lastDataUsageUpdateTime||payload.obj.usageUpdateTime||payload.obj.lastUsageUpdateTime||payload.obj.lastUpdateTime||payload.obj.updateTime||null,
   };
 }
 module.exports = { provisionEsim, checkUsage, checkSupportLinkUsage, recoverEsim, recoverEsimByOrderNo, topupEsim, listPackages, findRenewalTopup, cancelEsim, revokeEsim, suspendEsim, unsuspendEsim, listAllocatedEsims, listOwnedProfiles, manageProfile, profileToEsim };

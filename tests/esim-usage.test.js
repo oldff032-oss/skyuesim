@@ -70,10 +70,10 @@ test('dedicated real-time dataUsage overrides conflicting stale profile and rema
   assert.equal(usage.providerUpdatedAt,'2026-09-21T12:59:41Z');
 });
 
-test('usage parser accepts live and nested provider counters instead of treating orderUsage zero as authoritative', async t => {
+test('usage parser accepts live and nested provider counters instead of treating a stale remaining value as authoritative', async t => {
   const originalFetch=global.fetch;
   t.after(()=>{global.fetch=originalFetch});
-  global.fetch=async()=>response({success:true,obj:{esimList:[{orderNo:'ORDER-FIELDS',esimTranNo:'TRAN-FIELDS',iccid:'8943000000000000008',orderUsage:0,totalVolume:20*1024**3,packageList:[{volume:20*1024**3,dataUsage:3*1024**3}],esimStatus:'IN_USE',lastDataUsageUpdateTime:'2026-09-21T09:00:00Z'}]}});
+  global.fetch=async()=>response({success:true,obj:{esimList:[{orderNo:'ORDER-FIELDS',esimTranNo:'TRAN-FIELDS',iccid:'8943000000000000008',orderUsage:0,remain:20*1024**3,totalVolume:20*1024**3,packageList:[{volume:20*1024**3,dataUsage:3*1024**3}],esimStatus:'IN_USE',lastDataUsageUpdateTime:'2026-09-21T09:00:00Z'}]}});
   const usage=await service.checkUsage({orderNo:'ORDER-FIELDS',esimTranNo:'TRAN-FIELDS',iccid:'8943000000000000008'});
   assert.equal(usage.usedBytes,3*1024**3);
   assert.equal(usage.totalBytes,20*1024**3);
@@ -81,22 +81,40 @@ test('usage parser accepts live and nested provider counters instead of treating
   assert.equal(usage.hasUsageTimestamp,true);
 });
 
-test('trusted provider share counter takes priority over the stale reseller usage endpoint', async t => {
+test('all exact provider counters are compared and the greatest consumption wins', async t => {
   const originalFetch=global.fetch,calls=[];
   t.after(()=>{global.fetch=originalFetch});
   global.fetch=async url=>{
     calls.push(String(url));
     if(calls.length===1)return response({success:true,obj:{esimList:[{orderNo:'ORDER-SHARE',esimTranNo:'TRAN-SHARE',iccid:'8943000000000000009',orderUsage:0,totalVolume:20*1024**3,shortUrl:'https://p.qrsim.net/0123456789abcdef0123456789abcdef',esimStatus:'IN_USE'}]}});
     if(calls.length===2)return new Response('<input value="https://api.esimaccess.com/api/v1/h5/share/order/queryUsage?token=safe%2Btoken" id="queryUsageAPI">',{status:200,headers:{'content-type':'text/html'}});
-    return response({success:true,obj:{iccid:'8943000000000000009',totalVolume:20*1024**3,dataUsage:4*1024**3,expiredTime:'2027-01-01T00:00:00Z'}});
+    if(calls.length===3)return response({success:true,obj:{iccid:'8943000000000000009',totalVolume:20*1024**3,dataUsage:4*1024**3,expiredTime:'2027-01-01T00:00:00Z'}});
+    return response({success:true,obj:{esimTranNo:'TRAN-SHARE',totalData:20*1024**3,dataUsage:0,lastUpdateTime:'2026-09-15T00:00:00Z'}});
   };
   const usage=await service.checkUsage({orderNo:'ORDER-SHARE',esimTranNo:'TRAN-SHARE',iccid:'8943000000000000009'});
-  assert.equal(calls.length,3);
-  assert.equal(calls.some(url=>url.includes('/api/v1/open/esim/usage/query')),false);
+  assert.equal(calls.length,4);
+  assert.equal(calls.some(url=>url.includes('/api/v1/open/esim/usage/query')),true);
   assert.equal(usage.usedBytes,4*1024**3);
   assert.equal(usage.totalBytes,20*1024**3);
   assert.equal(usage.source,'share_usage_api');
   assert.equal(usage.counterSource,'share.dataUsage');
+});
+
+test('profile orderUsage beats frozen zero counters and an unchanged full remain value', async t => {
+  const originalFetch=global.fetch,calls=[],used=11*1024**3+494*1024**2,total=20*1024**3;
+  t.after(()=>{global.fetch=originalFetch});
+  global.fetch=async url=>{
+    calls.push(String(url));
+    if(calls.length===1)return response({success:true,obj:{esimList:[{orderNo:'ORDER-CONFLICT',esimTranNo:'TRAN-CONFLICT',iccid:'8943000000000000013',orderUsage:used,remain:total,totalVolume:total,shortUrl:'https://p.qrsim.net/abcdef0123456789abcdef0123456789',esimStatus:'IN_USE',lastDataUsageUpdateTime:'2026-09-21T12:59:41Z'}]}});
+    if(calls.length===2)return new Response('<input value="https://api.esimaccess.com/api/v1/h5/share/order/queryUsage?token=safe%2Btoken" id="queryUsageAPI">',{status:200,headers:{'content-type':'text/html'}});
+    if(calls.length===3)return response({success:true,obj:{iccid:'8943000000000000013',totalVolume:total,dataUsage:0}});
+    return response({success:true,obj:{esimTranNo:'TRAN-CONFLICT',totalData:total,dataUsage:0,lastUpdateTime:'2026-09-15T00:00:00Z'}});
+  };
+  const usage=await service.checkUsage({orderNo:'ORDER-CONFLICT',esimTranNo:'TRAN-CONFLICT',iccid:'8943000000000000013'});
+  assert.equal(usage.usedBytes,used);
+  assert.equal(usage.totalBytes,total);
+  assert.equal(usage.source,'profile_api');
+  assert.equal(usage.counterSource,'profile.used');
 });
 
 test('reseller usage lookup uses the compatible query route directly without the unsupported list request', async t => {
