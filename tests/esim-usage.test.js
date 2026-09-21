@@ -50,14 +50,14 @@ test('official ICCID profile is the only usage source and is not mixed with anot
   assert.equal(calls.length,2);
 });
 
-test('dedicated real-time endpoint overrides the zero profile counter shown by the inventory API', async t => {
+test('dedicated real-time dataUsage overrides conflicting stale profile and remain counters', async t => {
   const originalFetch=global.fetch,calls=[];
   t.after(()=>{global.fetch=originalFetch});
   const realtimeUsed=11*1024**3+494*1024**2;
   global.fetch=async (url,options={})=>{
     calls.push({url:String(url),body:JSON.parse(options.body||'{}')});
     if(calls.length===1)return response({success:true,obj:{esimList:[{orderNo:'ORDER-REALTIME',esimTranNo:'TRAN-REALTIME',iccid:'8943000000000000011',orderUsage:0,totalVolume:20*1024**3,esimStatus:'IN_USE'}]}});
-    return response({success:true,obj:{esimTranNo:'TRAN-REALTIME',totalVolume:20*1024**3,orderUsage:realtimeUsed,remain:20*1024**3-realtimeUsed,lastUpdateTime:'2026-09-21T12:59:41Z'}});
+    return response({success:true,obj:{esimTranNo:'TRAN-REALTIME',totalData:20*1024**3,dataUsage:realtimeUsed,orderUsage:0,remain:20*1024**3,lastUpdateTime:'2026-09-21T12:59:41Z'}});
   };
   const usage=await service.checkUsage({orderNo:'ORDER-REALTIME',esimTranNo:'TRAN-REALTIME',iccid:'8943000000000000011'});
   assert.equal(calls.length,2);
@@ -66,7 +66,7 @@ test('dedicated real-time endpoint overrides the zero profile counter shown by t
   assert.equal(usage.usedBytes,realtimeUsed);
   assert.equal(usage.totalBytes,20*1024**3);
   assert.equal(usage.source,'realtime_usage_api');
-  assert.equal(usage.counterSource,'realtime.profile.remaining');
+  assert.equal(usage.counterSource,'realtime.dataUsage');
   assert.equal(usage.providerUpdatedAt,'2026-09-21T12:59:41Z');
 });
 
@@ -99,20 +99,18 @@ test('profile share URL supplies the live counter when the allocated-profile cou
   assert.equal(usage.counterSource,'share.dataUsage');
 });
 
-test('legacy reseller accounts fall back to the compatible query route when list returns 404', async t => {
+test('reseller usage lookup uses the compatible query route directly without the unsupported list request', async t => {
   const originalFetch=global.fetch,calls=[];
   t.after(()=>{global.fetch=originalFetch});
   global.fetch=async (url,options={})=>{
     calls.push({url:String(url),body:JSON.parse(options.body||'{}')});
-    if(calls.length===1)return new Response(JSON.stringify({success:false,errorCode:'404',errorMsg:'path: /api/v1/open/esim/list'}),{status:404,headers:{'content-type':'application/json'}});
     return response({success:true,obj:{esimList:[{orderNo:'ORDER-LEGACY',esimTranNo:'TRAN-LEGACY',iccid:'8943000000000000007',orderUsage:7441033216,totalVolume:42949672960,esimStatus:'IN_USE'}]}});
   };
   const usage=await service.checkUsage({orderNo:'ORDER-LEGACY',esimTranNo:'TRAN-LEGACY',iccid:'8943000000000000007'});
-  assert.equal(calls.length,3);
-  assert.match(calls[0].url,/\/api\/v1\/open\/esim\/list$/);
-  assert.match(calls[1].url,/\/api\/v1\/open\/esim\/query$/);
-  assert.match(calls[2].url,/\/api\/v1\/open\/esim\/usage\/query$/);
-  assert.equal(calls[1].body.iccid,'8943000000000000007');
+  assert.equal(calls.length,2);
+  assert.match(calls[0].url,/\/api\/v1\/open\/esim\/query$/);
+  assert.match(calls[1].url,/\/api\/v1\/open\/esim\/usage\/query$/);
+  assert.equal(calls[0].body.iccid,'8943000000000000007');
   assert.equal(usage.usedBytes,7441033216);
   assert.equal(usage.totalBytes,42949672960);
   assert.equal(usage.source,'profile_api');
@@ -158,16 +156,16 @@ test('an unchanged old counter is hidden, then an exact new provider snapshot re
   assert.equal(users['live@example.com'].esim.usageStale,false);
 });
 
-test('an unchanged but recently updated provider counter remains visible between provider refreshes', async () => {
+test('an authoritative dedicated usage counter remains visible until the provider returns a newer value', async () => {
   const server=read('server.js'),helper=server.slice(server.indexOf('function cachedEsimUsage'),server.indexOf('const SUPPORT_MAX_FILES'));
-  const recentTime=new Date(Date.now()-5*60*1000).toISOString(),usedBytes=11*1024**3+494*1024**2,totalBytes=20*1024**3;
-  const users={'recent@example.com':{status:'active',esim:{orderNo:'ORDER-RECENT',esimTranNo:'TRAN-RECENT',iccid:'8943000000000000012',usedBytes,totalBytes,remainingBytes:totalBytes-usedBytes,usedGb:usedBytes/(1024**3),dataLimitGb:20,remainingGb:(totalBytes-usedBytes)/(1024**3),status:'active',esimStatus:'IN_USE',assignedAt:'2026-09-01T00:00:00Z',lastUsageSyncAt:recentTime,lastProviderUsageAt:recentTime}}};
+  const providerTime='2026-09-01T12:00:00Z',lastSyncTime=new Date(Date.now()-5*60*1000).toISOString(),usedBytes=11*1024**3+494*1024**2,totalBytes=20*1024**3;
+  const users={'recent@example.com':{status:'active',esim:{orderNo:'ORDER-RECENT',esimTranNo:'TRAN-RECENT',iccid:'8943000000000000012',usedBytes,totalBytes,remainingBytes:totalBytes-usedBytes,usedGb:usedBytes/(1024**3),dataLimitGb:20,remainingGb:(totalBytes-usedBytes)/(1024**3),status:'active',esimStatus:'IN_USE',assignedAt:'2026-09-01T00:00:00Z',lastUsageSyncAt:lastSyncTime,lastProviderUsageAt:providerTime}}};
   const context={
     getUser:email=>users[email],
     saveUser:(email,patch)=>{users[email]={...users[email],...patch};return users[email]},
     refreshGoogleWallet:()=>{},
     checkSupportLinkUsage:async()=>{throw new Error('not used')},
-    checkUsage:async()=>({usedBytes,totalBytes,esimStatus:'IN_USE',source:'realtime_usage_api',stale:false,live:true,syncedAt:new Date().toISOString(),counterUpdatedAt:recentTime}),
+    checkUsage:async()=>({usedBytes,totalBytes,esimStatus:'IN_USE',source:'realtime_usage_api',stale:false,live:true,syncedAt:new Date().toISOString(),counterUpdatedAt:providerTime}),
   };
   vm.runInNewContext(`${helper}\nthis.syncEsimUsageForUser=syncEsimUsageForUser;`,context);
   const current=await context.syncEsimUsageForUser('recent@example.com',{force:true});

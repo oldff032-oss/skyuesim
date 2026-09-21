@@ -295,11 +295,22 @@ async function queryRealtimeUsage(esimTranNo) {
   // response is still unambiguous. Never accept a differently identified item.
   const usage=exact||((items.length===1&&!String(items[0]?.esimTranNo||'').trim())?items[0]:null);
   if(!usage) throw new EsimAccessError('The real-time usage response did not contain the requested eSIM.',{code:'USAGE_PROFILE_MISMATCH'});
-  const counters=profileUsageCounters(usage);
-  if(counters.usedBytes==null||counters.totalBytes==null){
+  // The dedicated usage endpoint is authoritative for consumption. eSIM
+  // Access can return an old `remain` value together with a newer
+  // `dataUsage` value (the console displays the latter as "Real-time"). The
+  // original working implementation therefore used dataUsage first. Do not
+  // let the stale remaining field turn a real counter back into zero.
+  const totalBytes=maxBytes(usage.totalData,usage.totalVolume,usage.dataTotal,usage.volume);
+  const explicitUsed=maxBytes(usage.dataUsage,usage.orderUsage,usage.usedVolume,usage.usedData,usage.usedBytes,usage.usage);
+  const explicitRemaining=minBytes(usage.remain,usage.remaining,usage.remainVolume,usage.remainingVolume,usage.remainingData,usage.remainingBytes,usage.dataRemain);
+  let usedBytes=explicitUsed,remainingBytes=null,counterSource='dataUsage';
+  if(totalBytes!=null&&usedBytes!=null){usedBytes=Math.min(totalBytes,usedBytes);remainingBytes=Math.max(0,totalBytes-usedBytes);}
+  else if(totalBytes!=null&&explicitRemaining!=null){remainingBytes=Math.min(totalBytes,explicitRemaining);usedBytes=Math.max(0,totalBytes-remainingBytes);counterSource='remaining';}
+  const counterUpdatedAt=usage.lastDataUsageUpdateTime||usage.usageUpdateTime||usage.lastUsageUpdateTime||usage.lastUpdateTime||usage.updateTime||null;
+  if(usedBytes==null||totalBytes==null){
     throw new EsimAccessError('The real-time usage response did not include complete traffic counters.',{code:'USAGE_VALUES_MISSING'});
   }
-  return{...counters,details:usage};
+  return{usedBytes,totalBytes,remainingBytes,counterSource,counterUpdatedAt,hasUsageTimestamp:Boolean(counterUpdatedAt),details:usage};
 }
 
 function trustedProfileShareUrl(profile = {}) {
@@ -543,19 +554,11 @@ async function checkUsage(input) {
   let profile = null;
   try {
     let profileResponse;
-    if (requestedIccid) {
-      // Newer eSIM Access accounts expose the documented /list route, while
-      // some existing reseller accounts return HTTP 404 for it and only
-      // expose /query. Use exactly one successful response and still require
-      // an exact ICCID/esimTranNo match below, so counters can never be mixed.
-      try {
-        profileResponse = await esimAccessRequest('/api/v1/open/esim/list', { iccid:requestedIccid, pager:{ pageNum:1, pageSize:20 } });
-      } catch (error) {
-        if (Number(error.status) !== 404) throw error;
-        log('usage_list_unavailable_using_query', { iccid:mask(requestedIccid), status:error.status, code:error.code });
-        profileResponse = await queryProfiles({ iccid:requestedIccid, pageNum:1, pageSize:20 });
-      }
-    } else profileResponse = await queryOrderProfiles(orderNo);
+    // This reseller account does not expose /esim/list (HTTP 404). The
+    // provider-supported /esim/query route accepts ICCID and was also the
+    // route used by the original working traffic implementation.
+    if (requestedIccid) profileResponse = await queryProfiles({ iccid:requestedIccid, pageNum:1, pageSize:20 });
+    else profileResponse = await queryOrderProfiles(orderNo);
     const profiles = profileResponse?.obj?.esimList || [];
     profile = profiles.find((item) => requestedTranNo && String(item?.esimTranNo || '') === requestedTranNo)
       || profiles.find((item) => requestedIccid && String(item?.iccid || '') === requestedIccid)
