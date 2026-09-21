@@ -158,6 +158,26 @@ test('an unchanged old counter is hidden, then an exact new provider snapshot re
   assert.equal(users['live@example.com'].esim.usageStale,false);
 });
 
+test('an unchanged but recently updated provider counter remains visible between provider refreshes', async () => {
+  const server=read('server.js'),helper=server.slice(server.indexOf('function cachedEsimUsage'),server.indexOf('const SUPPORT_MAX_FILES'));
+  const recentTime=new Date(Date.now()-5*60*1000).toISOString(),usedBytes=11*1024**3+494*1024**2,totalBytes=20*1024**3;
+  const users={'recent@example.com':{status:'active',esim:{orderNo:'ORDER-RECENT',esimTranNo:'TRAN-RECENT',iccid:'8943000000000000012',usedBytes,totalBytes,remainingBytes:totalBytes-usedBytes,usedGb:usedBytes/(1024**3),dataLimitGb:20,remainingGb:(totalBytes-usedBytes)/(1024**3),status:'active',esimStatus:'IN_USE',assignedAt:'2026-09-01T00:00:00Z',lastUsageSyncAt:recentTime,lastProviderUsageAt:recentTime}}};
+  const context={
+    getUser:email=>users[email],
+    saveUser:(email,patch)=>{users[email]={...users[email],...patch};return users[email]},
+    refreshGoogleWallet:()=>{},
+    checkSupportLinkUsage:async()=>{throw new Error('not used')},
+    checkUsage:async()=>({usedBytes,totalBytes,esimStatus:'IN_USE',source:'realtime_usage_api',stale:false,live:true,syncedAt:new Date().toISOString(),counterUpdatedAt:recentTime}),
+  };
+  vm.runInNewContext(`${helper}\nthis.syncEsimUsageForUser=syncEsimUsageForUser;`,context);
+  const current=await context.syncEsimUsageForUser('recent@example.com',{force:true});
+  assert.equal(current.stale,false);
+  assert.equal(current.changed,false);
+  assert.equal(current.usedBytes,usedBytes);
+  assert.equal(current.remainingBytes,totalBytes-usedBytes);
+  assert.equal(users['recent@example.com'].esim.usageStale,false);
+});
+
 test('top-up never invents a new local traffic balance before provider confirmation', () => {
   const server=read('server.js'),helper=server.slice(server.indexOf('function cachedEsimUsage'),server.indexOf('async function syncEsimUsageForUser'));
   const context={};
