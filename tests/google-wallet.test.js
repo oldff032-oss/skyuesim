@@ -102,7 +102,7 @@ test('Wallet endpoint generates Google links on the server and frontend shows a 
   assert.match(server,/googleWallet\.createPass\(card\)/);
   assert.match(server,/function refreshGoogleWallet\(email\)/);
   assert.match(server,/saveUser\(req\.userEmail,\{travelMode\}\);\s*refreshGoogleWallet\(req\.userEmail\)/);
-  assert.match(server,/saveUser\(email,\{esim:nextEsim\}\);refreshGoogleWallet\(email\)/);
+  assert.match(server,/saveUser\(email,\{status:user\.status==='blocked'\?'blocked':'active',esim:nextEsim\}\);refreshGoogleWallet\(email\)/);
   assert.doesNotMatch(server,/GOOGLE_WALLET_SAVE_URL/);
   assert.match(service,/crypto\.sign\('RSA-SHA256'/);
   assert.match(service,/payload:\{genericObjects:\[\{id:resources\.objectId,classId:resources\.config\.classId\}\]\}/);

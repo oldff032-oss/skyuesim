@@ -279,7 +279,7 @@ test('usage fallback does not reference webhook-only state', () => {
   assert.match(route, /cachedEsimUsage\(cachedUser\)/);
   assert.match(syncHelper, /profile\.provider==='support-link'/);
   assert.match(syncHelper, /checkUsage\(\{orderNo:profile\.orderNo,esimTranNo:profile\.esimTranNo,iccid:profile\.iccid\}\)/);
-  assert.match(syncHelper, /usage\.stale/);
+  assert.match(syncHelper, /freshness\.stale/);
 });
 
 test('client control center consolidates safe admin work and Super Admin eSIM actions',()=>{

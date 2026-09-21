@@ -20,7 +20,7 @@ test('usage query follows the exact stored eSIM instead of the first profile in 
     calls.push({url:String(url),body:JSON.parse(options.body||'{}')});
     return response({success:true,obj:{esimList:[
       {orderNo:'ORDER-1',esimTranNo:'TRAN-OLD',iccid:'8943000000000000001',orderUsage:0,totalVolume:10737418240},
-      {orderNo:'ORDER-1',esimTranNo:'TRAN-LIVE',iccid:'8943000000000000002',orderUsage:5368709120,totalVolume:10737418240,esimStatus:'IN_USE',lastUpdateTime:'2026-09-18T10:00:00Z'},
+      {orderNo:'ORDER-1',esimTranNo:'TRAN-LIVE',iccid:'8943000000000000002',orderUsage:5368709120,totalVolume:10737418240,esimStatus:'IN_USE',lastDataUsageUpdateTime:'2026-09-18T10:00:00Z'},
     ]}});
   };
   const usage=await service.checkUsage({orderNo:'ORDER-1',esimTranNo:'TRAN-LIVE',iccid:'8943000000000000002'});
@@ -101,33 +101,61 @@ test('usage lookup rejects a response that does not contain the requested ICCID'
   await assert.rejects(()=>service.checkUsage({orderNo:'ORDER-3',esimTranNo:'TRAN-3',iccid:'8943000000000000006'}),error=>error.code==='PROFILE_NOT_FOUND');
 });
 
-test('failed provider lookups are marked stale and never erase cached usage', () => {
+test('unchanged old provider counters are marked stale and never presented as current', () => {
   const server=read('server.js'),provider=read('esimService.js');
   assert.match(provider,/No exact eSIM profile found/);
-  assert.match(server,/providerTotalRegressed/);
-  assert.match(server,/counterStale\?cached\.usedBytes/);
+  assert.match(server,/function providerUsageFreshness/);
+  assert.match(server,/unchangedOldCounter/);
+  assert.match(server,/usageStale:true/);
 });
 
-test('top-up accounting adds the new allowance to the existing profile when provider response only echoes the added volume', () => {
+test('an unchanged old counter is hidden, then an exact new provider snapshot replaces it', async () => {
+  const server=read('server.js'),helper=server.slice(server.indexOf('function cachedEsimUsage'),server.indexOf('const SUPPORT_MAX_FILES'));
+  const users={'live@example.com':{status:'active',esim:{orderNo:'ORDER-LIVE',esimTranNo:'TRAN-LIVE',iccid:'8943000000000000010',usedBytes:0,totalBytes:20*1024**3,remainingBytes:20*1024**3,usedGb:0,dataLimitGb:20,remainingGb:20,status:'active',esimStatus:'IN_USE',assignedAt:'2026-09-01T00:00:00Z',lastUsageSyncAt:'2026-09-01T00:00:00Z'}}};
+  let providerUsed=0,providerTime=null;
+  const context={
+    getUser:email=>users[email],
+    saveUser:(email,patch)=>{users[email]={...users[email],...patch};return users[email]},
+    refreshGoogleWallet:()=>{},
+    checkSupportLinkUsage:async()=>{throw new Error('not used')},
+    checkUsage:async()=>({usedBytes:providerUsed,totalBytes:20*1024**3,esimStatus:'IN_USE',source:'profile_api',stale:false,live:true,syncedAt:'2026-09-21T12:00:00Z',counterUpdatedAt:providerTime}),
+  };
+  vm.runInNewContext(`${helper}\nthis.syncEsimUsageForUser=syncEsimUsageForUser;`,context);
+  const stale=await context.syncEsimUsageForUser('live@example.com',{force:true});
+  assert.equal(stale.stale,true);
+  assert.equal(stale.changed,false);
+  assert.equal(users['live@example.com'].esim.usageStale,true);
+  providerUsed=5*1024**3;providerTime='2026-09-21T11:55:00Z';
+  const fresh=await context.syncEsimUsageForUser('live@example.com',{force:true});
+  assert.equal(fresh.stale,false);
+  assert.equal(fresh.changed,true);
+  assert.equal(fresh.usedBytes,5*1024**3);
+  assert.equal(fresh.remainingBytes,15*1024**3);
+  assert.equal(users['live@example.com'].esim.usageStale,false);
+});
+
+test('top-up never invents a new local traffic balance before provider confirmation', () => {
   const server=read('server.js'),helper=server.slice(server.indexOf('function cachedEsimUsage'),server.indexOf('async function syncEsimUsageForUser'));
   const context={};
   vm.runInNewContext(`${helper}\nthis.mergeTopupUsage=mergeTopupUsage;`,context);
   const result=context.mergeTopupUsage({totalBytes:20*1024**3,usedBytes:7*1024**3,remainingBytes:13*1024**3},{transactionId:'TOPUP-1',totalGb:20,usedGb:0,remainingGb:20},{packageCode:'EU20',dataLimitGb:20,unlimited:false},'2026-09-18T12:00:00Z');
-  assert.equal(result.totalBytes,40*1024**3);
+  assert.equal(result.totalBytes,20*1024**3);
   assert.equal(result.usedBytes,7*1024**3);
-  assert.equal(result.remainingBytes,33*1024**3);
+  assert.equal(result.remainingBytes,13*1024**3);
   assert.equal(result.usageStale,true);
+  assert.equal(result.usageChanged,false);
   assert.equal(result.pendingTopupConfirmation.expectedMinimumTotalBytes,40*1024**3);
 });
 
-test('top-up and later sync never reset consumed traffic to zero on the same ICCID', () => {
+test('top-up response cannot overwrite the last provider-confirmed traffic snapshot', () => {
   const server=read('server.js'),helper=server.slice(server.indexOf('function cachedEsimUsage'),server.indexOf('async function syncEsimUsageForUser'));
   const context={};
   vm.runInNewContext(`${helper}\nthis.mergeTopupUsage=mergeTopupUsage;`,context);
   const result=context.mergeTopupUsage({totalBytes:20*1024**3,usedBytes:7*1024**3,remainingBytes:13*1024**3},{transactionId:'TOPUP-2',totalGb:40,usedGb:0,remainingGb:40},{packageCode:'EU20',dataLimitGb:20,unlimited:false},'2026-09-21T12:00:00Z');
-  assert.equal(result.totalBytes,40*1024**3);
+  assert.equal(result.totalBytes,20*1024**3);
   assert.equal(result.usedBytes,7*1024**3);
-  assert.equal(result.remainingBytes,33*1024**3);
+  assert.equal(result.remainingBytes,13*1024**3);
+  assert.equal(result.usageStale,true);
 });
 
 test('provider USED_UP and EXPIRED states override delayed gigabyte counters', async () => {

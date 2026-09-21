@@ -120,11 +120,12 @@
           }
         }catch(e){ /* якщо не вдалось оновити — показуємо останнє відоме значення */ }
 
-        const pct = totalBytes ? Math.min(100, Math.round((usedBytes / totalBytes) * 100)) : 0;
-        const isLow = totalBytes && pct >= 80;
+        const usageKnown = !usageStale && totalBytes != null && usedBytes != null;
+        const pct = usageKnown && totalBytes ? Math.min(100, Math.round((usedBytes / totalBytes) * 100)) : 0;
+        const isLow = usageKnown && totalBytes && pct >= 80;
         const endedHtml=serviceEnded?`<div class="card" style="border-color:rgba(255,92,118,.55);background:rgba(112,24,46,.2)"><b style="color:#ff8ca1">${serviceEndedReason==='expired'?'Термін пакета завершився':'Інтернет у пакеті закінчився'}</b><p class="muted" style="margin-top:7px">${serviceEndedReason==='expired'?'Невикористаний залишок більше недоступний після завершення строку дії.':'Провайдер позначив пакет як повністю використаний.'} Можна додати сумісний пакет без перевстановлення eSIM або отримати новий QR.</p><a class="btn" href="esim-topup.html" style="margin-top:12px">Додати інтернет</a></div>`:'';
         let trafficAlertHtml = '';
-        if(limitGb){
+        if(usageKnown&&limitGb){
           try{
             const sessionToken = localStorage.getItem('signal_session_token');
             const preferencesRes = await fetch(`${API_URL}/api/account/preferences`, { headers: { 'x-session-token': sessionToken } });
@@ -148,7 +149,7 @@
 
         // Прогноз закінчення трафіку за поточним темпом
         let forecastHtml = '';
-        if(limitGb && usedGb > 0 && activateTime){
+        if(usageKnown&&limitGb && usedGb > 0 && activateTime){
           const daysSinceActivation = Math.max(1, (Date.now() - new Date(activateTime).getTime()) / 86400000);
           const dailyAvg = usedGb / daysSinceActivation;
           if(dailyAvg > 0){
@@ -158,16 +159,16 @@
             const dateStr = projectedDate.toLocaleDateString(appLocale, { day:'numeric', month:'long' });
             forecastHtml = `<div class="card"><p class="muted">При такому темпі використання (~${dailyAvg.toFixed(2)} ГБ/день) трафіку вистачить приблизно до <b style="color:var(--text);">${dateStr}</b>.</p></div>`;
           }
-        } else if(limitGb) {
+        } else if(usageKnown&&limitGb) {
           forecastHtml = `<div class="card"><p class="muted">Прогноз з'явиться, коли назбирається трохи даних про використання.</p></div>`;
         }
-        try{
+        if(usageKnown)try{
           const insightRes=await fetch(`${API_URL}/api/account/usage-insights`,{headers:{'x-session-token':sessionToken},cache:'no-store'}),insight=await insightRes.json();
           if(insightRes.ok)forecastHtml=`<div class="card" style="position:relative;overflow:hidden;border-color:${insight.risk==='high'?'#ff718566':'#55dfff3d'}"><div style="display:flex;align-items:center;gap:12px"><span style="width:44px;height:44px;border-radius:15px;display:grid;place-items:center;background:linear-gradient(145deg,#17467c,#40236e);font-size:22px;animation:usageGlow 2.8s ease-in-out infinite">◉</span><span><b>Розумний прогноз</b><small class="muted" style="display:block;margin-top:3px">${insight.confidence==='high'?'Висока точність':insight.confidence==='medium'?'Середня точність':'Потрібно більше даних'}</small></span></div><p class="muted" style="margin-top:13px;line-height:1.5">${insight.recommendation}</p>${insight.projectedDaysLeft==null?'':`<div style="font:700 28px Space Grotesk;margin-top:10px">≈ ${insight.projectedDaysLeft} дн.</div>`}<a href="smart-assist.html" class="btn ghost" style="margin-top:12px;padding:10px 12px;font-size:12px">Налаштувати Smart Assist</a></div>`;
         }catch(e){}
 
         let historyHtml = '';
-        try{
+        if(usageKnown)try{
           const historyRes = await fetch(`${API_URL}/api/account/usage-history`, { headers: { 'x-session-token': localStorage.getItem('signal_session_token') } });
           const historyData = await historyRes.json();
           const history = (historyData.history || []).slice(-14);
@@ -182,12 +183,12 @@
           ${trafficAlertHtml || (isLow ? `<div class="card" style="border-color:var(--danger);"><p style="color:var(--danger); font-size:13px; display:flex; align-items:center; gap:8px;">⚠️ Використано понад 80% трафіку тарифу</p></div>` : '')}
 
           <div class="card">
-            <div class="usage-top"><span>Використано</span><b>${formatBytes(usedBytes)}${totalBytes!=null?` / ${formatBytes(totalBytes)}`:' · безліміт'}</b></div>
-            ${limitGb ? `<div class="usage-track"><div class="usage-fill" style="--usage-pct:${pct}%;${isLow ? 'background:linear-gradient(90deg,#f5a623,var(--danger));' : ''}"></div></div>` : ''}
-            ${remainingBytes != null ? `<p class="muted" style="margin-top:12px;">Залишилось: <b style="color:var(--text);">${formatBytes(remainingBytes)}</b></p>` : ''}
-            <p class="muted" style="margin-top:8px;font-size:11px;word-break:break-word;">Точне значення провайдера: ${Number(usedBytes||0).toLocaleString('uk-UA')} байт використано${totalBytes!=null?` із ${Number(totalBytes).toLocaleString('uk-UA')} байт`:''}.</p>
+            <div class="usage-top"><span>Використано</span><b>${usageKnown?`${formatBytes(usedBytes)} / ${formatBytes(totalBytes)}`:'—'}</b></div>
+            ${usageKnown&&limitGb ? `<div class="usage-track"><div class="usage-fill" style="--usage-pct:${pct}%;${isLow ? 'background:linear-gradient(90deg,#f5a623,var(--danger));' : ''}"></div></div>` : ''}
+            ${usageKnown&&remainingBytes != null ? `<p class="muted" style="margin-top:12px;">Залишилось: <b style="color:var(--text);">${formatBytes(remainingBytes)}</b></p>` : '<p class="muted" style="margin-top:12px;">Актуальні гігабайти приховано, поки оператор не передасть новий лічильник.</p>'}
+            ${usageKnown?`<p class="muted" style="margin-top:8px;font-size:11px;word-break:break-word;">Точне значення оператора: ${Number(usedBytes).toLocaleString('uk-UA')} байт використано із ${Number(totalBytes).toLocaleString('uk-UA')} байт.</p>`:''}
             ${apn ? `<p class="muted" style="margin-top:14px;">📡 Мережа: <span style="color:var(--text);">${apn}</span></p>` : ''}
-            <div class="sync-state ${usageStale?'warn':''}"><b>${usageStale?'⚠️ Показано останні підтверджені дані':usageSource==='manual_admin'?'✓ Залишок перевірено командою Signal':'✓ Дані отримано від провайдера'}</b>${usageWarning?`<div style="margin-top:5px">${escapeHtml(usageWarning)}</div>`:''}<div class="sync-meta"><span>Перевірено Signal: ${syncedAt&&providerDate(syncedAt)?providerDate(syncedAt).toLocaleString('uk-UA'):'—'}</span><span>Оновлення провайдера: ${providerUpdatedAt&&providerDate(providerUpdatedAt)?providerDate(providerUpdatedAt).toLocaleString('uk-UA'):'ще не підтверджено'}</span><span>Автоматична перевірка: кожні 30 хвилин. Оператор може передавати використання із затримкою до кількох годин.</span></div></div>
+            <div class="sync-state ${usageStale?'warn':''}"><b>${usageStale?'⚠️ Нового лічильника від оператора немає':'✓ Цифри отримано від оператора'}</b>${usageWarning?`<div style="margin-top:5px">${escapeHtml(usageWarning)}</div>`:''}<div class="sync-meta"><span>Запит Signal: ${syncedAt&&providerDate(syncedAt)?providerDate(syncedAt).toLocaleString('uk-UA'):'—'}</span><span>Час лічильника оператора: ${providerUpdatedAt&&providerDate(providerUpdatedAt)?providerDate(providerUpdatedAt).toLocaleString('uk-UA'):'не передано'}</span><span>Автоматична перевірка: кожні 30 хвилин.</span></div></div>
             <button class="btn ghost" data-refresh-usage style="margin-top:12px;padding:9px 12px;font-size:12px" onclick="load()">Перевірити зараз</button>
           </div>
 

@@ -270,7 +270,8 @@ function profileUsageCounters(profile = {}) {
   let usedBytes=explicitUsed,remainingBytes=explicitRemaining,counterSource='missing';
   if(totalBytes!=null&&explicitRemaining!=null){remainingBytes=Math.min(totalBytes,explicitRemaining);usedBytes=Math.max(0,totalBytes-remainingBytes);counterSource=packageRemainingTotal!=null&&explicitRemaining===packageRemainingTotal?'package.remaining':'profile.remaining';}
   else if(totalBytes!=null&&explicitUsed!=null){usedBytes=Math.min(totalBytes,explicitUsed);remainingBytes=Math.max(0,totalBytes-usedBytes);counterSource=packageUsedTotal!=null&&explicitUsed===packageUsedTotal?'package.used':'profile.used';}
-  return{usedBytes,totalBytes,remainingBytes,counterSource,providerUpdatedAt:profile.lastDataUsageUpdateTime||profile.usageUpdateTime||profile.lastUsageUpdateTime||profile.updateTime||profile.lastUpdateTime||null,hasUsageTimestamp:Boolean(profile.lastDataUsageUpdateTime||profile.usageUpdateTime||profile.lastUsageUpdateTime)};
+  const counterUpdatedAt=profile.lastDataUsageUpdateTime||profile.usageUpdateTime||profile.lastUsageUpdateTime||null;
+  return{usedBytes,totalBytes,remainingBytes,counterSource,counterUpdatedAt,hasUsageTimestamp:Boolean(counterUpdatedAt)};
 }
 
 function trustedProfileShareUrl(profile = {}) {
@@ -547,7 +548,7 @@ async function checkUsage(input) {
       const live=await checkSupportLinkUsage(shareUrl);
       if(requestedIccid&&live.iccid&&String(live.iccid)!==requestedIccid)throw new EsimAccessError('Live usage link returned another ICCID.',{code:'USAGE_ICCID_MISMATCH'});
       return usageResult(live.usedBytes,live.totalBytes,profile,live,{
-        source:'share_usage_api',live:true,stale:false,syncedAt:new Date().toISOString(),counterSource:'share.dataUsage',hasUsageTimestamp:true,
+        source:'share_usage_api',live:true,stale:false,syncedAt:new Date().toISOString(),counterSource:'share.dataUsage',counterUpdatedAt:live.lastUpdateTime||null,hasUsageTimestamp:Boolean(live.lastUpdateTime),
       });
     }catch(error){
       log('share_usage_failed_using_profile_counter',{iccid:mask(requestedIccid),code:error.code,message:error.message});
@@ -560,7 +561,7 @@ async function checkUsage(input) {
   }
   return usageResult(usedBytes, totalBytes, profile, profile, {
     source:'profile_api', live:true, stale:false,
-    syncedAt:new Date().toISOString(),counterSource:counters.counterSource,hasUsageTimestamp:counters.hasUsageTimestamp,providerUpdatedAt:counters.providerUpdatedAt,
+    syncedAt:new Date().toISOString(),counterSource:counters.counterSource,counterUpdatedAt:counters.counterUpdatedAt,hasUsageTimestamp:counters.hasUsageTimestamp,
   });
 }
 
@@ -573,7 +574,7 @@ function usageResult(usedBytes, totalBytes, profile, usageDetails = null, metada
     expiredTime: profile.expiredTime || null,
     activateTime: profile.activateTime || null,
     lastUpdateTime: usageDetails?.lastUpdateTime || usageDetails?.lastDataUsageUpdateTime || profile.lastUpdateTime || null,
-    providerUpdatedAt: usageDetails?.lastUpdateTime || usageDetails?.lastDataUsageUpdateTime || profile.lastUpdateTime || null,
+    providerUpdatedAt: usageDetails?.lastDataUsageUpdateTime || usageDetails?.usageUpdateTime || usageDetails?.lastUsageUpdateTime || null,
     ...metadata,
   };
 }

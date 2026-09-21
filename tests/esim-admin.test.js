@@ -165,17 +165,17 @@ test('Super Admin can import an exact support replacement without creating anoth
   assert.match(provider,/async function recoverEsimByOrderNo/);
 });
 
-test('support-link usage is updated manually without querying a fake provider order', () => {
+test('manual traffic editing is disabled so only the provider counter can change usage', () => {
   const server=read('server.js'),page=read('admin-client.html'),inventory=read('esimInventoryService.js');
   const route=server.slice(server.indexOf("app.patch('/api/admin/users/:email/esim-usage'"),server.indexOf("app.post('/api/admin/users/:email/resend-esim-instructions'"));
   assert.match(route,/requireRole\('super_admin'\)/);
   assert.match(route,/requirePermission\('esim\.manage',\{requireTwoFactor:true\}\)/);
-  assert.match(route,/provider!=='support-link'/);
-  assert.match(route,/remainingGb===0/);
-  assert.match(route,/support_esim_usage_adjusted/);
+  assert.match(route,/status\(410\)/);
+  assert.match(route,/Ручне редагування трафіку вимкнено/);
+  assert.doesNotMatch(route,/saveUser|remainingGb|usedGb/);
   assert.doesNotMatch(route,/checkUsage|provisionEsim|topupEsim/);
-  assert.match(page,/Вказати вручну/);
-  assert.match(page,/Якщо інтернет закінчився — введіть 0/);
+  assert.doesNotMatch(page,/Вказати вручну/);
+  assert.doesNotMatch(page,/setSupportUsage/);
   assert.match(inventory,/provider==='support-link'\)actions\.canSync=false/);
 });
 
@@ -194,7 +194,7 @@ test('support share link supplies real usage to both admin and customer screens'
   assert.match(adminRoute,/syncEsimUsageForUser\(email,\{force:true\}\)/);
   assert.match(customerRoute,/syncEsimUsageForUser\(email,\{force:true\}\)/);
   assert.match(page,/Перевірити залишок/);
-  assert.match(page,/Вказати вручну/);
+  assert.doesNotMatch(page,/Вказати вручну/);
 });
 
 test('support share usage parser accepts only the official token endpoint', async t => {
