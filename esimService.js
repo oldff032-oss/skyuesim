@@ -719,8 +719,11 @@ async function checkSupportLinkUsage(supportInstallUrl) {
   if (!usageResponse.ok || !isSuccess(payload) || !payload?.obj) {
     throw new EsimAccessError(`Support usage error: ${apiMessage(payload)}`, { code:apiCode(payload) || 'SUPPORT_USAGE_FAILED', status:usageResponse.status, payload });
   }
-  const totalBytes = bytes(payload.obj.totalVolume);
-  const usedBytes = bytes(payload.obj.dataUsage ?? payload.obj.orderUsage);
+  const totalBytes = maxBytes(payload.obj.totalVolume,payload.obj.totalData,payload.obj.dataTotal,payload.obj.volume);
+  // Some H5 responses keep dataUsage at zero while orderUsage contains the
+  // counter displayed as Real-time. Nullish coalescing would incorrectly lock
+  // the result to that zero, so compare every explicit used-data field.
+  const usedBytes = maxBytes(payload.obj.dataUsage,payload.obj.orderUsage,payload.obj.usedVolume,payload.obj.usedData,payload.obj.usedBytes,payload.obj.usage);
   if (totalBytes == null || usedBytes == null) throw new EsimAccessError('Support usage response did not include traffic values.', { code:'SUPPORT_USAGE_VALUES_MISSING' });
   return {
     usedBytes:Math.max(0, usedBytes),

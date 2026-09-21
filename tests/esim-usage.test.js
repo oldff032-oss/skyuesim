@@ -100,21 +100,21 @@ test('all exact provider counters are compared and the greatest consumption wins
   assert.equal(usage.counterSource,'share.dataUsage');
 });
 
-test('profile orderUsage beats frozen zero counters and an unchanged full remain value', async t => {
+test('support orderUsage beats a frozen zero dataUsage and an unchanged full remain value', async t => {
   const originalFetch=global.fetch,calls=[],used=11*1024**3+494*1024**2,total=20*1024**3;
   t.after(()=>{global.fetch=originalFetch});
   global.fetch=async url=>{
     calls.push(String(url));
-    if(calls.length===1)return response({success:true,obj:{esimList:[{orderNo:'ORDER-CONFLICT',esimTranNo:'TRAN-CONFLICT',iccid:'8943000000000000013',orderUsage:used,remain:total,totalVolume:total,shortUrl:'https://p.qrsim.net/abcdef0123456789abcdef0123456789',esimStatus:'IN_USE',lastDataUsageUpdateTime:'2026-09-21T12:59:41Z'}]}});
+    if(calls.length===1)return response({success:true,obj:{esimList:[{orderNo:'ORDER-CONFLICT',esimTranNo:'TRAN-CONFLICT',iccid:'8943000000000000013',orderUsage:0,remain:total,totalVolume:total,shortUrl:'https://p.qrsim.net/abcdef0123456789abcdef0123456789',esimStatus:'IN_USE',lastDataUsageUpdateTime:'2026-09-15T12:59:41Z'}]}});
     if(calls.length===2)return new Response('<input value="https://api.esimaccess.com/api/v1/h5/share/order/queryUsage?token=safe%2Btoken" id="queryUsageAPI">',{status:200,headers:{'content-type':'text/html'}});
-    if(calls.length===3)return response({success:true,obj:{iccid:'8943000000000000013',totalVolume:total,dataUsage:0}});
+    if(calls.length===3)return response({success:true,obj:{iccid:'8943000000000000013',totalVolume:total,dataUsage:0,orderUsage:used,lastUpdateTime:'2026-09-21T12:59:41Z'}});
     return response({success:true,obj:{esimTranNo:'TRAN-CONFLICT',totalData:total,dataUsage:0,lastUpdateTime:'2026-09-15T00:00:00Z'}});
   };
   const usage=await service.checkUsage({orderNo:'ORDER-CONFLICT',esimTranNo:'TRAN-CONFLICT',iccid:'8943000000000000013'});
   assert.equal(usage.usedBytes,used);
   assert.equal(usage.totalBytes,total);
-  assert.equal(usage.source,'profile_api');
-  assert.equal(usage.counterSource,'profile.used');
+  assert.equal(usage.source,'share_usage_api');
+  assert.equal(usage.counterSource,'share.dataUsage');
 });
 
 test('reseller usage lookup uses the compatible query route directly without the unsupported list request', async t => {
