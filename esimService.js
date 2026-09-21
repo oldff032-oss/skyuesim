@@ -573,19 +573,9 @@ async function checkUsage(input) {
     throw new EsimAccessError(`No exact eSIM profile found for ${requestedIccid || requestedTranNo || orderNo}.`, { code:'PROFILE_NOT_FOUND' });
   }
 
-  const profileTranNo=String(profile.esimTranNo||requestedTranNo||'').trim();
-  if(profileTranNo){
-    try{
-      const realtime=await queryRealtimeUsage(profileTranNo);
-      return usageResult(realtime.usedBytes,realtime.totalBytes,profile,realtime.details,{
-        source:'realtime_usage_api',live:true,stale:false,syncedAt:new Date().toISOString(),
-        counterSource:`realtime.${realtime.counterSource}`,counterUpdatedAt:realtime.counterUpdatedAt,hasUsageTimestamp:realtime.hasUsageTimestamp,
-      });
-    }catch(error){
-      log('realtime_usage_failed_using_fallback',{esimTranNo:mask(profileTranNo),code:error.code,status:error.status,message:error.message});
-    }
-  }
-
+  // The provider's H5/share page exposes the same real-time counter shown in
+  // its dashboard. Prefer it when available: the reseller usage endpoint can
+  // return a successful but frozen zero counter for an otherwise active eSIM.
   const shareUrl=trustedProfileShareUrl(profile);
   if(shareUrl){
     try{
@@ -596,6 +586,19 @@ async function checkUsage(input) {
       });
     }catch(error){
       log('share_usage_failed_using_profile_counter',{iccid:mask(requestedIccid),code:error.code,message:error.message});
+    }
+  }
+
+  const profileTranNo=String(profile.esimTranNo||requestedTranNo||'').trim();
+  if(profileTranNo){
+    try{
+      const realtime=await queryRealtimeUsage(profileTranNo);
+      return usageResult(realtime.usedBytes,realtime.totalBytes,profile,realtime.details,{
+        source:'realtime_usage_api',live:true,stale:false,syncedAt:new Date().toISOString(),
+        counterSource:`realtime.${realtime.counterSource}`,counterUpdatedAt:realtime.counterUpdatedAt,hasUsageTimestamp:realtime.hasUsageTimestamp,
+      });
+    }catch(error){
+      log('realtime_usage_failed_using_fallback',{esimTranNo:mask(profileTranNo),code:error.code,status:error.status,message:error.message});
     }
   }
 

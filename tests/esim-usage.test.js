@@ -81,18 +81,18 @@ test('usage parser accepts live and nested provider counters instead of treating
   assert.equal(usage.hasUsageTimestamp,true);
 });
 
-test('profile share URL supplies the live counter when the allocated-profile counter stays at zero', async t => {
+test('trusted provider share counter takes priority over the stale reseller usage endpoint', async t => {
   const originalFetch=global.fetch,calls=[];
   t.after(()=>{global.fetch=originalFetch});
   global.fetch=async url=>{
     calls.push(String(url));
     if(calls.length===1)return response({success:true,obj:{esimList:[{orderNo:'ORDER-SHARE',esimTranNo:'TRAN-SHARE',iccid:'8943000000000000009',orderUsage:0,totalVolume:20*1024**3,shortUrl:'https://p.qrsim.net/0123456789abcdef0123456789abcdef',esimStatus:'IN_USE'}]}});
-    if(calls.length===2)return response({success:true,obj:[]});
-    if(calls.length===3)return new Response('<input value="https://api.esimaccess.com/api/v1/h5/share/order/queryUsage?token=safe%2Btoken" id="queryUsageAPI">',{status:200,headers:{'content-type':'text/html'}});
+    if(calls.length===2)return new Response('<input value="https://api.esimaccess.com/api/v1/h5/share/order/queryUsage?token=safe%2Btoken" id="queryUsageAPI">',{status:200,headers:{'content-type':'text/html'}});
     return response({success:true,obj:{iccid:'8943000000000000009',totalVolume:20*1024**3,dataUsage:4*1024**3,expiredTime:'2027-01-01T00:00:00Z'}});
   };
   const usage=await service.checkUsage({orderNo:'ORDER-SHARE',esimTranNo:'TRAN-SHARE',iccid:'8943000000000000009'});
-  assert.equal(calls.length,4);
+  assert.equal(calls.length,3);
+  assert.equal(calls.some(url=>url.includes('/api/v1/open/esim/usage/query')),false);
   assert.equal(usage.usedBytes,4*1024**3);
   assert.equal(usage.totalBytes,20*1024**3);
   assert.equal(usage.source,'share_usage_api');
