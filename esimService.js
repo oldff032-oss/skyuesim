@@ -240,8 +240,44 @@ function transactionId() {
 }
 
 function bytes(value) {
+  if (value === null || value === undefined || value === '') return null;
   const number = Number(value);
   return Number.isFinite(number) && number >= 0 ? number : null;
+}
+
+function firstBytes(...values) {
+  for (const value of values) {
+    const parsed=bytes(value);
+    if (parsed != null) return parsed;
+  }
+  return null;
+}
+
+function maxBytes(...values){const parsed=values.map(bytes).filter(value=>value!=null);return parsed.length?Math.max(...parsed):null;}
+function minBytes(...values){const parsed=values.map(bytes).filter(value=>value!=null);return parsed.length?Math.min(...parsed):null;}
+
+function profileUsageCounters(profile = {}) {
+  const packages=Array.isArray(profile.packageList)?profile.packageList:[];
+  const packageTotals=packages.map(item=>firstBytes(item?.totalVolume,item?.totalData,item?.volume)).filter(value=>value!=null);
+  const packageUsed=packages.map(item=>firstBytes(item?.dataUsage,item?.orderUsage,item?.usedVolume,item?.usedData,item?.usedBytes,item?.usage));
+  const packageRemaining=packages.map(item=>firstBytes(item?.remain,item?.remaining,item?.remainVolume,item?.remainingVolume,item?.remainingData,item?.remainingBytes,item?.dataRemain));
+  const packageTotal=packageTotals.length===packages.length&&packages.length?packageTotals.reduce((sum,value)=>sum+value,0):null;
+  const packageUsedTotal=packageUsed.length===packages.length&&packages.length&&packageUsed.every(value=>value!=null)?packageUsed.reduce((sum,value)=>sum+value,0):null;
+  const packageRemainingTotal=packageRemaining.length===packages.length&&packages.length&&packageRemaining.every(value=>value!=null)?packageRemaining.reduce((sum,value)=>sum+value,0):null;
+  const totalBytes=maxBytes(profile.totalVolume,profile.totalData,profile.dataTotal,profile.volume,packageTotal);
+  const explicitRemaining=minBytes(profile.remain,profile.remaining,profile.remainVolume,profile.remainingVolume,profile.remainingData,profile.remainingBytes,profile.dataRemain,packageRemainingTotal);
+  const explicitUsed=maxBytes(profile.dataUsage,profile.orderUsage,profile.usedVolume,profile.usedData,profile.usedBytes,profile.usage,packageUsedTotal);
+  let usedBytes=explicitUsed,remainingBytes=explicitRemaining,counterSource='missing';
+  if(totalBytes!=null&&explicitRemaining!=null){remainingBytes=Math.min(totalBytes,explicitRemaining);usedBytes=Math.max(0,totalBytes-remainingBytes);counterSource=packageRemainingTotal!=null&&explicitRemaining===packageRemainingTotal?'package.remaining':'profile.remaining';}
+  else if(totalBytes!=null&&explicitUsed!=null){usedBytes=Math.min(totalBytes,explicitUsed);remainingBytes=Math.max(0,totalBytes-usedBytes);counterSource=packageUsedTotal!=null&&explicitUsed===packageUsedTotal?'package.used':'profile.used';}
+  return{usedBytes,totalBytes,remainingBytes,counterSource,providerUpdatedAt:profile.lastDataUsageUpdateTime||profile.usageUpdateTime||profile.lastUsageUpdateTime||profile.updateTime||profile.lastUpdateTime||null,hasUsageTimestamp:Boolean(profile.lastDataUsageUpdateTime||profile.usageUpdateTime||profile.lastUsageUpdateTime)};
+}
+
+function trustedProfileShareUrl(profile = {}) {
+  for(const value of [profile.shortUrl,profile.shortURL,profile.shareUrl,profile.installUrl,profile.installationUrl]){
+    try{const url=new URL(String(value||'').trim());if(url.protocol==='https:'&&url.hostname.toLowerCase()==='p.qrsim.net')return url.toString();}catch{}
+  }
+  return null;
 }
 
 // Public package catalogue from eSIM Access. It is used server-side only so
@@ -505,17 +541,26 @@ async function checkUsage(input) {
     throw new EsimAccessError(`No exact eSIM profile found for ${requestedIccid || requestedTranNo || orderNo}.`, { code:'PROFILE_NOT_FOUND' });
   }
 
-  const usedBytes = bytes(profile.orderUsage);
-  const packageTotalBytes = Array.isArray(profile.packageList)
-    ? profile.packageList.reduce((sum,item) => sum + (bytes(item?.volume) || 0), 0)
-    : 0;
-  const totalBytes = bytes(profile.totalVolume) ?? (packageTotalBytes || null);
+  const shareUrl=trustedProfileShareUrl(profile);
+  if(shareUrl){
+    try{
+      const live=await checkSupportLinkUsage(shareUrl);
+      if(requestedIccid&&live.iccid&&String(live.iccid)!==requestedIccid)throw new EsimAccessError('Live usage link returned another ICCID.',{code:'USAGE_ICCID_MISMATCH'});
+      return usageResult(live.usedBytes,live.totalBytes,profile,live,{
+        source:'share_usage_api',live:true,stale:false,syncedAt:new Date().toISOString(),counterSource:'share.dataUsage',hasUsageTimestamp:true,
+      });
+    }catch(error){
+      log('share_usage_failed_using_profile_counter',{iccid:mask(requestedIccid),code:error.code,message:error.message});
+    }
+  }
+
+  const counters=profileUsageCounters(profile),{usedBytes,totalBytes}=counters;
   if (usedBytes == null || totalBytes == null) {
     throw new EsimAccessError('The provider profile did not include a complete traffic counter.', { code:'USAGE_VALUES_MISSING' });
   }
   return usageResult(usedBytes, totalBytes, profile, profile, {
     source:'profile_api', live:true, stale:false,
-    syncedAt:new Date().toISOString(),
+    syncedAt:new Date().toISOString(),counterSource:counters.counterSource,hasUsageTimestamp:counters.hasUsageTimestamp,providerUpdatedAt:counters.providerUpdatedAt,
   });
 }
 

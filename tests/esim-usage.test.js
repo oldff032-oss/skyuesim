@@ -48,6 +48,34 @@ test('official ICCID profile is the only usage source and is not mixed with anot
   assert.equal(calls.length,1);
 });
 
+test('usage parser accepts live and nested provider counters instead of treating orderUsage zero as authoritative', async t => {
+  const originalFetch=global.fetch;
+  t.after(()=>{global.fetch=originalFetch});
+  global.fetch=async()=>response({success:true,obj:{esimList:[{orderNo:'ORDER-FIELDS',esimTranNo:'TRAN-FIELDS',iccid:'8943000000000000008',orderUsage:0,totalVolume:20*1024**3,packageList:[{volume:20*1024**3,dataUsage:3*1024**3}],esimStatus:'IN_USE',lastDataUsageUpdateTime:'2026-09-21T09:00:00Z'}]}});
+  const usage=await service.checkUsage({orderNo:'ORDER-FIELDS',esimTranNo:'TRAN-FIELDS',iccid:'8943000000000000008'});
+  assert.equal(usage.usedBytes,3*1024**3);
+  assert.equal(usage.totalBytes,20*1024**3);
+  assert.equal(usage.counterSource,'package.used');
+  assert.equal(usage.hasUsageTimestamp,true);
+});
+
+test('profile share URL supplies the live counter when the allocated-profile counter stays at zero', async t => {
+  const originalFetch=global.fetch,calls=[];
+  t.after(()=>{global.fetch=originalFetch});
+  global.fetch=async url=>{
+    calls.push(String(url));
+    if(calls.length===1)return response({success:true,obj:{esimList:[{orderNo:'ORDER-SHARE',esimTranNo:'TRAN-SHARE',iccid:'8943000000000000009',orderUsage:0,totalVolume:20*1024**3,shortUrl:'https://p.qrsim.net/0123456789abcdef0123456789abcdef',esimStatus:'IN_USE'}]}});
+    if(calls.length===2)return new Response('<input value="https://api.esimaccess.com/api/v1/h5/share/order/queryUsage?token=safe%2Btoken" id="queryUsageAPI">',{status:200,headers:{'content-type':'text/html'}});
+    return response({success:true,obj:{iccid:'8943000000000000009',totalVolume:20*1024**3,dataUsage:4*1024**3,expiredTime:'2027-01-01T00:00:00Z'}});
+  };
+  const usage=await service.checkUsage({orderNo:'ORDER-SHARE',esimTranNo:'TRAN-SHARE',iccid:'8943000000000000009'});
+  assert.equal(calls.length,3);
+  assert.equal(usage.usedBytes,4*1024**3);
+  assert.equal(usage.totalBytes,20*1024**3);
+  assert.equal(usage.source,'share_usage_api');
+  assert.equal(usage.counterSource,'share.dataUsage');
+});
+
 test('legacy reseller accounts fall back to the compatible query route when list returns 404', async t => {
   const originalFetch=global.fetch,calls=[];
   t.after(()=>{global.fetch=originalFetch});
@@ -90,6 +118,16 @@ test('top-up accounting adds the new allowance to the existing profile when prov
   assert.equal(result.remainingBytes,33*1024**3);
   assert.equal(result.usageStale,true);
   assert.equal(result.pendingTopupConfirmation.expectedMinimumTotalBytes,40*1024**3);
+});
+
+test('top-up and later sync never reset consumed traffic to zero on the same ICCID', () => {
+  const server=read('server.js'),helper=server.slice(server.indexOf('function cachedEsimUsage'),server.indexOf('async function syncEsimUsageForUser'));
+  const context={};
+  vm.runInNewContext(`${helper}\nthis.mergeTopupUsage=mergeTopupUsage;`,context);
+  const result=context.mergeTopupUsage({totalBytes:20*1024**3,usedBytes:7*1024**3,remainingBytes:13*1024**3},{transactionId:'TOPUP-2',totalGb:40,usedGb:0,remainingGb:40},{packageCode:'EU20',dataLimitGb:20,unlimited:false},'2026-09-21T12:00:00Z');
+  assert.equal(result.totalBytes,40*1024**3);
+  assert.equal(result.usedBytes,7*1024**3);
+  assert.equal(result.remainingBytes,33*1024**3);
 });
 
 test('provider USED_UP and EXPIRED states override delayed gigabyte counters', async () => {
