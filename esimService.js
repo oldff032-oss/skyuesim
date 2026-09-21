@@ -270,8 +270,36 @@ function profileUsageCounters(profile = {}) {
   let usedBytes=explicitUsed,remainingBytes=explicitRemaining,counterSource='missing';
   if(totalBytes!=null&&explicitRemaining!=null){remainingBytes=Math.min(totalBytes,explicitRemaining);usedBytes=Math.max(0,totalBytes-remainingBytes);counterSource=packageRemainingTotal!=null&&explicitRemaining===packageRemainingTotal?'package.remaining':'profile.remaining';}
   else if(totalBytes!=null&&explicitUsed!=null){usedBytes=Math.min(totalBytes,explicitUsed);remainingBytes=Math.max(0,totalBytes-usedBytes);counterSource=packageUsedTotal!=null&&explicitUsed===packageUsedTotal?'package.used':'profile.used';}
-  const counterUpdatedAt=profile.lastDataUsageUpdateTime||profile.usageUpdateTime||profile.lastUsageUpdateTime||null;
+  const counterUpdatedAt=profile.lastDataUsageUpdateTime||profile.usageUpdateTime||profile.lastUsageUpdateTime||profile.lastUpdateTime||profile.updateTime||null;
   return{usedBytes,totalBytes,remainingBytes,counterSource,counterUpdatedAt,hasUsageTimestamp:Boolean(counterUpdatedAt)};
+}
+
+function realtimeUsageItems(payload) {
+  const object=payload?.obj;
+  if(Array.isArray(object)) return object;
+  if(!object||typeof object!=='object') return [];
+  for(const key of ['esimUsageList','usageList','list']){
+    if(Array.isArray(object[key])) return object[key];
+  }
+  return [object];
+}
+
+async function queryRealtimeUsage(esimTranNo) {
+  const requested=String(esimTranNo||'').trim();
+  if(!requested) throw new EsimAccessError('An eSIM transaction number is required for real-time traffic.',{code:'ESIM_TRAN_NO_REQUIRED'});
+  const response=await esimAccessRequest('/api/v1/open/esim/usage/query',{esimTranNoList:[requested]});
+  const items=realtimeUsageItems(response);
+  const exact=items.find(item=>String(item?.esimTranNo||'').trim()===requested);
+  // The official endpoint accepts exactly the requested transaction list. Some
+  // reseller responses omit esimTranNo when a single item is requested; that
+  // response is still unambiguous. Never accept a differently identified item.
+  const usage=exact||((items.length===1&&!String(items[0]?.esimTranNo||'').trim())?items[0]:null);
+  if(!usage) throw new EsimAccessError('The real-time usage response did not contain the requested eSIM.',{code:'USAGE_PROFILE_MISMATCH'});
+  const counters=profileUsageCounters(usage);
+  if(counters.usedBytes==null||counters.totalBytes==null){
+    throw new EsimAccessError('The real-time usage response did not include complete traffic counters.',{code:'USAGE_VALUES_MISSING'});
+  }
+  return{...counters,details:usage};
 }
 
 function trustedProfileShareUrl(profile = {}) {
@@ -542,6 +570,19 @@ async function checkUsage(input) {
     throw new EsimAccessError(`No exact eSIM profile found for ${requestedIccid || requestedTranNo || orderNo}.`, { code:'PROFILE_NOT_FOUND' });
   }
 
+  const profileTranNo=String(profile.esimTranNo||requestedTranNo||'').trim();
+  if(profileTranNo){
+    try{
+      const realtime=await queryRealtimeUsage(profileTranNo);
+      return usageResult(realtime.usedBytes,realtime.totalBytes,profile,realtime.details,{
+        source:'realtime_usage_api',live:true,stale:false,syncedAt:new Date().toISOString(),
+        counterSource:`realtime.${realtime.counterSource}`,counterUpdatedAt:realtime.counterUpdatedAt,hasUsageTimestamp:realtime.hasUsageTimestamp,
+      });
+    }catch(error){
+      log('realtime_usage_failed_using_fallback',{esimTranNo:mask(profileTranNo),code:error.code,status:error.status,message:error.message});
+    }
+  }
+
   const shareUrl=trustedProfileShareUrl(profile);
   if(shareUrl){
     try{
@@ -574,7 +615,7 @@ function usageResult(usedBytes, totalBytes, profile, usageDetails = null, metada
     expiredTime: profile.expiredTime || null,
     activateTime: profile.activateTime || null,
     lastUpdateTime: usageDetails?.lastUpdateTime || usageDetails?.lastDataUsageUpdateTime || profile.lastUpdateTime || null,
-    providerUpdatedAt: usageDetails?.lastDataUsageUpdateTime || usageDetails?.usageUpdateTime || usageDetails?.lastUsageUpdateTime || null,
+    providerUpdatedAt: usageDetails?.lastDataUsageUpdateTime || usageDetails?.usageUpdateTime || usageDetails?.lastUsageUpdateTime || usageDetails?.lastUpdateTime || usageDetails?.updateTime || null,
     ...metadata,
   };
 }

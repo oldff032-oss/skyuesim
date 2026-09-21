@@ -25,7 +25,9 @@ test('usage query follows the exact stored eSIM instead of the first profile in 
   };
   const usage=await service.checkUsage({orderNo:'ORDER-1',esimTranNo:'TRAN-LIVE',iccid:'8943000000000000002'});
   assert.equal(calls[0].body.iccid,'8943000000000000002');
-  assert.equal(calls.length,1);
+  assert.equal(calls.length,2);
+  assert.match(calls[1].url,/\/api\/v1\/open\/esim\/usage\/query$/);
+  assert.deepEqual(calls[1].body.esimTranNoList,['TRAN-LIVE']);
   assert.equal(usage.usedBytes,5368709120);
   assert.equal(usage.totalBytes,10737418240);
   assert.equal(usage.source,'profile_api');
@@ -45,7 +47,27 @@ test('official ICCID profile is the only usage source and is not mixed with anot
   assert.equal(usage.source,'profile_api');
   assert.equal(usage.live,true);
   assert.equal(usage.stale,false);
-  assert.equal(calls.length,1);
+  assert.equal(calls.length,2);
+});
+
+test('dedicated real-time endpoint overrides the zero profile counter shown by the inventory API', async t => {
+  const originalFetch=global.fetch,calls=[];
+  t.after(()=>{global.fetch=originalFetch});
+  const realtimeUsed=11*1024**3+494*1024**2;
+  global.fetch=async (url,options={})=>{
+    calls.push({url:String(url),body:JSON.parse(options.body||'{}')});
+    if(calls.length===1)return response({success:true,obj:{esimList:[{orderNo:'ORDER-REALTIME',esimTranNo:'TRAN-REALTIME',iccid:'8943000000000000011',orderUsage:0,totalVolume:20*1024**3,esimStatus:'IN_USE'}]}});
+    return response({success:true,obj:{esimTranNo:'TRAN-REALTIME',totalVolume:20*1024**3,orderUsage:realtimeUsed,remain:20*1024**3-realtimeUsed,lastUpdateTime:'2026-09-21T12:59:41Z'}});
+  };
+  const usage=await service.checkUsage({orderNo:'ORDER-REALTIME',esimTranNo:'TRAN-REALTIME',iccid:'8943000000000000011'});
+  assert.equal(calls.length,2);
+  assert.match(calls[1].url,/\/api\/v1\/open\/esim\/usage\/query$/);
+  assert.deepEqual(calls[1].body,{esimTranNoList:['TRAN-REALTIME']});
+  assert.equal(usage.usedBytes,realtimeUsed);
+  assert.equal(usage.totalBytes,20*1024**3);
+  assert.equal(usage.source,'realtime_usage_api');
+  assert.equal(usage.counterSource,'realtime.profile.remaining');
+  assert.equal(usage.providerUpdatedAt,'2026-09-21T12:59:41Z');
 });
 
 test('usage parser accepts live and nested provider counters instead of treating orderUsage zero as authoritative', async t => {
@@ -65,11 +87,12 @@ test('profile share URL supplies the live counter when the allocated-profile cou
   global.fetch=async url=>{
     calls.push(String(url));
     if(calls.length===1)return response({success:true,obj:{esimList:[{orderNo:'ORDER-SHARE',esimTranNo:'TRAN-SHARE',iccid:'8943000000000000009',orderUsage:0,totalVolume:20*1024**3,shortUrl:'https://p.qrsim.net/0123456789abcdef0123456789abcdef',esimStatus:'IN_USE'}]}});
-    if(calls.length===2)return new Response('<input value="https://api.esimaccess.com/api/v1/h5/share/order/queryUsage?token=safe%2Btoken" id="queryUsageAPI">',{status:200,headers:{'content-type':'text/html'}});
+    if(calls.length===2)return response({success:true,obj:[]});
+    if(calls.length===3)return new Response('<input value="https://api.esimaccess.com/api/v1/h5/share/order/queryUsage?token=safe%2Btoken" id="queryUsageAPI">',{status:200,headers:{'content-type':'text/html'}});
     return response({success:true,obj:{iccid:'8943000000000000009',totalVolume:20*1024**3,dataUsage:4*1024**3,expiredTime:'2027-01-01T00:00:00Z'}});
   };
   const usage=await service.checkUsage({orderNo:'ORDER-SHARE',esimTranNo:'TRAN-SHARE',iccid:'8943000000000000009'});
-  assert.equal(calls.length,3);
+  assert.equal(calls.length,4);
   assert.equal(usage.usedBytes,4*1024**3);
   assert.equal(usage.totalBytes,20*1024**3);
   assert.equal(usage.source,'share_usage_api');
@@ -85,9 +108,10 @@ test('legacy reseller accounts fall back to the compatible query route when list
     return response({success:true,obj:{esimList:[{orderNo:'ORDER-LEGACY',esimTranNo:'TRAN-LEGACY',iccid:'8943000000000000007',orderUsage:7441033216,totalVolume:42949672960,esimStatus:'IN_USE'}]}});
   };
   const usage=await service.checkUsage({orderNo:'ORDER-LEGACY',esimTranNo:'TRAN-LEGACY',iccid:'8943000000000000007'});
-  assert.equal(calls.length,2);
+  assert.equal(calls.length,3);
   assert.match(calls[0].url,/\/api\/v1\/open\/esim\/list$/);
   assert.match(calls[1].url,/\/api\/v1\/open\/esim\/query$/);
+  assert.match(calls[2].url,/\/api\/v1\/open\/esim\/usage\/query$/);
   assert.equal(calls[1].body.iccid,'8943000000000000007');
   assert.equal(usage.usedBytes,7441033216);
   assert.equal(usage.totalBytes,42949672960);
