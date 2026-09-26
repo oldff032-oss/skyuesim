@@ -645,7 +645,7 @@ async function checkUsage(input) {
   const selected=candidates.reduce((best,item)=>item.usedBytes>best.usedBytes?item:best);
   const totalBytes=Math.max(...candidates.map(item=>item.totalBytes));
   const usedBytes=Math.min(totalBytes,selected.usedBytes);
-  if(usedBytes===0)log('usage_counters_all_zero',JSON.stringify({iccid:mask(requestedIccid||profile.iccid),sources:candidates.map(item=>({source:item.source,usedBytes:item.usedBytes,totalBytes:item.totalBytes,fields:usageFieldSummary(item.details)}))}));
+  if(usedBytes===0)log('usage_counters_all_zero',{details:JSON.stringify({iccid:mask(requestedIccid||profile.iccid),sources:candidates.map(item=>({source:item.source,usedBytes:item.usedBytes,totalBytes:item.totalBytes,fields:usageFieldSummary(item.details)}))})});
   return usageResult(usedBytes,totalBytes,profile,selected.details,{
     source:selected.source,live:true,stale:false,syncedAt:new Date().toISOString(),counterSource:selected.counterSource,counterUpdatedAt:selected.counterUpdatedAt,hasUsageTimestamp:selected.hasUsageTimestamp,
   });
