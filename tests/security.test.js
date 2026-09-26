@@ -365,7 +365,7 @@ test('Stripe profiles recover automatically and checkout reuses one customer',()
 test('bottom navigation always identifies usage and charts stay visible without motion',()=>{
   const pwa=read('pwa.js'),usage=read('usage.html'),css=read('style.css'),headers=read('_headers');
   assert.match(pwa, /'usage\.html':\{label:'Витрати',labelEn:'Usage'/);
-  assert.match(pwa, /classList\.toggle\('active',page===current\)/);
+  assert.match(pwa, /classList\.toggle\('active',page===activePage\)/);
   assert.match(pwa, /setTimeout\(enhanceSignalNavigation,500\)/);
   assert.match(usage, /height:var\(--bar-height\)/);
   assert.match(usage, /width:var\(--usage-pct\)!important/);

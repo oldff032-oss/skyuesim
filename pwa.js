@@ -23,7 +23,21 @@ const signalNavItems={
   'usage.html':{label:'Витрати',labelEn:'Usage',icon:'<svg class="nav-art nav-vector" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V5M16 20v-8M22 20V3M2 20h21"/></svg>'},
   'profile.html':{label:'Профіль',labelEn:'Profile',icon:'<svg class="nav-art nav-vector" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="7.5" r="3.5"/><path d="M5 21c.4-4.6 2.8-7 7-7s6.6 2.4 7 7"/></svg>'}
 };
-function enhanceSignalNavigation(){const current=location.pathname.split('/').pop(),isCore=Boolean(signalNavItems[current]),english=localStorage.getItem('signal_language')==='en';document.querySelectorAll('.bottomnav a').forEach(link=>{const page=(link.getAttribute('href')||'').split(/[?#]/)[0].split('/').pop(),item=signalNavItems[page];if(!item)return;const label=english?item.labelEn:item.label;if(isCore)link.classList.toggle('active',page===current);link.dataset.nav=page.replace('.html','');link.setAttribute('aria-label',label);link.setAttribute('title',label);link.innerHTML=`<span class="nav-icon" aria-hidden="true">${item.icon}</span><span class="nav-label" data-no-auto-translate>${label}</span>`;});const dashboardLogo=document.querySelector('.logo-orbit');if(dashboardLogo&&!dashboardLogo.querySelector('img'))dashboardLogo.innerHTML='<img src="signal-premium-logo.png" alt="Signal">';}
+const signalNoBottomNavPages=new Set([...signalAuthPages,'index.html','welcome.html','access-recovery.html','access-recovery-complete.html','rescue-mode.html','account-created.html']);
+const signalPlanPages=new Set(['plans.html','esim-topup.html','mobile-topup.html','travel-plans.html']);
+const signalUsagePages=new Set(['usage.html','traffic-alerts.html','activity.html','savings.html','smart-assist.html']);
+function signalBottomNavMarkup(){return `<nav class="bottomnav" aria-label="Головна навігація">${Object.entries(signalNavItems).map(([page,item])=>`<a href="${page}" aria-label="${item.label}"></a>`).join('')}</nav>`;}
+function signalActiveNavPage(current){if(signalNavItems[current])return current;if(signalPlanPages.has(current))return'plans.html';if(signalUsagePages.has(current))return'usage.html';return'profile.html';}
+function enhanceSignalNavigation(){
+  const current=location.pathname.split('/').pop()||'index.html',english=localStorage.getItem('signal_language')==='en',hasSession=Boolean(localStorage.getItem('signal_session_token')),isCustomerPage=hasSession&&!signalNoBottomNavPages.has(current)&&!current.startsWith('admin-');
+  document.querySelectorAll('.xp-nav').forEach(nav=>nav.remove());
+  let nav=document.querySelector('.bottomnav');
+  if(isCustomerPage&&!nav){document.body?.insertAdjacentHTML('beforeend',signalBottomNavMarkup());nav=document.querySelector('.bottomnav');}
+  document.body?.classList.toggle('has-bottomnav',Boolean(isCustomerPage&&nav));
+  const activePage=signalActiveNavPage(current);
+  nav?.querySelectorAll('a').forEach(link=>{const page=(link.getAttribute('href')||'').split(/[?#]/)[0].split('/').pop(),item=signalNavItems[page];if(!item)return;const label=english?item.labelEn:item.label;link.classList.toggle('active',page===activePage);link.dataset.nav=page.replace('.html','');link.setAttribute('aria-label',label);link.setAttribute('title',label);link.innerHTML=`<span class="nav-icon" aria-hidden="true">${item.icon}</span><span class="nav-label" data-no-auto-translate>${label}</span>`;});
+  const dashboardLogo=document.querySelector('.logo-orbit');if(dashboardLogo&&!dashboardLogo.querySelector('img'))dashboardLogo.innerHTML='<img src="signal-premium-logo.png" alt="Signal">';
+}
 document.readyState==='loading'?document.addEventListener('DOMContentLoaded',enhanceSignalNavigation):enhanceSignalNavigation();
 window.addEventListener('load',()=>{enhanceSignalNavigation();setTimeout(enhanceSignalNavigation,500);});
 const signalOfflineCardPage=/\/offline-esim\.html$/i.test(location.pathname);
