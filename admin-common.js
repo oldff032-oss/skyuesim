@@ -36,6 +36,7 @@ function requireAdminAuth(){
   nav.innerHTML=renderLinks(primary)
     +renderGroup('Операції',operations,'<path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/>')
     +renderGroup('Система',system,'<path d="M12 3 5 6v5c0 4.8 2.8 8.2 7 10 4.2-1.8 7-5.2 7-10V6l-7-3Z"/>')
+    +(role==='super_admin'?`<a href="#" onclick="openMaintenancePreview();return false">${svg('<path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z"/><circle cx="12" cy="12" r="2.5"/>')}Перевірити застосунок</a>`:'')
     +`<a href="#" onclick="logout();return false">${svg('<path d="M10 5H5v14h5M14 8l4 4-4 4M18 12H9"/>')}Вийти</a>`;
   if(currentSection){
     const pages=currentSection.pages.filter(allowed);
@@ -49,4 +50,5 @@ function requireAdminAuth(){
   requestAnimationFrame(()=>nav.querySelector('.active')?.scrollIntoView({block:'nearest'}));
 }
 async function adminFetch(path,options={}){const token=localStorage.getItem('signal_admin_token');const res=await fetch(`${API_URL}${path}`,{cache:'no-store',...options,headers:{'Content-Type':'application/json','X-Admin-Token':token,...(options.headers||{})}});if(res.status===401){localStorage.removeItem('signal_admin_token');location.href='admin-login.html';throw new Error('Сесія завершена');}return res;}
+async function openMaintenancePreview(){const previewWindow=window.open('about:blank','_blank');try{const response=await adminFetch('/api/admin/maintenance-preview',{method:'POST'}),data=await response.json();if(!response.ok)throw Error(data.error||'Не вдалося відкрити режим перевірки');const target=new URL(data.url,location.origin).href;if(previewWindow)previewWindow.location.replace(target);else location.href=target;}catch(error){previewWindow?.close();alert(error.message)}}
 function logout(){localStorage.removeItem('signal_admin_token');localStorage.removeItem('signal_admin_role');localStorage.removeItem('signal_admin_email');location.href='admin-login.html';}

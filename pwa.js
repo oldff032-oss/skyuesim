@@ -99,6 +99,12 @@ if (window.location.pathname.endsWith('/app-tools.html')) {
 // auth headers, PINs, tokens, QR data or full URLs/query strings.
 const signalOriginalFetch = window.fetch.bind(window);
 let signalDiagnosticCount = 0;
+async function signalConsumeMaintenancePreviewCode(){
+  const url=new URL(location.href),code=url.searchParams.get('maintenance_preview');
+  if(!code||typeof API_URL==='undefined')return false;
+  url.searchParams.delete('maintenance_preview');history.replaceState(null,'',`${url.pathname}${url.search}${url.hash}`);
+  try{const response=await signalOriginalFetch(`${API_URL}/api/maintenance-preview/exchange`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code}),cache:'no-store'}),data=await response.json();if(!response.ok)throw Error(data.error||'Preview failed');sessionStorage.setItem('signal_maintenance_preview_token',data.previewToken);sessionStorage.setItem('signal_maintenance_preview_expires',data.expiresAt);location.replace(url.href);return true;}catch{return false;}
+}
 const SIGNAL_FRONTEND_VERSION='2.9.0',SIGNAL_SW_VERSION='v91',SIGNAL_CACHE_VERSION='signal-shell-v91-support-studio';
 window.SIGNAL_APP_VERSION=SIGNAL_FRONTEND_VERSION;
 window.addEventListener('load',async()=>{
@@ -137,6 +143,8 @@ window.fetch = async function(input, init = {}) {
   }
   const adminToken=localStorage.getItem('signal_admin_token'),adminRole=localStorage.getItem('signal_admin_role'),apiOrigin=typeof API_URL==='undefined'?location.origin:new URL(API_URL,location.origin).origin;
   if(adminToken&&adminRole==='super_admin'&&requestUrl?.origin===apiOrigin&&path.startsWith('/api/')){const headers=new Headers(init.headers||{});headers.set('x-admin-token',adminToken);init={...init,headers};}
+  const previewToken=sessionStorage.getItem('signal_maintenance_preview_token');
+  if(previewToken&&requestUrl?.origin===apiOrigin&&path.startsWith('/api/')&&!path.startsWith('/api/admin/')){const headers=new Headers(init.headers||{});headers.set('x-maintenance-preview-token',previewToken);init={...init,headers};}
   if (path === '/api/account/diagnostics') return signalOriginalFetch(input, init);
   try {
     const response = await signalOriginalFetch(input, init);
@@ -166,6 +174,8 @@ const signalEscapeHtml = (value) => String(value || '').replace(/[&<>"']/g, char
 let signalMaintenanceTimer=null;
 let signalSuperAdminPreview={token:'',checkedAt:0,allowed:false};
 async function signalHasSuperAdminPreview(){
+  const previewToken=sessionStorage.getItem('signal_maintenance_preview_token'),previewExpiry=new Date(sessionStorage.getItem('signal_maintenance_preview_expires')||0).getTime();
+  if(previewToken&&previewExpiry>Date.now()){try{const response=await signalOriginalFetch(`${API_URL}/api/maintenance-preview/status`,{headers:{'x-maintenance-preview-token':previewToken},cache:'no-store'});if(response.ok)return true;}catch{}sessionStorage.removeItem('signal_maintenance_preview_token');sessionStorage.removeItem('signal_maintenance_preview_expires');}
   const adminToken=localStorage.getItem('signal_admin_token');
   if(!adminToken||localStorage.getItem('signal_admin_role')!=='super_admin')return false;
   if(signalSuperAdminPreview.token===adminToken&&Date.now()-signalSuperAdminPreview.checkedAt<15000)return signalSuperAdminPreview.allowed;
@@ -177,6 +187,7 @@ function startMaintenanceCountdown(expiresAt){clearInterval(signalMaintenanceTim
 function renderSignalDashboardNotice(notice){const home=document.querySelector('.home'),existing=document.getElementById('signal-dashboard-notice');if(!home||!notice)return;if(existing?.dataset.noticeId===notice.id)return;existing?.remove();const anchor=document.getElementById('loading')||document.getElementById('content');if(!anchor)return;anchor.insertAdjacentHTML('beforebegin',`<article id="signal-dashboard-notice" class="signal-dashboard-notice" data-notice-id="${signalEscapeHtml(notice.id)}"><i class="dashboard-notice-glow" aria-hidden="true"></i><header><span class="dashboard-notice-logo"><img src="signal-premium-logo.png" alt="Signal"></span><span><small><i></i> Актуальне повідомлення</small><strong>${signalEscapeHtml(notice.title||'Повідомлення Signal')}</strong></span></header><div class="dashboard-notice-copy">${signalEscapeHtml(notice.message).replace(/\n/g,'<br>')}</div><footer><span>Signal інформує</span><button type="button" aria-expanded="false">Читати повністю</button></footer></article>`);const card=document.getElementById('signal-dashboard-notice'),button=card.querySelector('footer button');button.onclick=()=>{const expanded=card.classList.toggle('expanded');button.setAttribute('aria-expanded',String(expanded));button.textContent=expanded?'Згорнути':'Читати повністю';};}
 async function checkAppAnnouncements() {
   if (typeof API_URL === 'undefined' || !document.body) return;
+  if(await signalConsumeMaintenancePreviewCode())return;
   const token = localStorage.getItem('signal_session_token');
   const email = localStorage.getItem('signal_email');
   const endpoint = token ? '/api/account/announcements' : '/api/announcements';

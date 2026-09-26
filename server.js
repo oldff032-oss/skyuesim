@@ -50,11 +50,13 @@ const travelPackageCache = { createdAt:0, packages:[] };
 const adminRecoveryRateLimit = new Map();
 const pendingBackupRestores = new Map();
 const securityAttemptTracker = new Map();
+const maintenancePreviewCodes = new Map();
+const maintenancePreviewSessions = new Map();
 const BACKUP_STATE_KEYS = ['users.json','auth.json','admins.json','tickets.json','audit-log.json','operations.json','push-subscriptions.json','diagnostics.json','translations.json'];
 app.set('trust proxy',1);
 const allowedOrigins=new Set([process.env.FRONTEND_URL,'https://skyesim.netlify.app',...String(process.env.ALLOWED_ORIGINS||'').split(',')].map(value=>String(value||'').trim().replace(/\/$/,'')).filter(Boolean));
 if(process.env.NODE_ENV!=='production'){allowedOrigins.add('http://localhost:3000');allowedOrigins.add('http://localhost:4242');allowedOrigins.add('http://127.0.0.1:5500');}
-app.use(cors({origin(origin,callback){if(!origin||allowedOrigins.has(String(origin).replace(/\/$/,'')))return callback(null,true);callback(new Error('Origin is not allowed'));},methods:['GET','POST','PUT','PATCH','DELETE','OPTIONS'],allowedHeaders:['Content-Type','x-session-token','x-admin-token','x-device-name','stripe-signature','svix-id','svix-timestamp','svix-signature'],exposedHeaders:['x-request-id'],maxAge:86400}));
+app.use(cors({origin(origin,callback){if(!origin||allowedOrigins.has(String(origin).replace(/\/$/,'')))return callback(null,true);callback(new Error('Origin is not allowed'));},methods:['GET','POST','PUT','PATCH','DELETE','OPTIONS'],allowedHeaders:['Content-Type','x-session-token','x-admin-token','x-maintenance-preview-token','x-device-name','stripe-signature','svix-id','svix-timestamp','svix-signature'],exposedHeaders:['x-request-id'],maxAge:86400}));
 app.use((req,res,next)=>{req.requestId=String(req.headers['x-request-id']||crypto.randomUUID()).slice(0,100);res.setHeader('x-request-id',req.requestId);next();});
 app.use((req,res,next)=>{res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('X-Frame-Options','DENY');res.setHeader('Referrer-Policy','no-referrer');res.setHeader('Permissions-Policy','camera=(), microphone=(), geolocation=()');res.setHeader('Cross-Origin-Resource-Policy','same-site');if(req.path.startsWith('/api/'))res.setHeader('Cache-Control','no-store');next();});
 
@@ -591,14 +593,18 @@ function activeSystemLock(){
   const active=operationsStore.activeAnnouncements(null);
   return active.find(item=>item.type==='security'&&item.audience==='all')||active.find(item=>item.type==='maintenance'&&item.audience==='all')||null;
 }
+function maintenancePreviewHash(value){return crypto.createHash('sha256').update(String(value||'')).digest('hex');}
+function cleanupMaintenancePreviews(){const now=Date.now();for(const [key,item] of maintenancePreviewCodes)if(item.expiresAt<=now)maintenancePreviewCodes.delete(key);for(const [key,item] of maintenancePreviewSessions)if(item.expiresAt<=now)maintenancePreviewSessions.delete(key);}
+function getMaintenancePreviewSession(token){cleanupMaintenancePreviews();return maintenancePreviewSessions.get(maintenancePreviewHash(token))||null;}
 app.use('/api',(req,res,next)=>{
   const lock=activeSystemLock();
   if(!lock)return next();
   const path=`/api${req.path}`;
-  const alwaysAvailable=new Set(['/api/service-status','/api/announcements','/api/maintenance-support','/api/app-version','/api/webhook','/api/inbound-email']);
+  const alwaysAvailable=new Set(['/api/service-status','/api/announcements','/api/maintenance-support','/api/maintenance-preview/exchange','/api/app-version','/api/webhook','/api/inbound-email']);
   if(alwaysAvailable.has(path)||path.startsWith('/api/admin/login'))return next();
   const adminSession=adminAuth.getSession(req.headers['x-admin-token']);
   if(adminSession?.role==='super_admin')return next();
+  if(!path.startsWith('/api/admin/')&&getMaintenancePreviewSession(req.headers['x-maintenance-preview-token']))return next();
   return res.status(423).json({error:lock.type==='security'?'Система тимчасово закрита режимом захисту. Доступ має лише Super Admin.':'Тривають технічні роботи. Доступ має лише Super Admin.',code:'SYSTEM_LOCKDOWN',mode:lock.type,expiresAt:lock.expiresAt||null});
 });
 
@@ -1049,6 +1055,18 @@ app.get('/api/service-status', async (req, res) => {
   res.set('Cache-Control','no-store, no-cache, must-revalidate');
   res.json({status:lock?(lock.type==='security'?'security':'maintenance'):'operational',locked:Boolean(lock),mode:lock?.type||null,superAdminOnly:Boolean(lock),maintenanceId:maintenance?.id||null,title:lock?.title||null,message:lock?.message||null,expiresAt:lock?.expiresAt||null,checkedAt:new Date().toISOString()});
 });
+
+app.post('/api/maintenance-preview/exchange',(req,res)=>{
+  cleanupMaintenancePreviews();
+  const code=String(req.body?.code||''),key=maintenancePreviewHash(code),entry=maintenancePreviewCodes.get(key),lock=activeSystemLock();
+  maintenancePreviewCodes.delete(key);
+  if(!entry||entry.expiresAt<=Date.now()||!lock)return res.status(401).json({error:'Посилання режиму перевірки недійсне або вже використане',code:'PREVIEW_INVALID'});
+  const token=crypto.randomBytes(32).toString('base64url'),lockExpiry=lock.expiresAt?new Date(lock.expiresAt).getTime():Infinity,expiresAt=Math.min(Date.now()+2*60*60*1000,lockExpiry);
+  maintenancePreviewSessions.set(maintenancePreviewHash(token),{adminEmail:entry.adminEmail,expiresAt});
+  auditStore.log({adminEmail:entry.adminEmail,action:'maintenance_preview_started',details:{expiresAt:new Date(expiresAt).toISOString()}});
+  res.json({previewToken:token,expiresAt:new Date(expiresAt).toISOString()});
+});
+app.get('/api/maintenance-preview/status',(req,res)=>{const preview=getMaintenancePreviewSession(req.headers['x-maintenance-preview-token']);if(!preview||!activeSystemLock())return res.status(401).json({valid:false});res.json({valid:true,expiresAt:new Date(preview.expiresAt).toISOString()});});
 
 app.get('/api/travel-packages', requireUserSession, requireFeature('travelPackages','Пакети для подорожей тимчасово недоступні'), rateLimit('travel_catalog',60*1000,30,req=>req.userEmail), async (req,res) => {
   const started=Date.now();
@@ -1710,6 +1728,13 @@ app.get('/api/admin/me', adminAuth.requireAdmin, (req, res) => {
     ...req.admin,
     permissions: adminAuth.permissionsFor(req.admin.email, req.admin.role),
   });
+});
+app.post('/api/admin/maintenance-preview',adminAuth.requireAdmin,adminAuth.requireRole('super_admin'),(req,res)=>{
+  const lock=activeSystemLock();if(!lock)return res.status(409).json({error:'Режим технічних робіт або захисту зараз не активний'});
+  cleanupMaintenancePreviews();const code=crypto.randomBytes(32).toString('base64url'),expiresAt=Date.now()+60*1000;
+  maintenancePreviewCodes.set(maintenancePreviewHash(code),{adminEmail:req.admin.email,expiresAt});
+  auditStore.log({adminEmail:req.admin.email,action:'maintenance_preview_link_created',details:{expiresAt:new Date(expiresAt).toISOString()}});
+  res.json({url:`/dashboard.html?maintenance_preview=${encodeURIComponent(code)}`,expiresAt:new Date(expiresAt).toISOString()});
 });
 
 app.get('/api/admin/security/2fa',adminAuth.requireAdmin,(req,res)=>res.json(adminAuth.twoFactorStatus(req.admin.email)));
