@@ -23,7 +23,7 @@ test('home has one compact header, a hidden zero badge and an in-app guide',()=>
   assert.match(dashboard,/function setNotificationBadge\(unread\)/);
   assert.match(dashboard,/setInterval\(refreshNotifications,60000\)/);
   assert.match(dashboard,/Як користуватися Signal eSIM/);
-  assert.match(dashboard,/Увімкнути сповіщення/);
+  assert.match(dashboard,/Сповіщення підключаються автоматично/);
   assert.match(dashboard,/Діагностика підключення/);
 });
 
@@ -37,14 +37,15 @@ test('customer pages receive one shared bottom navigation',()=>{
   assert.doesNotMatch(experience,/nav-home-v2\.png/);
 });
 
-test('notification center can register, test and remove phone push',()=>{
-  const page=read('notifications.html'),server=read('server.js'),worker=read('sw.js');
-  assert.match(page,/Notification\.requestPermission\(\)/);
-  assert.match(page,/registration\.pushManager\.subscribe/);
-  assert.match(page,/\/api\/push\/subscribe/);
-  assert.match(page,/\/api\/push\/unsubscribe/);
-  assert.match(page,/\/api\/push\/test/);
-  assert.match(page,/відповідь підтримки прийде як системне повідомлення/);
+test('phone push enrolls automatically without a custom setup panel',()=>{
+  const page=read('notifications.html'),pwa=read('pwa.js'),server=read('server.js'),worker=read('sw.js');
+  assert.doesNotMatch(page,/class="push-panel"/);
+  assert.doesNotMatch(page,/id="pushToggle"/);
+  assert.match(pwa,/function signalSetupAutomaticPush\(\)/);
+  assert.match(pwa,/Notification\.requestPermission\(\)/);
+  assert.match(pwa,/registration\.pushManager\.subscribe/);
+  assert.match(pwa,/\/api\/push\/subscribe/);
+  assert.match(pwa,/document\.addEventListener\('pointerdown',requestOnce/);
   assert.match(server,/tag: `support-\$\{ticket\.id\}`/);
   assert.match(worker,/self\.addEventListener\('push'/);
   assert.match(worker,/self\.addEventListener\('notificationclick'/);

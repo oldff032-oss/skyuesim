@@ -40,6 +40,41 @@ function enhanceSignalNavigation(){
 }
 document.readyState==='loading'?document.addEventListener('DOMContentLoaded',enhanceSignalNavigation):enhanceSignalNavigation();
 window.addEventListener('load',()=>{enhanceSignalNavigation();setTimeout(enhanceSignalNavigation,500);});
+let signalPushEnrollmentPromise=null;
+function signalVapidBytes(value){const padding='='.repeat((4-value.length%4)%4),base64=(value+padding).replace(/-/g,'+').replace(/_/g,'/'),raw=atob(base64);return Uint8Array.from([...raw].map(char=>char.charCodeAt(0)));}
+async function signalEnrollPhonePush({requestPermission=false}={}){
+  if(signalPushEnrollmentPromise)return signalPushEnrollmentPromise;
+  signalPushEnrollmentPromise=(async()=>{
+    const token=localStorage.getItem('signal_session_token');
+    if(!token||!('serviceWorker'in navigator)||!('PushManager'in window)||!('Notification'in window)||Notification.permission==='denied')return false;
+    if(Notification.permission!=='granted'){
+      if(!requestPermission)return false;
+      const permission=await Notification.requestPermission();
+      if(permission!=='granted')return false;
+    }
+    const apiBase=typeof API_URL==='undefined'?'':API_URL,headers={'Content-Type':'application/json','x-session-token':token},registration=await navigator.serviceWorker.ready;
+    let subscription=await registration.pushManager.getSubscription();
+    if(!subscription){
+      const keyResponse=await signalOriginalFetch(`${apiBase}/api/push/public-key`,{headers:{'x-session-token':token},cache:'no-store'});
+      if(!keyResponse.ok)return false;
+      const {publicKey}=await keyResponse.json();
+      subscription=await registration.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:signalVapidBytes(publicKey)});
+    }
+    const response=await signalOriginalFetch(`${apiBase}/api/push/subscribe`,{method:'POST',headers,body:JSON.stringify({subscription:subscription.toJSON()})});
+    return response.ok;
+  })().catch(()=>false).finally(()=>{signalPushEnrollmentPromise=null;});
+  return signalPushEnrollmentPromise;
+}
+function signalSetupAutomaticPush(){
+  const token=localStorage.getItem('signal_session_token');
+  if(!token||!('Notification'in window)||Notification.permission==='denied')return;
+  if(Notification.permission==='granted'){signalEnrollPhonePush();return;}
+  const requestOnce=()=>{document.removeEventListener('pointerdown',requestOnce,true);document.removeEventListener('keydown',requestOnce,true);signalEnrollPhonePush({requestPermission:true});};
+  document.addEventListener('pointerdown',requestOnce,{once:true,capture:true});
+  document.addEventListener('keydown',requestOnce,{once:true,capture:true});
+}
+window.addEventListener('load',signalSetupAutomaticPush);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&'Notification'in window&&Notification.permission==='granted')signalEnrollPhonePush();});
 const signalOfflineCardPage=/\/offline-esim\.html$/i.test(location.pathname);
 // Render the application immediately. Maintenance and announcement data loads
 // asynchronously and must never leave the customer looking at a blank screen.
