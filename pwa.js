@@ -128,13 +128,15 @@ function signalReportDiagnostic(type, severity, message, context = {}) {
 window.fetch = async function(input, init = {}) {
   const started = performance.now();
   const rawUrl = typeof input === 'string' ? input : input?.url || '';
-  let path = 'unknown';
-  try { path = new URL(rawUrl, location.origin).pathname; } catch {}
+  let path = 'unknown',requestUrl=null;
+  try { requestUrl = new URL(rawUrl, location.origin);path=requestUrl.pathname; } catch {}
   const protectedLegacyPaths=['/api/status','/api/usage','/api/billing','/api/cancel','/api/create-subscription','/api/support/tickets','/api/mobile-topups'];
   const sessionToken=localStorage.getItem('signal_session_token');
   if(sessionToken&&protectedLegacyPaths.some(prefix=>path===prefix||path.startsWith(`${prefix}/`))){
     const headers=new Headers(init.headers||{});if(!headers.has('x-session-token'))headers.set('x-session-token',sessionToken);init={...init,headers};
   }
+  const adminToken=localStorage.getItem('signal_admin_token'),adminRole=localStorage.getItem('signal_admin_role'),apiOrigin=typeof API_URL==='undefined'?location.origin:new URL(API_URL,location.origin).origin;
+  if(adminToken&&adminRole==='super_admin'&&requestUrl?.origin===apiOrigin&&path.startsWith('/api/')){const headers=new Headers(init.headers||{});headers.set('x-admin-token',adminToken);init={...init,headers};}
   if (path === '/api/account/diagnostics') return signalOriginalFetch(input, init);
   try {
     const response = await signalOriginalFetch(input, init);
@@ -162,6 +164,15 @@ window.addEventListener('load',()=>signalReportDiagnostic('page_view','info','Pa
 
 const signalEscapeHtml = (value) => String(value || '').replace(/[&<>"']/g, char => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[char]));
 let signalMaintenanceTimer=null;
+let signalSuperAdminPreview={token:'',checkedAt:0,allowed:false};
+async function signalHasSuperAdminPreview(){
+  const adminToken=localStorage.getItem('signal_admin_token');
+  if(!adminToken||localStorage.getItem('signal_admin_role')!=='super_admin')return false;
+  if(signalSuperAdminPreview.token===adminToken&&Date.now()-signalSuperAdminPreview.checkedAt<15000)return signalSuperAdminPreview.allowed;
+  let allowed=false;
+  try{const response=await signalOriginalFetch(`${API_URL}/api/admin/me`,{headers:{'x-admin-token':adminToken},cache:'no-store'});if(response.ok){const admin=await response.json();allowed=admin.role==='super_admin';}}catch{}
+  signalSuperAdminPreview={token:adminToken,checkedAt:Date.now(),allowed};return allowed;
+}
 function startMaintenanceCountdown(expiresAt){clearInterval(signalMaintenanceTimer);const target=new Date(expiresAt).getTime(),root=document.getElementById('signal-maintenance-countdown');if(!root||!Number.isFinite(target)){root?.remove();return;}const tick=()=>{const remaining=Math.max(0,target-Date.now()),days=Math.floor(remaining/86400000),hours=Math.floor(remaining%86400000/3600000),minutes=Math.floor(remaining%3600000/60000),seconds=Math.floor(remaining%60000/1000),value=document.getElementById('signal-maintenance-countdown-value'),exact=document.getElementById('signal-maintenance-countdown-exact');if(value)value.textContent=`${days?`${days} дн. `:''}${String(hours).padStart(2,'0')}:${String(minutes).padStart(2,'0')}:${String(seconds).padStart(2,'0')}`;if(exact)exact.textContent=`Орієнтовне завершення: ${new Date(target).toLocaleString(localStorage.getItem('signal_language')==='en'?'en-GB':'uk-UA',{dateStyle:'medium',timeStyle:'short'})}`;if(remaining<=0){clearInterval(signalMaintenanceTimer);setTimeout(checkAppAnnouncements,500);}};tick();signalMaintenanceTimer=setInterval(tick,1000);}
 function renderSignalDashboardNotice(notice){const home=document.querySelector('.home'),existing=document.getElementById('signal-dashboard-notice');if(!home||!notice)return;if(existing?.dataset.noticeId===notice.id)return;existing?.remove();const anchor=document.getElementById('loading')||document.getElementById('content');if(!anchor)return;anchor.insertAdjacentHTML('beforebegin',`<article id="signal-dashboard-notice" class="signal-dashboard-notice" data-notice-id="${signalEscapeHtml(notice.id)}"><i class="dashboard-notice-glow" aria-hidden="true"></i><header><span class="dashboard-notice-logo"><img src="signal-premium-logo.png" alt="Signal"></span><span><small><i></i> Актуальне повідомлення</small><strong>${signalEscapeHtml(notice.title||'Повідомлення Signal')}</strong></span></header><div class="dashboard-notice-copy">${signalEscapeHtml(notice.message).replace(/\n/g,'<br>')}</div><footer><span>Signal інформує</span><button type="button" aria-expanded="false">Читати повністю</button></footer></article>`);const card=document.getElementById('signal-dashboard-notice'),button=card.querySelector('footer button');button.onclick=()=>{const expanded=card.classList.toggle('expanded');button.setAttribute('aria-expanded',String(expanded));button.textContent=expanded?'Згорнути':'Читати повністю';};}
 async function checkAppAnnouncements() {
@@ -180,27 +191,30 @@ async function checkAppAnnouncements() {
     const announcements=response.ok?((await response.json()).announcements||[]):[];
     if(!response.ok&&serviceStatus.status!=='maintenance'){document.documentElement.classList.remove('signal-maintenance-check');return;}
     document.documentElement.classList.remove('signal-maintenance-check');
+    const superAdminPreview=Boolean(serviceStatus.locked&&await signalHasSuperAdminPreview()),previewBadge=document.getElementById('signal-super-admin-preview');
+    if(superAdminPreview&&!previewBadge)document.body.insertAdjacentHTML('afterbegin','<div id="signal-super-admin-preview" role="status" style="position:fixed;z-index:2147483646;top:max(8px,env(safe-area-inset-top));left:50%;transform:translateX(-50%);padding:8px 13px;border:1px solid rgba(255,199,77,.35);border-radius:99px;background:rgba(25,20,9,.94);color:#ffd36b;font:800 11px Inter,sans-serif;box-shadow:0 10px 30px #0007">Super Admin · режим перевірки</div>');
+    if(!superAdminPreview)previewBadge?.remove();
     const securityIncident = announcements.find(item => item.type === 'security' && item.audience === 'all');
     const existingSecurity = document.getElementById('signal-security-incident-screen');
-    if (!securityIncident) existingSecurity?.remove();
-    if (securityIncident && !existingSecurity) {
+    if (!securityIncident||superAdminPreview) existingSecurity?.remove();
+    if (securityIncident && !superAdminPreview && !existingSecurity) {
       document.body.insertAdjacentHTML('beforeend', `<div id="signal-security-incident-screen" style="position:fixed;inset:0;z-index:2147483647;background:radial-gradient(circle at 50% 0,#482044 0,#131326 42%,#05060d 100%);color:#f7f8ff;display:grid;place-items:center;padding:24px;text-align:center;font-family:Inter,-apple-system,sans-serif"><div style="width:min(100%,560px)"><div style="width:92px;height:92px;margin:auto;border-radius:28px;display:grid;place-items:center;background:linear-gradient(145deg,#ff4d6d,#7557ff);box-shadow:0 0 60px rgba(255,77,109,.4);font-size:48px">🛡️</div><div style="margin-top:22px;font-size:11px;font-weight:800;letter-spacing:2px;color:#ff9bac">ЗАХИСТ SIGNAL АКТИВОВАНО</div><h1 style="font-size:30px;line-height:1.25;margin:10px 0 0">${signalEscapeHtml(securityIncident.title || 'Важливе повідомлення безпеки')}</h1><p style="color:#c7cada;line-height:1.7;margin:16px auto 0;max-width:500px">${signalEscapeHtml(securityIncident.message).replace(/\n/g,'<br>')}</p><div style="margin-top:20px;padding:13px;border:1px solid rgba(255,255,255,.13);border-radius:13px;background:rgba(255,255,255,.05);font-size:13px;color:#aeb5c9">Ваш акаунт не вимкнено. Нікому не повідомляйте пароль, PIN, резервні коди або коди з email.</div><button type="button" onclick="location.reload()" style="margin-top:20px;padding:12px 20px;border:0;border-radius:11px;background:linear-gradient(135deg,#ff4d6d,#7658ff);color:#fff;font-weight:800">Перевірити стан системи</button><p style="color:#7f879d;font-size:12px;margin-top:16px">Екран автоматично оновлюється кожні 30 секунд.</p></div></div>`);
       return;
     }
-    if (securityIncident) return;
+    if (securityIncident&&!superAdminPreview) return;
     const maintenance = announcements.find(item => item.type === 'maintenance' && item.audience === 'all')||(serviceStatus.status==='maintenance'?{title:'Тимчасово недоступно',message:serviceStatus.message||'Ми проводимо технічні роботи. Спробуйте відкрити застосунок трохи пізніше.',audience:'all',type:'maintenance'}:null);
     const existingMaintenance = document.getElementById('signal-maintenance-screen');
-    if (!maintenance){existingMaintenance?.remove();clearInterval(signalMaintenanceTimer);signalMaintenanceTimer=null;}
+    if (!maintenance||superAdminPreview){existingMaintenance?.remove();clearInterval(signalMaintenanceTimer);signalMaintenanceTimer=null;}
     // During maintenance every customer page is blocked. The only exception
     // is the standalone form, which deliberately does not load this script.
     const onSupportPage = /\/maintenance-support\.html$/i.test(location.pathname);
-    if (maintenance && !existingMaintenance && !onSupportPage && !signalOfflineCardPage) {
+    if (maintenance && !superAdminPreview && !existingMaintenance && !onSupportPage && !signalOfflineCardPage) {
       document.body.insertAdjacentHTML('beforeend', `<div id="signal-maintenance-screen" class="signal-maintenance-screen" role="dialog" aria-modal="true" aria-label="Технічні роботи"><i class="maintenance-orb one" aria-hidden="true"></i><i class="maintenance-orb two" aria-hidden="true"></i><div class="signal-maintenance-card"><span class="maintenance-logo"><img src="signal-premium-logo.png" alt="Signal"><i></i></span><div class="maintenance-badge"><i></i> Оновлення системи</div><h1>${signalEscapeHtml(maintenance.title || 'Тимчасово недоступно')}</h1><p class="maintenance-message">${signalEscapeHtml(maintenance.message).replace(/\n/g,'<br>')}</p>${maintenance.expiresAt?'<div id="signal-maintenance-countdown" class="maintenance-countdown"><span>До завершення робіт</span><strong id="signal-maintenance-countdown-value">00:00:00</strong><small id="signal-maintenance-countdown-exact"></small></div>':''}<p class="maintenance-safe">Дані акаунта та активні eSIM залишаються захищеними. Стан перевіряється автоматично.</p><div class="maintenance-actions"><button type="button" onclick="location.reload()">Перевірити стан</button><button type="button" onclick="location.href='maintenance-support.html'">Написати в підтримку</button></div></div></div>`);
       if(maintenance.expiresAt)startMaintenanceCountdown(maintenance.expiresAt);
       return;
     }
-    if(maintenance?.expiresAt&&!signalMaintenanceTimer)startMaintenanceCountdown(maintenance.expiresAt);
-    if (maintenance || !token) return;
+    if(maintenance?.expiresAt&&!superAdminPreview&&!signalMaintenanceTimer)startMaintenanceCountdown(maintenance.expiresAt);
+    if ((maintenance&&!superAdminPreview) || !token) return;
     const activeNotice = announcements.find(item => !['maintenance','security'].includes(item.type));
     const dashboardNotice=document.getElementById('signal-dashboard-notice');
     if(!activeNotice)dashboardNotice?.remove();

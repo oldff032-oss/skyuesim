@@ -204,6 +204,21 @@ test('maintenance support works without account unlock and remains rate limited'
   assert.doesNotMatch(page, /pwa\.js/);
 });
 
+test('maintenance and security modes enforce a server-side Super Admin lockdown',()=>{
+  const server=read('server.js'),auth=read('adminAuthService.js');
+  assert.match(server,/function activeSystemLock\(\)/);
+  assert.match(server,/app\.use\('\/api'/);
+  assert.match(server,/adminAuth\.getSession\(req\.headers\['x-admin-token'\]\)/);
+  assert.match(server,/adminSession\?\.role==='super_admin'/);
+  assert.match(server,/status\(423\).*code:'SYSTEM_LOCKDOWN'/s);
+  assert.match(server,/alwaysAvailable=new Set\(\['\/api\/service-status','\/api\/announcements','\/api\/maintenance-support','\/api\/app-version','\/api\/webhook','\/api\/inbound-email'\]\)/);
+  assert.match(server,/superAdminOnly:Boolean\(lock\)/);
+  assert.match(auth,/module\.exports = \{[^}]*getSession/);
+  assert.match(read('pwa.js'),/function signalHasSuperAdminPreview\(\)/);
+  assert.match(read('pwa.js'),/headers\.set\('x-admin-token',adminToken\)/);
+  assert.match(read('pwa.js'),/Super Admin · режим перевірки/);
+});
+
 test('service worker bypasses stale cache for maintenance and localization assets', () => {
   const worker=read('sw.js');
   const support=read('support.html');

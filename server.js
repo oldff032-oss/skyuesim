@@ -587,6 +587,21 @@ app.use((req,res,next)=>{
   return (supportUpload?supportUploadJsonParser:regularJsonParser)(req,res,next);
 });
 
+function activeSystemLock(){
+  const active=operationsStore.activeAnnouncements(null);
+  return active.find(item=>item.type==='security'&&item.audience==='all')||active.find(item=>item.type==='maintenance'&&item.audience==='all')||null;
+}
+app.use('/api',(req,res,next)=>{
+  const lock=activeSystemLock();
+  if(!lock)return next();
+  const path=`/api${req.path}`;
+  const alwaysAvailable=new Set(['/api/service-status','/api/announcements','/api/maintenance-support','/api/app-version','/api/webhook','/api/inbound-email']);
+  if(alwaysAvailable.has(path)||path.startsWith('/api/admin/login'))return next();
+  const adminSession=adminAuth.getSession(req.headers['x-admin-token']);
+  if(adminSession?.role==='super_admin')return next();
+  return res.status(423).json({error:lock.type==='security'?'Система тимчасово закрита режимом захисту. Доступ має лише Super Admin.':'Тривають технічні роботи. Доступ має лише Super Admin.',code:'SYSTEM_LOCKDOWN',mode:lock.type,expiresAt:lock.expiresAt||null});
+});
+
 // =========================================================
 // АВТЕНТИФІКАЦІЯ: email -> код -> пароль -> акаунт, і логін
 // =========================================================
@@ -1030,9 +1045,9 @@ app.patch('/api/admin/feedback/:id',adminAuth.requireAdmin,adminAuth.requirePerm
 
 app.get('/api/service-status', async (req, res) => {
   await operationsStore.refresh();
-  const maintenance = operationsStore.activeAnnouncements(null).find((item) => item.type === 'maintenance');
+  const lock=activeSystemLock(),maintenance=lock?.type==='maintenance'?lock:null;
   res.set('Cache-Control','no-store, no-cache, must-revalidate');
-  res.json({ status: maintenance ? 'maintenance' : 'operational', maintenanceId:maintenance?.id||null, title:maintenance?.title||null, message: maintenance?.message || null, expiresAt:maintenance?.expiresAt||null, checkedAt: new Date().toISOString() });
+  res.json({status:lock?(lock.type==='security'?'security':'maintenance'):'operational',locked:Boolean(lock),mode:lock?.type||null,superAdminOnly:Boolean(lock),maintenanceId:maintenance?.id||null,title:lock?.title||null,message:lock?.message||null,expiresAt:lock?.expiresAt||null,checkedAt:new Date().toISOString()});
 });
 
 app.get('/api/travel-packages', requireUserSession, requireFeature('travelPackages','Пакети для подорожей тимчасово недоступні'), rateLimit('travel_catalog',60*1000,30,req=>req.userEmail), async (req,res) => {

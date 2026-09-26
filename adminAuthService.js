@@ -231,4 +231,4 @@ async function emergencyResetTwoFactor({email,password,recoverySecret}){
   writeAll(store);return {email,enabled:false};
 }
 
-module.exports = { bootstrap, login, completeLogin, twoFactorStatus, startTwoFactorChange, completeTwoFactorChange, resetTwoFactor, emergencyResetTwoFactor, requireAdmin, requireRole, requirePermission, permissionsFor, setPermissions, createAdmin, listAdmins, setAdminBlocked, deleteAdmin, ALL_PERMISSIONS };
+module.exports = { bootstrap, login, completeLogin, twoFactorStatus, startTwoFactorChange, completeTwoFactorChange, resetTwoFactor, emergencyResetTwoFactor, getSession, requireAdmin, requireRole, requirePermission, permissionsFor, setPermissions, createAdmin, listAdmins, setAdminBlocked, deleteAdmin, ALL_PERMISSIONS };
