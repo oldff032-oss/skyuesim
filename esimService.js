@@ -242,7 +242,15 @@ function transactionId() {
 function bytes(value) {
   if (value === null || value === undefined || value === '') return null;
   const number = Number(value);
-  return Number.isFinite(number) && number >= 0 ? number : null;
+  if (Number.isFinite(number) && number >= 0) return number;
+  if (typeof value !== 'string') return null;
+  const units={B:1,KB:1024,MB:1024**2,GB:1024**3,TB:1024**4};
+  let total=0,matched=false;
+  for(const match of value.toUpperCase().matchAll(/(\d+(?:[.,]\d+)?)\s*(TB|GB|MB|KB|B)\b/g)){
+    const amount=Number(match[1].replace(',','.'));
+    if(Number.isFinite(amount)){total+=amount*units[match[2]];matched=true;}
+  }
+  return matched?total:null;
 }
 
 function firstBytes(...values) {
@@ -256,6 +264,31 @@ function firstBytes(...values) {
 function maxBytes(...values){const parsed=values.map(bytes).filter(value=>value!=null);return parsed.length?Math.max(...parsed):null;}
 function minBytes(...values){const parsed=values.map(bytes).filter(value=>value!=null);return parsed.length?Math.min(...parsed):null;}
 
+function trafficObjects(value,depth=0,seen=new Set()){
+  if(!value||typeof value!=='object'||depth>4||seen.has(value))return[];
+  seen.add(value);
+  if(Array.isArray(value))return value.flatMap(item=>trafficObjects(item,depth+1,seen));
+  const objects=[value];
+  for(const [key,nested] of Object.entries(value)){
+    if(nested&&typeof nested==='object'&&/^(?:obj|data|result|detail|details|usage|usageInfo|usageData|usageList|esimUsageList|list)$/i.test(key))objects.push(...trafficObjects(nested,depth+1,seen));
+  }
+  return objects;
+}
+
+function usageFieldSummary(value){
+  const summary={};
+  const walk=(item,path='',depth=0)=>{
+    if(!item||typeof item!=='object'||depth>4)return;
+    for(const [key,nested] of Object.entries(item)){
+      const next=path?`${path}.${key}`:key;
+      if(nested&&typeof nested==='object'){walk(nested,next,depth+1);continue;}
+      if(/(?:usage|remain|remaining|volume|total.?data|used.?data|real.?time)/i.test(key)&&!/^(?:iccid|imsi|token|url|code|eid|transactionId|orderNo|esimTranNo)$/i.test(key))summary[next]=String(nested).slice(0,80);
+    }
+  };
+  walk(value);
+  return summary;
+}
+
 function profileUsageCounters(profile = {}) {
   const packages=Array.isArray(profile.packageList)?profile.packageList:[];
   const packageTotals=packages.map(item=>firstBytes(item?.totalVolume,item?.totalData,item?.volume)).filter(value=>value!=null);
@@ -267,13 +300,11 @@ function profileUsageCounters(profile = {}) {
   const totalBytes=maxBytes(profile.totalVolume,profile.totalData,profile.dataTotal,profile.volume,packageTotal);
   const explicitRemaining=minBytes(profile.remain,profile.remaining,profile.remainVolume,profile.remainingVolume,profile.remainingData,profile.remainingBytes,profile.dataRemain,packageRemainingTotal);
   const explicitUsed=maxBytes(profile.dataUsage,profile.orderUsage,profile.usedVolume,profile.usedData,profile.usedBytes,profile.usage,packageUsedTotal);
-  let usedBytes=explicitUsed,remainingBytes=explicitRemaining,counterSource='missing';
-  // `remain` can stay at the original allowance while `orderUsage` already
-  // contains the carrier's newer counter (the console labels it Real-time).
-  // Consumption is cumulative for one ICCID, so an explicit used counter must
-  // win over a conflicting remaining counter.
-  if(totalBytes!=null&&explicitUsed!=null){usedBytes=Math.min(totalBytes,explicitUsed);remainingBytes=Math.max(0,totalBytes-usedBytes);counterSource=packageUsedTotal!=null&&explicitUsed===packageUsedTotal?'package.used':'profile.used';}
-  else if(totalBytes!=null&&explicitRemaining!=null){remainingBytes=Math.min(totalBytes,explicitRemaining);usedBytes=Math.max(0,totalBytes-remainingBytes);counterSource=packageRemainingTotal!=null&&explicitRemaining===packageRemainingTotal?'package.remaining':'profile.remaining';}
+  const derivedUsed=totalBytes!=null&&explicitRemaining!=null?Math.max(0,totalBytes-Math.min(totalBytes,explicitRemaining)):null;
+  let usedBytes=maxBytes(explicitUsed,derivedUsed),remainingBytes=explicitRemaining,counterSource='missing';
+  // Provider fields do not always refresh together. Use the greatest
+  // cumulative consumption confirmed either directly or from total-remain.
+  if(totalBytes!=null&&usedBytes!=null){usedBytes=Math.min(totalBytes,usedBytes);remainingBytes=Math.max(0,totalBytes-usedBytes);counterSource=derivedUsed!=null&&derivedUsed>Number(explicitUsed??-1)?(packageRemainingTotal!=null&&explicitRemaining===packageRemainingTotal?'package.remaining':'profile.remaining'):(packageUsedTotal!=null&&explicitUsed===packageUsedTotal?'package.used':'profile.used');}
   const counterUpdatedAt=profile.lastDataUsageUpdateTime||profile.usageUpdateTime||profile.lastUsageUpdateTime||profile.lastUpdateTime||profile.updateTime||null;
   return{usedBytes,totalBytes,remainingBytes,counterSource,counterUpdatedAt,hasUsageTimestamp:Boolean(counterUpdatedAt)};
 }
@@ -307,9 +338,9 @@ async function queryRealtimeUsage(esimTranNo) {
   const totalBytes=maxBytes(usage.totalData,usage.totalVolume,usage.dataTotal,usage.volume);
   const explicitUsed=maxBytes(usage.dataUsage,usage.orderUsage,usage.usedVolume,usage.usedData,usage.usedBytes,usage.usage);
   const explicitRemaining=minBytes(usage.remain,usage.remaining,usage.remainVolume,usage.remainingVolume,usage.remainingData,usage.remainingBytes,usage.dataRemain);
-  let usedBytes=explicitUsed,remainingBytes=null,counterSource='dataUsage';
+  const derivedUsed=totalBytes!=null&&explicitRemaining!=null?Math.max(0,totalBytes-Math.min(totalBytes,explicitRemaining)):null;
+  let usedBytes=maxBytes(explicitUsed,derivedUsed),remainingBytes=null,counterSource=derivedUsed!=null&&derivedUsed>Number(explicitUsed??-1)?'remaining':'dataUsage';
   if(totalBytes!=null&&usedBytes!=null){usedBytes=Math.min(totalBytes,usedBytes);remainingBytes=Math.max(0,totalBytes-usedBytes);}
-  else if(totalBytes!=null&&explicitRemaining!=null){remainingBytes=Math.min(totalBytes,explicitRemaining);usedBytes=Math.max(0,totalBytes-remainingBytes);counterSource='remaining';}
   const counterUpdatedAt=usage.lastDataUsageUpdateTime||usage.usageUpdateTime||usage.lastUsageUpdateTime||usage.lastUpdateTime||usage.updateTime||null;
   if(usedBytes==null||totalBytes==null){
     throw new EsimAccessError('The real-time usage response did not include complete traffic counters.',{code:'USAGE_VALUES_MISSING'});
@@ -592,7 +623,7 @@ async function checkUsage(input) {
     try{
       const live=await checkSupportLinkUsage(shareUrl);
       if(requestedIccid&&live.iccid&&String(live.iccid)!==requestedIccid)throw new EsimAccessError('Live usage link returned another ICCID.',{code:'USAGE_ICCID_MISMATCH'});
-      candidates.push({usedBytes:live.usedBytes,totalBytes:live.totalBytes,details:live,source:'share_usage_api',counterSource:'share.dataUsage',counterUpdatedAt:live.lastUpdateTime||null,hasUsageTimestamp:Boolean(live.lastUpdateTime)});
+      candidates.push({usedBytes:live.usedBytes,totalBytes:live.totalBytes,details:live,source:'share_usage_api',counterSource:`share.${live.counterSource||'used'}`,counterUpdatedAt:live.lastUpdateTime||null,hasUsageTimestamp:Boolean(live.lastUpdateTime)});
     }catch(error){
       log('share_usage_failed_using_profile_counter',{iccid:mask(requestedIccid),code:error.code,message:error.message});
     }
@@ -614,6 +645,7 @@ async function checkUsage(input) {
   const selected=candidates.reduce((best,item)=>item.usedBytes>best.usedBytes?item:best);
   const totalBytes=Math.max(...candidates.map(item=>item.totalBytes));
   const usedBytes=Math.min(totalBytes,selected.usedBytes);
+  if(usedBytes===0)log('usage_counters_all_zero',{iccid:mask(requestedIccid||profile.iccid),sources:candidates.map(item=>({source:item.source,usedBytes:item.usedBytes,totalBytes:item.totalBytes,fields:usageFieldSummary(item.details)}))});
   return usageResult(usedBytes,totalBytes,profile,selected.details,{
     source:selected.source,live:true,stale:false,syncedAt:new Date().toISOString(),counterSource:selected.counterSource,counterUpdatedAt:selected.counterUpdatedAt,hasUsageTimestamp:selected.hasUsageTimestamp,
   });
@@ -719,21 +751,25 @@ async function checkSupportLinkUsage(supportInstallUrl) {
   if (!usageResponse.ok || !isSuccess(payload) || !payload?.obj) {
     throw new EsimAccessError(`Support usage error: ${apiMessage(payload)}`, { code:apiCode(payload) || 'SUPPORT_USAGE_FAILED', status:usageResponse.status, payload });
   }
-  const totalBytes = maxBytes(payload.obj.totalVolume,payload.obj.totalData,payload.obj.dataTotal,payload.obj.volume);
-  // Some H5 responses keep dataUsage at zero while orderUsage contains the
-  // counter displayed as Real-time. Nullish coalescing would incorrectly lock
-  // the result to that zero, so compare every explicit used-data field.
-  const usedBytes = maxBytes(payload.obj.dataUsage,payload.obj.orderUsage,payload.obj.usedVolume,payload.obj.usedData,payload.obj.usedBytes,payload.obj.usage);
+  const objects=trafficObjects(payload.obj);
+  const totalBytes=maxBytes(...objects.flatMap(item=>[item.totalVolume,item.totalData,item.dataTotal,item.volume]));
+  const explicitUsed=maxBytes(...objects.flatMap(item=>[item.dataUsage,item.orderUsage,item.usedVolume,item.usedData,item.usedBytes,item.usage,item.realTimeUsage,item.realtimeUsage]));
+  const explicitRemaining=minBytes(...objects.flatMap(item=>[item.remain,item.remaining,item.remainVolume,item.remainingVolume,item.remainingData,item.remainingBytes,item.dataRemain]));
+  const derivedUsed=totalBytes!=null&&explicitRemaining!=null?Math.max(0,totalBytes-Math.min(totalBytes,explicitRemaining)):null;
+  const usedBytes=maxBytes(explicitUsed,derivedUsed);
   if (totalBytes == null || usedBytes == null) throw new EsimAccessError('Support usage response did not include traffic values.', { code:'SUPPORT_USAGE_VALUES_MISSING' });
+  const identity=objects.find(item=>item.iccid)||payload.obj;
+  const timestamps=objects.flatMap(item=>[item.lastDataUsageUpdateTime,item.usageUpdateTime,item.lastUsageUpdateTime,item.lastUpdateTime,item.updateTime]).filter(Boolean).sort((a,b)=>(new Date(b).getTime()||0)-(new Date(a).getTime()||0));
   return {
     usedBytes:Math.max(0, usedBytes),
     totalBytes:Math.max(0, totalBytes),
     remainingBytes:Math.max(0, totalBytes - usedBytes),
-    iccid:payload.obj.iccid || null,
-    expiredTime:payload.obj.expiredTime || null,
-    totalDuration:payload.obj.totalDuration ?? null,
-    dataType:payload.obj.dataType ?? null,
-    lastUpdateTime:payload.obj.lastDataUsageUpdateTime||payload.obj.usageUpdateTime||payload.obj.lastUsageUpdateTime||payload.obj.lastUpdateTime||payload.obj.updateTime||null,
+    counterSource:derivedUsed!=null&&derivedUsed>Number(explicitUsed??-1)?'remaining':'used',
+    iccid:identity.iccid || null,
+    expiredTime:identity.expiredTime || payload.obj.expiredTime || null,
+    totalDuration:identity.totalDuration ?? payload.obj.totalDuration ?? null,
+    dataType:identity.dataType ?? payload.obj.dataType ?? null,
+    lastUpdateTime:timestamps[0]||null,
   };
 }
 module.exports = { provisionEsim, checkUsage, checkSupportLinkUsage, recoverEsim, recoverEsimByOrderNo, topupEsim, listPackages, findRenewalTopup, cancelEsim, revokeEsim, suspendEsim, unsuspendEsim, listAllocatedEsims, listOwnedProfiles, manageProfile, profileToEsim };
