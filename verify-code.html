@@ -19,9 +19,10 @@
 <body>
   <div class="wrap">
     <div class="brand"><div class="mark">📶</div><span>Сигнал</span></div>
+    <div class="signal-step-progress" aria-label="Крок 3 з 4"><i class="done"></i><i class="done"></i><i class="active"></i><i></i></div>
 
-    <h1 style="margin-top:20px;">Verify E-mail</h1>
-    <p class="lead">Ми надіслали код на <b id="emailShown" style="color:var(--text);"></b></p>
+    <h1 data-i18n-uk="Підтверди email" data-i18n-en="Verify your email">Підтверди email</h1>
+    <p class="lead"><span data-i18n-uk="Ми надіслали 6-значний код на" data-i18n-en="We sent a 6-digit code to">Ми надіслали 6-значний код на</span> <b id="emailShown" style="color:var(--text);"></b></p>
 
     <div class="otp-row" id="otpRow">
       <input class="otp-cell" maxlength="1" inputmode="numeric" />
@@ -34,7 +35,7 @@
     <div class="err-text" id="err" style="display:none; justify-content:center;"></div>
 
     <p class="muted" style="text-align:center; margin-top:22px;" id="resendWrap">
-      Не прийшов код? <a href="#" id="resendLink" style="color:var(--cyan); text-decoration:none;">Надіслати ще раз</a>
+      <span data-i18n-uk="Не прийшов код?" data-i18n-en="Didn't get a code?">Не прийшов код?</span> <a href="#" id="resendLink" data-i18n-uk="Надіслати ще раз" data-i18n-en="Send again" style="color:var(--cyan); text-decoration:none;">Надіслати ще раз</a>
       <span id="resendTimer" style="display:none;"></span>
     </p>
   </div>

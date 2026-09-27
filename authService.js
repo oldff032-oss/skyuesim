@@ -98,7 +98,7 @@ async function setPassword(verifyToken, password, deviceName, pin) {
   // an existing subscription/eSIM when an account is restored with the same email.
   if (!getUser(entry.email)) {
     const inviter = Object.values(getAllUsers()).find((user) => user.referralCode && user.referralCode === entry.referralCode && user.email !== entry.email);
-    saveUser(entry.email, { email: entry.email, status: 'registered', language: entry.language || 'uk', displayName: entry.displayName || '', avatarDataUrl: entry.avatarDataUrl || null, appLock: { enabled: true, pinHash: await bcrypt.hash(String(pin), 10) }, createdAt: new Date().toISOString(), ...(inviter ? { referredBy: inviter.email, referralRewardStatus: 'pending_first_payment' } : {}) });
+    saveUser(entry.email, { email: entry.email, status: 'registered', language: entry.language || 'uk', displayName: entry.displayName || '', avatarDataUrl: entry.avatarDataUrl || null, appLock: { enabled: true, pinHash: await bcrypt.hash(String(pin), 10), preferredMethod: 'pin', failedAttempts: 0, lockedUntil: null }, createdAt: new Date().toISOString(), ...(inviter ? { referredBy: inviter.email, referralRewardStatus: 'pending_first_payment' } : {}) });
     if (inviter) saveUser(inviter.email, { referrals: [...(inviter.referrals || []), { email: entry.email, createdAt: new Date().toISOString(), status: 'pending_first_payment' }] });
   } else {
     saveUser(entry.email, { language: entry.language || 'uk' });
@@ -312,7 +312,7 @@ async function completeAdminRecovery(token, newEmail, newPassword, pin) {
   saveUser(email, {
     ...subscription,
     email,
-    appLock: { enabled: true, pinHash: await bcrypt.hash(String(pin), 10) },
+    appLock: { ...(subscription?.appLock || {}), enabled: true, pinHash: await bcrypt.hash(String(pin), 10), preferredMethod: 'pin', failedAttempts: 0, lockedUntil: null },
   });
   for (const user of Object.values(getAllUsers())) {
     const patch = {};
