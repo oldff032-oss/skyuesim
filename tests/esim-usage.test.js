@@ -86,6 +86,22 @@ test('official Usage Check response reads esimUsageList dataUsage exactly as doc
   assert.equal(usage.source,'realtime_usage_api');
 });
 
+test('provider package without Usage Check API never presents zero as confirmed traffic', async t => {
+  const originalFetch=global.fetch,calls=[];
+  t.after(()=>{global.fetch=originalFetch});
+  global.fetch=async (url,options={})=>{
+    calls.push({url:String(url),body:JSON.parse(options.body||'{}')});
+    if(calls.length===1)return response({success:true,obj:{esimList:[{orderNo:'ORDER-UNSUPPORTED',esimTranNo:'TRAN-UNSUPPORTED',iccid:'8931084324105921283',orderUsage:0,totalVolume:20*1024**3,esimStatus:'IN_USE',packageList:[{saleNotes:'Check Usage: Usage Check API is not yet supported. Please click the refresh button on console portal.'}]}]}});
+    return response({success:true,obj:{esimUsageList:[{esimTranNo:'TRAN-UNSUPPORTED',dataUsage:0,totalData:20*1024**3,lastUpdateTime:'2026-09-15T16:33:00Z'}]}});
+  };
+  const usage=await service.checkUsage({orderNo:'ORDER-UNSUPPORTED',esimTranNo:'TRAN-UNSUPPORTED',iccid:'8931084324105921283'});
+  assert.equal(usage.usedBytes,0);
+  assert.equal(usage.stale,true);
+  assert.equal(usage.live,false);
+  assert.equal(usage.source,'usage_api_unsupported');
+  assert.match(usage.warning,/Usage Check API is not yet supported/);
+});
+
 test('base package and top-up transaction usage are requested together and summed', async t => {
   const originalFetch=global.fetch,calls=[],gb=1024**3;
   t.after(()=>{global.fetch=originalFetch});

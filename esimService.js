@@ -359,6 +359,17 @@ function nestedEsimTranNos(value,depth=0,seen=new Set()) {
   return found;
 }
 
+function usageCheckUnsupported(value,depth=0,seen=new Set()) {
+  if(!value||typeof value!=='object'||depth>6||seen.has(value))return false;
+  seen.add(value);
+  if(Array.isArray(value))return value.some(item=>usageCheckUnsupported(item,depth+1,seen));
+  for(const [key,nested] of Object.entries(value)){
+    if(/^(?:saleNotes?|notes?|remark|description)$/i.test(key)&&/usage\s*check\s*api\s*is\s*not\s*yet\s*supported/i.test(String(nested||'')))return true;
+    if(nested&&typeof nested==='object'&&usageCheckUnsupported(nested,depth+1,seen))return true;
+  }
+  return false;
+}
+
 function realtimeUsageCounter(usage) {
   const objects=trafficObjects(usage);
   const totalBytes=maxBytes(...objects.flatMap(item=>[item.totalData,item.totalVolume,item.dataTotal,item.volume]));
@@ -694,6 +705,11 @@ async function checkUsage(input) {
   const selected=candidates.reduce((best,item)=>item.usedBytes>best.usedBytes?item:best);
   const totalBytes=Math.max(...candidates.map(item=>item.totalBytes));
   const usedBytes=Math.min(totalBytes,selected.usedBytes);
+  if(usedBytes===0&&usageCheckUnsupported(profile)){
+    const warning='Цей пакет позначений eSIM Access як “Usage Check API is not yet supported”. Автоматичний лічильник недоступний; нуль не вважається фактичним використанням.';
+    log('usage_check_api_not_supported_for_package',{iccid:mask(requestedIccid||profile.iccid),esimTranNo:mask(profile.esimTranNo||requestedTranNo)});
+    return usageResult(usedBytes,totalBytes,profile,selected.details,{source:'usage_api_unsupported',live:false,stale:true,warning,syncedAt:new Date().toISOString(),counterSource:selected.counterSource,counterUpdatedAt:selected.counterUpdatedAt,hasUsageTimestamp:selected.hasUsageTimestamp});
+  }
   if(usedBytes===0)log('usage_counters_all_zero',{details:JSON.stringify({iccid:mask(requestedIccid||profile.iccid),sources:candidates.map(item=>({source:item.source,usedBytes:item.usedBytes,totalBytes:item.totalBytes,fields:usageFieldSummary(item.details)}))})});
   return usageResult(usedBytes,totalBytes,profile,selected.details,{
     source:selected.source,live:true,stale:false,syncedAt:new Date().toISOString(),counterSource:selected.counterSource,counterUpdatedAt:selected.counterUpdatedAt,hasUsageTimestamp:selected.hasUsageTimestamp,
