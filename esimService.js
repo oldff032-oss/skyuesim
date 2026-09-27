@@ -289,23 +289,39 @@ function usageFieldSummary(value){
   return summary;
 }
 
+function reportedUsageValues(item = {}) {
+  return [
+    item.dataUsage,item.orderUsage,item.usedVolume,item.usedData,item.usedBytes,item.usage,
+    item.realTimeUsage,item.realtimeUsage,item.realTime,item.realtime,
+    item.realTimeData,item.realtimeData,item.realTimeVolume,item.realtimeVolume,
+  ];
+}
+
+function usageUpdateValues(item = {}) {
+  return [
+    item.lastDataUsageUpdateTime,item.usageUpdateTime,item.lastUsageUpdateTime,
+    item.realTimeUpdateTime,item.realtimeUpdateTime,item.lastRealTimeUpdateTime,
+    item.lastUpdateTime,item.updateTime,
+  ];
+}
+
 function profileUsageCounters(profile = {}) {
   const packages=Array.isArray(profile.packageList)?profile.packageList:[];
   const packageTotals=packages.map(item=>firstBytes(item?.totalVolume,item?.totalData,item?.volume)).filter(value=>value!=null);
-  const packageUsed=packages.map(item=>firstBytes(item?.dataUsage,item?.orderUsage,item?.usedVolume,item?.usedData,item?.usedBytes,item?.usage));
+  const packageUsed=packages.map(item=>firstBytes(...reportedUsageValues(item)));
   const packageRemaining=packages.map(item=>firstBytes(item?.remain,item?.remaining,item?.remainVolume,item?.remainingVolume,item?.remainingData,item?.remainingBytes,item?.dataRemain));
   const packageTotal=packageTotals.length===packages.length&&packages.length?packageTotals.reduce((sum,value)=>sum+value,0):null;
   const packageUsedTotal=packageUsed.length===packages.length&&packages.length&&packageUsed.every(value=>value!=null)?packageUsed.reduce((sum,value)=>sum+value,0):null;
   const packageRemainingTotal=packageRemaining.length===packages.length&&packages.length&&packageRemaining.every(value=>value!=null)?packageRemaining.reduce((sum,value)=>sum+value,0):null;
   const totalBytes=maxBytes(profile.totalVolume,profile.totalData,profile.dataTotal,profile.volume,packageTotal);
   const explicitRemaining=minBytes(profile.remain,profile.remaining,profile.remainVolume,profile.remainingVolume,profile.remainingData,profile.remainingBytes,profile.dataRemain,packageRemainingTotal);
-  const explicitUsed=maxBytes(profile.dataUsage,profile.orderUsage,profile.usedVolume,profile.usedData,profile.usedBytes,profile.usage,packageUsedTotal);
+  const explicitUsed=maxBytes(...reportedUsageValues(profile),packageUsedTotal);
   const derivedUsed=totalBytes!=null&&explicitRemaining!=null?Math.max(0,totalBytes-Math.min(totalBytes,explicitRemaining)):null;
   let usedBytes=maxBytes(explicitUsed,derivedUsed),remainingBytes=explicitRemaining,counterSource='missing';
   // Provider fields do not always refresh together. Use the greatest
   // cumulative consumption confirmed either directly or from total-remain.
   if(totalBytes!=null&&usedBytes!=null){usedBytes=Math.min(totalBytes,usedBytes);remainingBytes=Math.max(0,totalBytes-usedBytes);counterSource=derivedUsed!=null&&derivedUsed>Number(explicitUsed??-1)?(packageRemainingTotal!=null&&explicitRemaining===packageRemainingTotal?'package.remaining':'profile.remaining'):(packageUsedTotal!=null&&explicitUsed===packageUsedTotal?'package.used':'profile.used');}
-  const counterUpdatedAt=profile.lastDataUsageUpdateTime||profile.usageUpdateTime||profile.lastUsageUpdateTime||profile.lastUpdateTime||profile.updateTime||null;
+  const counterUpdatedAt=usageUpdateValues(profile).find(Boolean)||null;
   return{usedBytes,totalBytes,remainingBytes,counterSource,counterUpdatedAt,hasUsageTimestamp:Boolean(counterUpdatedAt)};
 }
 
@@ -335,13 +351,16 @@ async function queryRealtimeUsage(esimTranNo) {
   // `dataUsage` value (the console displays the latter as "Real-time"). The
   // original working implementation therefore used dataUsage first. Do not
   // let the stale remaining field turn a real counter back into zero.
-  const totalBytes=maxBytes(usage.totalData,usage.totalVolume,usage.dataTotal,usage.volume);
-  const explicitUsed=maxBytes(usage.dataUsage,usage.orderUsage,usage.usedVolume,usage.usedData,usage.usedBytes,usage.usage);
-  const explicitRemaining=minBytes(usage.remain,usage.remaining,usage.remainVolume,usage.remainingVolume,usage.remainingData,usage.remainingBytes,usage.dataRemain);
+  const objects=trafficObjects(usage);
+  const totalBytes=maxBytes(...objects.flatMap(item=>[item.totalData,item.totalVolume,item.dataTotal,item.volume]));
+  const standardUsed=maxBytes(...objects.flatMap(item=>[item.dataUsage,item.orderUsage,item.usedVolume,item.usedData,item.usedBytes,item.usage]));
+  const realtimeUsed=maxBytes(...objects.flatMap(item=>[item.realTimeUsage,item.realtimeUsage,item.realTime,item.realtime,item.realTimeData,item.realtimeData,item.realTimeVolume,item.realtimeVolume]));
+  const explicitUsed=maxBytes(standardUsed,realtimeUsed);
+  const explicitRemaining=minBytes(...objects.flatMap(item=>[item.remain,item.remaining,item.remainVolume,item.remainingVolume,item.remainingData,item.remainingBytes,item.dataRemain]));
   const derivedUsed=totalBytes!=null&&explicitRemaining!=null?Math.max(0,totalBytes-Math.min(totalBytes,explicitRemaining)):null;
-  let usedBytes=maxBytes(explicitUsed,derivedUsed),remainingBytes=null,counterSource=derivedUsed!=null&&derivedUsed>Number(explicitUsed??-1)?'remaining':'dataUsage';
+  let usedBytes=maxBytes(explicitUsed,derivedUsed),remainingBytes=null,counterSource=derivedUsed!=null&&derivedUsed>Number(explicitUsed??-1)?'remaining':(realtimeUsed!=null&&realtimeUsed>=Number(standardUsed??-1)?'realTime':'dataUsage');
   if(totalBytes!=null&&usedBytes!=null){usedBytes=Math.min(totalBytes,usedBytes);remainingBytes=Math.max(0,totalBytes-usedBytes);}
-  const counterUpdatedAt=usage.lastDataUsageUpdateTime||usage.usageUpdateTime||usage.lastUsageUpdateTime||usage.lastUpdateTime||usage.updateTime||null;
+  const counterUpdatedAt=objects.flatMap(usageUpdateValues).filter(Boolean).sort((a,b)=>(new Date(b).getTime()||0)-(new Date(a).getTime()||0))[0]||null;
   if(usedBytes==null||totalBytes==null){
     throw new EsimAccessError('The real-time usage response did not include complete traffic counters.',{code:'USAGE_VALUES_MISSING'});
   }
@@ -753,13 +772,13 @@ async function checkSupportLinkUsage(supportInstallUrl) {
   }
   const objects=trafficObjects(payload.obj);
   const totalBytes=maxBytes(...objects.flatMap(item=>[item.totalVolume,item.totalData,item.dataTotal,item.volume]));
-  const explicitUsed=maxBytes(...objects.flatMap(item=>[item.dataUsage,item.orderUsage,item.usedVolume,item.usedData,item.usedBytes,item.usage,item.realTimeUsage,item.realtimeUsage]));
+  const explicitUsed=maxBytes(...objects.flatMap(reportedUsageValues));
   const explicitRemaining=minBytes(...objects.flatMap(item=>[item.remain,item.remaining,item.remainVolume,item.remainingVolume,item.remainingData,item.remainingBytes,item.dataRemain]));
   const derivedUsed=totalBytes!=null&&explicitRemaining!=null?Math.max(0,totalBytes-Math.min(totalBytes,explicitRemaining)):null;
   const usedBytes=maxBytes(explicitUsed,derivedUsed);
   if (totalBytes == null || usedBytes == null) throw new EsimAccessError('Support usage response did not include traffic values.', { code:'SUPPORT_USAGE_VALUES_MISSING' });
   const identity=objects.find(item=>item.iccid)||payload.obj;
-  const timestamps=objects.flatMap(item=>[item.lastDataUsageUpdateTime,item.usageUpdateTime,item.lastUsageUpdateTime,item.lastUpdateTime,item.updateTime]).filter(Boolean).sort((a,b)=>(new Date(b).getTime()||0)-(new Date(a).getTime()||0));
+  const timestamps=objects.flatMap(usageUpdateValues).filter(Boolean).sort((a,b)=>(new Date(b).getTime()||0)-(new Date(a).getTime()||0));
   return {
     usedBytes:Math.max(0, usedBytes),
     totalBytes:Math.max(0, totalBytes),
