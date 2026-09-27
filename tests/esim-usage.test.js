@@ -70,6 +70,42 @@ test('dedicated real-time dataUsage overrides conflicting stale profile and rema
   assert.equal(usage.providerUpdatedAt,'2026-09-21T12:59:41Z');
 });
 
+test('official Usage Check response reads esimUsageList dataUsage exactly as documented', async t => {
+  const originalFetch=global.fetch,calls=[];
+  t.after(()=>{global.fetch=originalFetch});
+  global.fetch=async (url,options={})=>{
+    calls.push({url:String(url),body:JSON.parse(options.body||'{}')});
+    if(calls.length===1)return response({success:true,obj:{esimList:[{orderNo:'ORDER-DOCS',esimTranNo:'25031120490003',iccid:'8943000000000000099',orderUsage:0,totalVolume:5368709120,esimStatus:'IN_USE'}]}});
+    return response({success:true,errorCode:'0',errorMsg:null,obj:{esimUsageList:[{esimTranNo:'25031120490003',dataUsage:1453344832,totalData:5368709120,lastUpdateTime:'2025-03-19T18:00:00+0000'}]}});
+  };
+  const usage=await service.checkUsage({orderNo:'ORDER-DOCS',esimTranNo:'25031120490003',iccid:'8943000000000000099'});
+  assert.deepEqual(calls[1].body,{esimTranNoList:['25031120490003']});
+  assert.equal(usage.usedBytes,1453344832);
+  assert.equal(usage.totalBytes,5368709120);
+  assert.equal(usage.providerUpdatedAt,'2025-03-19T18:00:00+0000');
+  assert.equal(usage.source,'realtime_usage_api');
+});
+
+test('base package and top-up transaction usage are requested together and summed', async t => {
+  const originalFetch=global.fetch,calls=[],gb=1024**3;
+  t.after(()=>{global.fetch=originalFetch});
+  global.fetch=async (url,options={})=>{
+    calls.push({url:String(url),body:JSON.parse(options.body||'{}')});
+    if(calls.length===1)return response({success:true,obj:{esimList:[{orderNo:'ORDER-TOPUP-USAGE',esimTranNo:'TRAN-BASE',iccid:'8943000000000000088',orderUsage:0,totalVolume:20*gb,esimStatus:'IN_USE',packageList:[{topUpEsimTranNo:'TRAN-TOPUP'}]}]}});
+    return response({success:true,obj:{esimUsageList:[
+      {esimTranNo:'TRAN-BASE',dataUsage:20*gb,totalData:20*gb,lastUpdateTime:'2026-09-27T18:00:00Z'},
+      {esimTranNo:'TRAN-TOPUP',dataUsage:4*gb,totalData:20*gb,lastUpdateTime:'2026-09-27T21:00:00Z'},
+    ]}});
+  };
+  const usage=await service.checkUsage({orderNo:'ORDER-TOPUP-USAGE',esimTranNo:'TRAN-BASE',iccid:'8943000000000000088'});
+  assert.deepEqual(calls[1].body,{esimTranNoList:['TRAN-BASE','TRAN-TOPUP']});
+  assert.equal(usage.usedBytes,24*gb);
+  assert.equal(usage.totalBytes,40*gb);
+  assert.equal(usage.source,'realtime_usage_api');
+  assert.equal(usage.counterSource,'realtime.aggregate');
+  assert.equal(usage.providerUpdatedAt,'2026-09-27T21:00:00Z');
+});
+
 test('nested real-time remaining balance overrides a stale full Data left value', async t => {
   const originalFetch=global.fetch,calls=[];
   t.after(()=>{global.fetch=originalFetch});
@@ -233,13 +269,15 @@ test('top-up never invents a new local traffic balance before provider confirmat
   const server=read('server.js'),helper=server.slice(server.indexOf('function cachedEsimUsage'),server.indexOf('async function syncEsimUsageForUser'));
   const context={};
   vm.runInNewContext(`${helper}\nthis.mergeTopupUsage=mergeTopupUsage;`,context);
-  const result=context.mergeTopupUsage({totalBytes:20*1024**3,usedBytes:7*1024**3,remainingBytes:13*1024**3},{transactionId:'TOPUP-1',totalGb:20,usedGb:0,remainingGb:20},{packageCode:'EU20',dataLimitGb:20,unlimited:false},'2026-09-18T12:00:00Z');
+  const result=context.mergeTopupUsage({esimTranNo:'TRAN-BASE',totalBytes:20*1024**3,usedBytes:7*1024**3,remainingBytes:13*1024**3},{transactionId:'TOPUP-1',topUpEsimTranNo:'TRAN-TOPUP',totalGb:20,usedGb:0,remainingGb:20},{packageCode:'EU20',dataLimitGb:20,unlimited:false},'2026-09-18T12:00:00Z');
   assert.equal(result.totalBytes,20*1024**3);
   assert.equal(result.usedBytes,7*1024**3);
   assert.equal(result.remainingBytes,13*1024**3);
   assert.equal(result.usageStale,true);
   assert.equal(result.usageChanged,false);
   assert.equal(result.pendingTopupConfirmation.expectedMinimumTotalBytes,40*1024**3);
+  assert.deepEqual(Array.from(result.usageEsimTranNos),['TRAN-BASE','TRAN-TOPUP']);
+  assert.equal(result.pendingTopupConfirmation.topUpEsimTranNo,'TRAN-TOPUP');
 });
 
 test('top-up response cannot overwrite the last provider-confirmed traffic snapshot', () => {

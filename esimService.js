@@ -342,22 +342,24 @@ function realtimeUsageItems(payload) {
   return [object];
 }
 
-async function queryRealtimeUsage(esimTranNo) {
-  const requested=String(esimTranNo||'').trim();
-  if(!requested) throw new EsimAccessError('An eSIM transaction number is required for real-time traffic.',{code:'ESIM_TRAN_NO_REQUIRED'});
-  const response=await esimAccessRequest('/api/v1/open/esim/usage/query',{esimTranNoList:[requested]});
-  const items=realtimeUsageItems(response);
-  const exact=items.find(item=>String(item?.esimTranNo||'').trim()===requested);
-  // The official endpoint accepts exactly the requested transaction list. Some
-  // reseller responses omit esimTranNo when a single item is requested; that
-  // response is still unambiguous. Never accept a differently identified item.
-  const usage=exact||((items.length===1&&!String(items[0]?.esimTranNo||'').trim())?items[0]:null);
-  if(!usage) throw new EsimAccessError('The real-time usage response did not contain the requested eSIM.',{code:'USAGE_PROFILE_MISMATCH'});
-  // The dedicated usage endpoint is authoritative for consumption. eSIM
-  // Access can return an old `remain` value together with a newer
-  // `dataUsage` value (the console displays the latter as "Real-time"). The
-  // original working implementation therefore used dataUsage first. Do not
-  // let the stale remaining field turn a real counter back into zero.
+function uniqueEsimTranNos(value) {
+  const values=Array.isArray(value)?value:[value];
+  return [...new Set(values.map(item=>String(item||'').trim()).filter(Boolean))].slice(0,10);
+}
+
+function nestedEsimTranNos(value,depth=0,seen=new Set()) {
+  if(!value||typeof value!=='object'||depth>5||seen.has(value))return[];
+  seen.add(value);
+  if(Array.isArray(value))return value.flatMap(item=>nestedEsimTranNos(item,depth+1,seen));
+  const found=[];
+  for(const [key,nested] of Object.entries(value)){
+    if(/^(?:esimTranNo|topUpEsimTranNo)$/i.test(key)&&nested)found.push(nested);
+    if(nested&&typeof nested==='object')found.push(...nestedEsimTranNos(nested,depth+1,seen));
+  }
+  return found;
+}
+
+function realtimeUsageCounter(usage) {
   const objects=trafficObjects(usage);
   const totalBytes=maxBytes(...objects.flatMap(item=>[item.totalData,item.totalVolume,item.dataTotal,item.volume]));
   const standardUsed=maxBytes(...objects.flatMap(item=>[item.dataUsage,item.orderUsage,item.usedVolume,item.usedData,item.usedBytes,item.usage]));
@@ -368,10 +370,31 @@ async function queryRealtimeUsage(esimTranNo) {
   let usedBytes=maxBytes(explicitUsed,derivedUsed),remainingBytes=null,counterSource=derivedUsed!=null&&derivedUsed>Number(explicitUsed??-1)?'remaining':(realtimeUsed!=null&&realtimeUsed>=Number(standardUsed??-1)?'realTime':'dataUsage');
   if(totalBytes!=null&&usedBytes!=null){usedBytes=Math.min(totalBytes,usedBytes);remainingBytes=Math.max(0,totalBytes-usedBytes);}
   const counterUpdatedAt=objects.flatMap(usageUpdateValues).filter(Boolean).sort((a,b)=>(new Date(b).getTime()||0)-(new Date(a).getTime()||0))[0]||null;
-  if(usedBytes==null||totalBytes==null){
+  return{usedBytes,totalBytes,remainingBytes,counterSource,counterUpdatedAt,hasUsageTimestamp:Boolean(counterUpdatedAt),details:usage};
+}
+
+async function queryRealtimeUsage(esimTranNos) {
+  const requested=uniqueEsimTranNos(esimTranNos);
+  if(!requested.length) throw new EsimAccessError('An eSIM transaction number is required for real-time traffic.',{code:'ESIM_TRAN_NO_REQUIRED'});
+  const response=await esimAccessRequest('/api/v1/open/esim/usage/query',{esimTranNoList:requested});
+  const items=realtimeUsageItems(response);
+  const requestedSet=new Set(requested);
+  let matching=items.filter(item=>requestedSet.has(String(item?.esimTranNo||'').trim()));
+  // A response without an identifier is unambiguous only for a single request.
+  if(!matching.length&&requested.length===1&&items.length===1&&!String(items[0]?.esimTranNo||'').trim())matching=items;
+  if(!matching.length) throw new EsimAccessError('The real-time usage response did not contain the requested eSIM.',{code:'USAGE_PROFILE_MISMATCH'});
+  const counters=matching.map(realtimeUsageCounter).filter(item=>item.usedBytes!=null&&item.totalBytes!=null);
+  if(!counters.length){
     throw new EsimAccessError('The real-time usage response did not include complete traffic counters.',{code:'USAGE_VALUES_MISSING'});
   }
-  return{usedBytes,totalBytes,remainingBytes,counterSource,counterUpdatedAt,hasUsageTimestamp:Boolean(counterUpdatedAt),details:usage};
+  // Every esimTranNo represents one issued package. For a top-up the provider
+  // returns a new topUpEsimTranNo, so totals and usage must be added together.
+  const usedBytes=counters.reduce((sum,item)=>sum+item.usedBytes,0);
+  const totalBytes=counters.reduce((sum,item)=>sum+item.totalBytes,0);
+  const remainingBytes=Math.max(0,totalBytes-usedBytes);
+  const counterUpdatedAt=counters.map(item=>item.counterUpdatedAt).filter(Boolean).sort((a,b)=>(new Date(b).getTime()||0)-(new Date(a).getTime()||0))[0]||null;
+  const counterSource=counters.length>1?'aggregate':counters[0].counterSource;
+  return{usedBytes,totalBytes,remainingBytes,counterSource,counterUpdatedAt,hasUsageTimestamp:Boolean(counterUpdatedAt),details:counters.length===1?counters[0].details:{esimUsageList:counters.map(item=>item.details)}};
 }
 
 function trustedProfileShareUrl(profile = {}) {
@@ -655,13 +678,13 @@ async function checkUsage(input) {
     }
   }
 
-  const profileTranNo=String(profile.esimTranNo||requestedTranNo||'').trim();
-  if(profileTranNo){
+  const usageTranNos=uniqueEsimTranNos([requestedTranNo,...(Array.isArray(identifiers.usageEsimTranNos)?identifiers.usageEsimTranNos:[]),...nestedEsimTranNos(profile)]);
+  if(usageTranNos.length){
     try{
-      const realtime=await queryRealtimeUsage(profileTranNo);
+      const realtime=await queryRealtimeUsage(usageTranNos);
       candidates.push({usedBytes:realtime.usedBytes,totalBytes:realtime.totalBytes,details:realtime.details,source:'realtime_usage_api',counterSource:`realtime.${realtime.counterSource}`,counterUpdatedAt:realtime.counterUpdatedAt,hasUsageTimestamp:realtime.hasUsageTimestamp});
     }catch(error){
-      log('realtime_usage_failed_using_fallback',{esimTranNo:mask(profileTranNo),code:error.code,status:error.status,message:error.message});
+      log('realtime_usage_failed_using_fallback',{esimTranNo:mask(usageTranNos[0]),transactionCount:usageTranNos.length,code:error.code,status:error.status,message:error.message});
     }
   }
 
@@ -686,7 +709,7 @@ function usageResult(usedBytes, totalBytes, profile, usageDetails = null, metada
     expiredTime: profile.expiredTime || null,
     activateTime: profile.activateTime || null,
     lastUpdateTime: usageDetails?.lastUpdateTime || usageDetails?.lastDataUsageUpdateTime || profile.lastUpdateTime || null,
-    providerUpdatedAt: usageDetails?.lastDataUsageUpdateTime || usageDetails?.usageUpdateTime || usageDetails?.lastUsageUpdateTime || usageDetails?.lastUpdateTime || usageDetails?.updateTime || null,
+    providerUpdatedAt: metadata.counterUpdatedAt || usageDetails?.lastDataUsageUpdateTime || usageDetails?.usageUpdateTime || usageDetails?.lastUsageUpdateTime || usageDetails?.lastUpdateTime || usageDetails?.updateTime || null,
     ...metadata,
   };
 }
@@ -708,6 +731,7 @@ async function topupEsim({ esimTranNo = '', iccid = '', packageCode, transaction
   const usedBytes = bytes(topup.orderUsage);
   return {
     transactionId: topup.transactionId || null,
+    topUpEsimTranNo: topup.topUpEsimTranNo || null,
     iccid: topup.iccid || iccid || null,
     totalGb: totalBytes == null ? null : bytesToGb(totalBytes),
     usedGb: usedBytes == null ? null : bytesToGb(usedBytes),

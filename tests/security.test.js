@@ -300,7 +300,7 @@ test('usage fallback does not reference webhook-only state', () => {
   assert.doesNotMatch(route, /inboundId|finishExternalEvent\('resend'/);
   assert.match(route, /cachedEsimUsage\(cachedUser\)/);
   assert.match(syncHelper, /profile\.provider==='support-link'/);
-  assert.match(syncHelper, /checkUsage\(\{orderNo:profile\.orderNo,esimTranNo:profile\.esimTranNo,iccid:profile\.iccid\}\)/);
+  assert.match(syncHelper, /checkUsage\(\{orderNo:profile\.orderNo,esimTranNo:profile\.esimTranNo,usageEsimTranNos:profile\.usageEsimTranNos,iccid:profile\.iccid\}\)/);
   assert.match(syncHelper, /freshness\.stale/);
 });
 

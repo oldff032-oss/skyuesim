@@ -153,8 +153,9 @@ function cachedEsimUsage(user,warning='Оператор тимчасово не 
 function mergeTopupUsage(profile,topup,packageInfo={},now=new Date().toISOString()){
   const current=cachedEsimUsage({esim:profile}),addedGb=packageInfo.unlimited?null:Number(packageInfo.dataLimitGb),addedBytes=Number.isFinite(addedGb)&&addedGb>0?Math.round(addedGb*(1024**3)):null;
   const expectedTotalBytes=current.totalBytes!=null&&addedBytes!=null?current.totalBytes+addedBytes:null;
-  const pendingTopupConfirmation={expectedMinimumTotalBytes:expectedTotalBytes,addedBytes,providerTransactionId:topup.transactionId||null,createdAt:now};
-  return{...profile,...(topup.iccid?{iccid:topup.iccid}:{}),...(topup.expiredTime?{expiredTime:topup.expiredTime}:{}),status:'active',esimStatus:'IN_USE',serviceEnded:false,serviceEndedReason:null,lastTopupAt:now,lastTopupPackageCode:packageInfo.packageCode||null,lastUsageSyncAt:now,usageStale:true,usageChanged:false,lastUsageSyncError:'Пакет прийнято. Цифри трафіку не змінюються, доки оператор не поверне новий лічильник.',pendingTopupConfirmation,lastPushAlertThreshold:null};
+  const usageEsimTranNos=[...new Set([...(Array.isArray(profile.usageEsimTranNos)?profile.usageEsimTranNos:[]),profile.esimTranNo,topup.topUpEsimTranNo].map(value=>String(value||'').trim()).filter(Boolean))].slice(-10);
+  const pendingTopupConfirmation={expectedMinimumTotalBytes:expectedTotalBytes,addedBytes,providerTransactionId:topup.transactionId||null,topUpEsimTranNo:topup.topUpEsimTranNo||null,createdAt:now};
+  return{...profile,...(topup.iccid?{iccid:topup.iccid}:{}),...(topup.expiredTime?{expiredTime:topup.expiredTime}:{}),usageEsimTranNos,status:'active',esimStatus:'IN_USE',serviceEnded:false,serviceEndedReason:null,lastTopupAt:now,lastTopupPackageCode:packageInfo.packageCode||null,lastUsageSyncAt:now,usageStale:true,usageChanged:false,lastUsageSyncError:'Пакет прийнято. Цифри трафіку не змінюються, доки оператор не поверне новий лічильник.',pendingTopupConfirmation,lastPushAlertThreshold:null};
 }
 
 function providerCounterTime(usage){return usage?.counterUpdatedAt||usage?.providerUpdatedAt||null;}
@@ -190,7 +191,7 @@ async function syncEsimUsageForUser(email,{force=false}={}){
       return cachedEsimUsage(getUser(email),`Провайдер не підтвердив свіжі дані: ${error.message}`);
     }
   }
-  const usage=await checkUsage({orderNo:profile.orderNo,esimTranNo:profile.esimTranNo,iccid:profile.iccid});
+  const usage=await checkUsage({orderNo:profile.orderNo,esimTranNo:profile.esimTranNo,usageEsimTranNos:profile.usageEsimTranNos,iccid:profile.iccid});
   const freshness=providerUsageFreshness(user,usage);
   if(freshness.stale){
     const syncedAt=usage.syncedAt||new Date().toISOString();
