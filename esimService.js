@@ -270,7 +270,7 @@ function trafficObjects(value,depth=0,seen=new Set()){
   if(Array.isArray(value))return value.flatMap(item=>trafficObjects(item,depth+1,seen));
   const objects=[value];
   for(const [key,nested] of Object.entries(value)){
-    if(nested&&typeof nested==='object'&&/^(?:obj|data|result|detail|details|usage|usageInfo|usageData|usageList|esimUsageList|list)$/i.test(key))objects.push(...trafficObjects(nested,depth+1,seen));
+    if(nested&&typeof nested==='object'&&/^(?:obj|data|result|detail|details|usage|usageInfo|usageData|dataBalance|realtimeBalance|usageList|esimUsageList|list)$/i.test(key))objects.push(...trafficObjects(nested,depth+1,seen));
   }
   return objects;
 }
@@ -292,8 +292,14 @@ function usageFieldSummary(value){
 function reportedUsageValues(item = {}) {
   return [
     item.dataUsage,item.orderUsage,item.usedVolume,item.usedData,item.usedBytes,item.usage,
-    item.realTimeUsage,item.realtimeUsage,item.realTime,item.realtime,
-    item.realTimeData,item.realtimeData,item.realTimeVolume,item.realtimeVolume,
+    item.realTimeUsage,item.realtimeUsage,
+  ];
+}
+
+function reportedRemainingValues(item = {}) {
+  return [
+    item.remain,item.remaining,item.remainVolume,item.remainingVolume,item.remainingData,
+    item.remainingBytes,item.dataRemain,item.dataRemaining,item.realTimeRemaining,item.realtimeRemaining,
   ];
 }
 
@@ -306,22 +312,23 @@ function usageUpdateValues(item = {}) {
 }
 
 function profileUsageCounters(profile = {}) {
+  const objects=trafficObjects(profile);
   const packages=Array.isArray(profile.packageList)?profile.packageList:[];
   const packageTotals=packages.map(item=>firstBytes(item?.totalVolume,item?.totalData,item?.volume)).filter(value=>value!=null);
   const packageUsed=packages.map(item=>firstBytes(...reportedUsageValues(item)));
-  const packageRemaining=packages.map(item=>firstBytes(item?.remain,item?.remaining,item?.remainVolume,item?.remainingVolume,item?.remainingData,item?.remainingBytes,item?.dataRemain));
+  const packageRemaining=packages.map(item=>firstBytes(...reportedRemainingValues(item)));
   const packageTotal=packageTotals.length===packages.length&&packages.length?packageTotals.reduce((sum,value)=>sum+value,0):null;
   const packageUsedTotal=packageUsed.length===packages.length&&packages.length&&packageUsed.every(value=>value!=null)?packageUsed.reduce((sum,value)=>sum+value,0):null;
   const packageRemainingTotal=packageRemaining.length===packages.length&&packages.length&&packageRemaining.every(value=>value!=null)?packageRemaining.reduce((sum,value)=>sum+value,0):null;
-  const totalBytes=maxBytes(profile.totalVolume,profile.totalData,profile.dataTotal,profile.volume,packageTotal);
-  const explicitRemaining=minBytes(profile.remain,profile.remaining,profile.remainVolume,profile.remainingVolume,profile.remainingData,profile.remainingBytes,profile.dataRemain,packageRemainingTotal);
-  const explicitUsed=maxBytes(...reportedUsageValues(profile),packageUsedTotal);
+  const totalBytes=maxBytes(...objects.flatMap(item=>[item.totalVolume,item.totalData,item.dataTotal,item.volume]),packageTotal);
+  const explicitRemaining=minBytes(...objects.flatMap(reportedRemainingValues),packageRemainingTotal);
+  const explicitUsed=maxBytes(...objects.flatMap(reportedUsageValues),packageUsedTotal);
   const derivedUsed=totalBytes!=null&&explicitRemaining!=null?Math.max(0,totalBytes-Math.min(totalBytes,explicitRemaining)):null;
   let usedBytes=maxBytes(explicitUsed,derivedUsed),remainingBytes=explicitRemaining,counterSource='missing';
   // Provider fields do not always refresh together. Use the greatest
   // cumulative consumption confirmed either directly or from total-remain.
   if(totalBytes!=null&&usedBytes!=null){usedBytes=Math.min(totalBytes,usedBytes);remainingBytes=Math.max(0,totalBytes-usedBytes);counterSource=derivedUsed!=null&&derivedUsed>Number(explicitUsed??-1)?(packageRemainingTotal!=null&&explicitRemaining===packageRemainingTotal?'package.remaining':'profile.remaining'):(packageUsedTotal!=null&&explicitUsed===packageUsedTotal?'package.used':'profile.used');}
-  const counterUpdatedAt=usageUpdateValues(profile).find(Boolean)||null;
+  const counterUpdatedAt=objects.flatMap(usageUpdateValues).filter(Boolean).sort((a,b)=>(new Date(b).getTime()||0)-(new Date(a).getTime()||0))[0]||null;
   return{usedBytes,totalBytes,remainingBytes,counterSource,counterUpdatedAt,hasUsageTimestamp:Boolean(counterUpdatedAt)};
 }
 
@@ -354,9 +361,9 @@ async function queryRealtimeUsage(esimTranNo) {
   const objects=trafficObjects(usage);
   const totalBytes=maxBytes(...objects.flatMap(item=>[item.totalData,item.totalVolume,item.dataTotal,item.volume]));
   const standardUsed=maxBytes(...objects.flatMap(item=>[item.dataUsage,item.orderUsage,item.usedVolume,item.usedData,item.usedBytes,item.usage]));
-  const realtimeUsed=maxBytes(...objects.flatMap(item=>[item.realTimeUsage,item.realtimeUsage,item.realTime,item.realtime,item.realTimeData,item.realtimeData,item.realTimeVolume,item.realtimeVolume]));
+  const realtimeUsed=maxBytes(...objects.flatMap(item=>[item.realTimeUsage,item.realtimeUsage]));
   const explicitUsed=maxBytes(standardUsed,realtimeUsed);
-  const explicitRemaining=minBytes(...objects.flatMap(item=>[item.remain,item.remaining,item.remainVolume,item.remainingVolume,item.remainingData,item.remainingBytes,item.dataRemain]));
+  const explicitRemaining=minBytes(...objects.flatMap(reportedRemainingValues));
   const derivedUsed=totalBytes!=null&&explicitRemaining!=null?Math.max(0,totalBytes-Math.min(totalBytes,explicitRemaining)):null;
   let usedBytes=maxBytes(explicitUsed,derivedUsed),remainingBytes=null,counterSource=derivedUsed!=null&&derivedUsed>Number(explicitUsed??-1)?'remaining':(realtimeUsed!=null&&realtimeUsed>=Number(standardUsed??-1)?'realTime':'dataUsage');
   if(totalBytes!=null&&usedBytes!=null){usedBytes=Math.min(totalBytes,usedBytes);remainingBytes=Math.max(0,totalBytes-usedBytes);}
@@ -773,7 +780,7 @@ async function checkSupportLinkUsage(supportInstallUrl) {
   const objects=trafficObjects(payload.obj);
   const totalBytes=maxBytes(...objects.flatMap(item=>[item.totalVolume,item.totalData,item.dataTotal,item.volume]));
   const explicitUsed=maxBytes(...objects.flatMap(reportedUsageValues));
-  const explicitRemaining=minBytes(...objects.flatMap(item=>[item.remain,item.remaining,item.remainVolume,item.remainingVolume,item.remainingData,item.remainingBytes,item.dataRemain]));
+  const explicitRemaining=minBytes(...objects.flatMap(reportedRemainingValues));
   const derivedUsed=totalBytes!=null&&explicitRemaining!=null?Math.max(0,totalBytes-Math.min(totalBytes,explicitRemaining)):null;
   const usedBytes=maxBytes(explicitUsed,derivedUsed);
   if (totalBytes == null || usedBytes == null) throw new EsimAccessError('Support usage response did not include traffic values.', { code:'SUPPORT_USAGE_VALUES_MISSING' });

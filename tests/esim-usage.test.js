@@ -70,21 +70,21 @@ test('dedicated real-time dataUsage overrides conflicting stale profile and rema
   assert.equal(usage.providerUpdatedAt,'2026-09-21T12:59:41Z');
 });
 
-test('nested Real-time counter overrides a stale full Data left value', async t => {
+test('nested real-time remaining balance overrides a stale full Data left value', async t => {
   const originalFetch=global.fetch,calls=[];
   t.after(()=>{global.fetch=originalFetch});
-  const total=20*1024**3,used=4*1024**3+13*1024**2;
+  const total=20*1024**3,remaining=4*1024**3+13*1024**2,used=total-remaining;
   global.fetch=async (url,options={})=>{
     calls.push({url:String(url),body:JSON.parse(options.body||'{}')});
     if(calls.length===1)return response({success:true,obj:{esimList:[{orderNo:'ORDER-REALTIME-NESTED',esimTranNo:'TRAN-REALTIME-NESTED',iccid:'8943000000000000015',orderUsage:0,totalVolume:total,esimStatus:'IN_USE'}]}});
-    return response({success:true,obj:{esimTranNo:'TRAN-REALTIME-NESTED',usageInfo:{totalData:'20 GB',remain:'20 GB',realTime:'4 GB 13 MB',realTimeUpdateTime:'2026-09-27T22:36:44Z'}}});
+    return response({success:true,obj:{esimTranNo:'TRAN-REALTIME-NESTED',usageInfo:{totalData:'20 GB',remain:'20 GB',dataBalance:{dataRemaining:'4 GB 13 MB'},realTimeUpdateTime:'2026-09-27T22:36:44Z'}}});
   };
   const usage=await service.checkUsage({orderNo:'ORDER-REALTIME-NESTED',esimTranNo:'TRAN-REALTIME-NESTED',iccid:'8943000000000000015'});
   assert.equal(usage.usedBytes,used);
   assert.equal(usage.totalBytes,total);
-  assert.equal(usage.totalBytes-usage.usedBytes,total-used);
+  assert.equal(usage.totalBytes-usage.usedBytes,remaining);
   assert.equal(usage.source,'realtime_usage_api');
-  assert.equal(usage.counterSource,'realtime.realTime');
+  assert.equal(usage.counterSource,'realtime.remaining');
   assert.equal(usage.counterUpdatedAt,'2026-09-27T22:36:44Z');
 });
 
