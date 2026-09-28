@@ -77,23 +77,16 @@ test('an inventory-assigned monthly eSIM cannot inherit an unrelated old travel 
   assert.equal(deck.active.destination, null);
 });
 
-test('approved visual system and functional gift center are present on mobile home', () => {
-  const dashboard = read('dashboard.html');
-  assert.match(dashboard, />Signal eSIM</);
-  assert.match(dashboard, /signal-card-scenes-v1\.png/);
+test('Signal Orbit visual system keeps real provider data on mobile home', () => {
+  const dashboard = read('dashboard.html'), theme=read('signal-v5.css');
+  assert.match(dashboard, /signal-v5 client-v5/);
   assert.match(dashboard, /\/api\/account\/home-deck/);
-  assert.match(dashboard, /href="signal-club\.html" aria-label="Винагороди"/);
-  assert.match(dashboard, /hero-used/);
   assert.match(dashboard, /remainingPercent/);
   assert.match(dashboard, /networkLabel/);
-  assert.match(dashboard, /\.esim-hero\{min-height:452px/);
-  assert.doesNotMatch(dashboard, /class="quick-row"/);
-  assert.match(dashboard, /href="app-guide\.html"/);
-  assert.doesNotMatch(dashboard, /quick-new[^>]*[\s\S]{0,120}<img/);
-  const bottomNavigation=dashboard.match(/<nav class="bottomnav"[\s\S]*?<\/nav>/)?.[0]||'';
-  assert.doesNotMatch(bottomNavigation, /<b>Витрати<\/b>|<b>Моя eSIM<\/b>/);
-  assert.doesNotMatch(dashboard, /Обери свій рівень|Мої картки|tier-grid|owned-strip/);
-  assert.match(dashboard, /overflow-x:hidden/);
+  assert.match(dashboard, /main-usage/);
+  for (const action of ['Купити','Витрати','Потрібна']) assert.match(dashboard, new RegExp(action));
+  assert.match(theme, /signal-earth-v1\.png/);
+  assert.match(theme, /\.o-bottomnav/);
 });
 
 test('tier links preselect the requested Stripe subscription', () => {
@@ -108,7 +101,7 @@ test('premium atlas is shipped in the offline shell and version is coherent', ()
   const pwa = read('pwa.js');
   const operations = read('operationsStore.js');
   assert.match(worker, /'\/signal-card-scenes-v1\.png'/);
-  assert.match(worker, /signal-shell-v93-client-ui/);
+  assert.match(worker, /signal-shell-v93-orbit/);
   assert.match(pwa, /SIGNAL_FRONTEND_VERSION='3\.0\.0'/);
   assert.match(operations, /frontend:'3\.0\.0', backend:'3\.0\.0', serviceWorker:'v93'/);
   assert.ok(fs.statSync(path.join(root, 'signal-card-scenes-v1.png')).size > 100000);

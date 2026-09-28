@@ -50,12 +50,11 @@ test('new customer experiences are authenticated and cached as one mobile shell'
   assert.match(css,/overflow-x:hidden/);
 });
 
-test('home keeps rewards and removes duplicate quick navigation buttons',()=>{
+test('home keeps rewards and quick actions without secondary operational cards',()=>{
   const dashboard=read('dashboard.html');
   assert.match(dashboard,/href="signal-club\.html"/);
   assert.match(dashboard,/class="reward-card"/);
-  assert.doesNotMatch(dashboard,/class="quick-row"/);
-  assert.match(dashboard,/href="app-guide\.html"/);
+  assert.match(dashboard,/class="quick-row"/);
   assert.doesNotMatch(dashboard,/space-launch|topup-promo|trip-promo|smart-card|Стан підключення|Поповнити звичайну SIM|Запланувати подорож/);
 });
 

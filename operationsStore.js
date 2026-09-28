@@ -20,12 +20,7 @@ const defaults = () => ({
   },
   featureRules: { disabledCountries:[], disabledPackages:[], paymentMethods:{stripeCard:true} },
   providerBalance: { amount:null, currency:'USD', averageOrderCost:null, updatedAt:null, source:'not_configured' },
-  versionInfo: {
-    frontend:'3.0.0', backend:'3.0.0', serviceWorker:'v93', cache:'signal-shell-v93-client-ui', deployedAt:null,
-    changelog:['Повністю новий єдиний дизайн усіх клієнтських екранів','Однакова шапка, навігація та кнопка назад у всьому застосунку','Червоний індикатор дзвіночка з’являється лише за наявності непрочитаних повідомлень','Повна двомовна інструкція користувача, доступна офлайн','Захищений PIN і графічний ключ із блокуванням після невдалих спроб','Оновлений темний інтерфейс для телефона, планшета та комп’ютера'],
-    criticalRefreshToken:null,
-    criticalAssets:['/dashboard.html','/plans.html','/esim-management.html','/signal-card-scenes-v1.png','/profile.html','/notifications.html','/activity.html','/savings.html','/family-center.html','/family-trip.html','/signal-universe.html','/support.html','/new-ticket.html','/ticket.html','/app-guide.html','/i18n.js','/style.css','/experience.css','/experience.js','/client-ui.css','/client-ui.js','/wallet-pass.html','/pwa.js','/sw.js']
-  },
+  versionInfo: { frontend:'3.0.0', backend:'3.0.0', serviceWorker:'v93', cache:'signal-shell-v93-orbit', deployedAt:null, changelog:['Повністю новий космічний дизайн Signal Orbit','Нові екрани старту, входу та реєстрації українською й англійською','Головна картка з реальним залишком, використаним трафіком і часом оператора','Круговий лічильник трафіку та оновлення в один дотик','Продовження пакета без нового QR-коду','Новий центр безпеки з PIN, Face ID і графічним ключем','Оновлений операційний центр адміністратора','Новий кеш v93 видаляє попередній стиль після оновлення'],criticalRefreshToken:null,criticalAssets:['/index.html','/welcome.html','/login.html','/register-email.html','/verify-code.html','/account-created.html','/dashboard.html','/usage.html','/esim-topup.html','/security.html','/admin-dashboard.html','/signal-v5.css','/signal-earth-v1.png','/signal-premium-logo.png','/i18n.js','/style.css','/experience.css','/experience.js','/pwa.js','/sw.js'] },
   clientVersions: {},
   dailyReports: [], reportSettings: { enabled:true, hour:8, lastSentDate:null },
 });

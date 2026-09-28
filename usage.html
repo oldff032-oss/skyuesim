@@ -6,7 +6,7 @@
 <title>Витрати — Сигнал</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=Space+Mono&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="style.css"><link rel="stylesheet" href="signal-v5.css">
 <script src="pwa.js"></script>
 <link rel="manifest" href="/manifest.json">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
@@ -22,17 +22,17 @@
 @keyframes usageGrow{from{transform:scaleX(0)}to{transform:scaleX(1)}}@keyframes usageShine{0%,35%{transform:translateX(-110%)}70%,100%{transform:translateX(110%)}}@keyframes barRise{from{transform:scaleY(0);opacity:.25}to{transform:scaleY(1);opacity:1}}
 </style>
 </head>
-<body class="has-bottomnav">
-  <div class="wrap">
-    <div class="brand"><div class="mark">S</div><span>Signal</span></div>
-    <h1 style="margin-top:20px;">Витрати трафіку</h1>
+<body class="signal-v5 client-v5 usage-v5 has-bottomnav">
+  <div class="o-shell">
+    <div class="o-brand"><img src="signal-premium-logo.png" alt=""><span><strong>Signal</strong><small>eSIM для подорожей</small></span></div>
+    <h1 style="margin:28px 0 4px;font:700 34px 'Space Grotesk'">Витрати трафіку</h1>
     <p class="lead">Скільки даних ти використав(ла) цього циклу</p>
 
     <div id="loading" class="shimmer" style="height:160px; margin-top:20px;"></div>
     <div id="content" style="display:none;"></div>
   </div>
 
-  <nav class="bottomnav" aria-label="Головна навігація"><a href="dashboard.html" aria-label="Головна" title="Головна" data-nav="dashboard"><span class="nav-icon"><svg class="nav-art nav-vector" viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 10.5 12 3l8.5 7.5"/><path d="M5.5 9.3V21h13V9.3M9.5 21v-6h5v6"/></svg></span></a><a href="plans.html" aria-label="Тарифи" title="Тарифи" data-nav="plans"><span class="nav-icon"><svg class="nav-art nav-vector" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3.5 12h17M12 3c2.5 2.6 3.8 5.6 3.8 9S14.5 18.4 12 21M12 3C9.5 5.6 8.2 8.6 8.2 12s1.3 6.4 3.8 9"/></svg></span></a><a href="usage.html" class="active" aria-label="Витрати" title="Витрати" data-nav="usage"><span class="nav-icon"><svg class="nav-art nav-vector" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V5M16 20v-8M22 20V3M2 20h21"/></svg></span></a><a href="profile.html" aria-label="Профіль" title="Профіль" data-nav="profile"><span class="nav-icon"><svg class="nav-art nav-vector" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="7.5" r="3.5"/><path d="M5 21c.4-4.6 2.8-7 7-7s6.6 2.4 7 7"/></svg></span></a></nav>
+  <nav class="o-bottomnav"><a href="dashboard.html"><svg viewBox="0 0 24 24"><path d="M3.5 10.5 12 3l8.5 7.5M5.5 9.3V21h13V9.3M9.5 21v-6h5v6"/></svg><span>Головна</span></a><a href="plans.html"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3.5 12h17M12 3c2.5 2.6 3.8 5.6 3.8 9S14.5 18.4 12 21M12 3C9.5 5.6 8.2 8.6 8.2 12s1.3 6.4 3.8 9"/></svg><span>Пакети</span></a><a href="usage.html" class="active"><svg viewBox="0 0 24 24"><path d="M4 20V10M10 20V5M16 20v-8M22 20V3M2 20h21"/></svg><span>Витрати</span></a><a href="profile.html"><svg viewBox="0 0 24 24"><circle cx="12" cy="7.5" r="3.5"/><path d="M5 21c.4-4.6 2.8-7 7-7s6.6 2.4 7 7"/></svg><span>Профіль</span></a></nav>
 
   <script src="config.js"></script>
   <script>
@@ -181,6 +181,8 @@
         content.innerHTML = `
           ${endedHtml}
           ${trafficAlertHtml || (isLow ? `<div class="card" style="border-color:var(--danger);"><p style="color:var(--danger); font-size:13px; display:flex; align-items:center; gap:8px;">⚠️ Використано понад 80% трафіку тарифу</p></div>` : '')}
+
+          <div class="usage-orbit" style="--used:${pct}"><div><strong>${usageKnown&&remainingBytes!=null?formatBytes(remainingBytes):'—'}</strong><span>залишилось</span><p style="margin:14px 0 0;color:#fff">${usageKnown?`${formatBytes(usedBytes)} використано з ${formatBytes(totalBytes)}`:'Лічильник оновлюється'}</p></div></div>
 
           <div class="card">
             <div class="usage-top"><span>Використано</span><b>${usageKnown?`${formatBytes(usedBytes)} / ${formatBytes(totalBytes)}`:'—'}</b></div>

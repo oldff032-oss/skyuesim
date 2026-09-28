@@ -1,14 +1,3 @@
-const SIGNAL_CLIENT_UI_VERSION='v4';
-function signalLoadClientUi(){
-  if(!document.querySelector('link[data-signal-client-ui]')){
-    const style=document.createElement('link');style.rel='stylesheet';style.href=`/client-ui.css?${SIGNAL_CLIENT_UI_VERSION}`;style.dataset.signalClientUi='true';document.head.appendChild(style);
-  }
-  if(!document.querySelector('script[data-signal-client-ui]')){
-    const script=document.createElement('script');script.src=`/client-ui.js?${SIGNAL_CLIENT_UI_VERSION}`;script.dataset.signalClientUi='true';document.body.appendChild(script);
-  }
-}
-document.readyState==='loading'?document.addEventListener('DOMContentLoaded',signalLoadClientUi,{once:true}):signalLoadClientUi();
-
 // Register from every entry page so a fresh "Add to Home Screen" install has
 // a service worker even when it starts directly on dashboard.html.
 if ('serviceWorker' in navigator) {
@@ -49,9 +38,10 @@ function signalActiveNavPage(current){if(signalNavItems[current])return current;
 function enhanceSignalNavigation(){
   const current=location.pathname.split('/').pop()||'index.html',english=localStorage.getItem('signal_language')==='en',hasSession=Boolean(localStorage.getItem('signal_session_token')),isCustomerPage=hasSession&&!signalNoBottomNavPages.has(current)&&!current.startsWith('admin-');
   document.querySelectorAll('.xp-nav').forEach(nav=>nav.remove());
-  let nav=document.querySelector('.bottomnav');
+  let nav=document.querySelector('.bottomnav,.o-bottomnav');
   if(isCustomerPage&&!nav){document.body?.insertAdjacentHTML('beforeend',signalBottomNavMarkup());nav=document.querySelector('.bottomnav');}
   document.body?.classList.toggle('has-bottomnav',Boolean(isCustomerPage&&nav));
+  if(nav?.classList.contains('o-bottomnav'))return;
   const activePage=signalActiveNavPage(current);
   nav?.querySelectorAll('a').forEach(link=>{const page=(link.getAttribute('href')||'').split(/[?#]/)[0].split('/').pop(),item=signalNavItems[page];if(!item)return;const label=english?item.labelEn:item.label;link.classList.toggle('active',page===activePage);link.dataset.nav=page.replace('.html','');link.setAttribute('aria-label',label);link.setAttribute('title',label);link.innerHTML=`<span class="nav-icon" aria-hidden="true">${item.icon}</span><span class="nav-label" data-no-auto-translate>${label}</span>`;});
   const dashboardLogo=document.querySelector('.logo-orbit');if(dashboardLogo&&!dashboardLogo.querySelector('img'))dashboardLogo.innerHTML='<img src="signal-premium-logo.png" alt="Signal">';
@@ -123,7 +113,7 @@ async function signalConsumeMaintenancePreviewCode(){
   url.searchParams.delete('maintenance_preview');history.replaceState(null,'',`${url.pathname}${url.search}${url.hash}`);
   try{const response=await signalOriginalFetch(`${API_URL}/api/maintenance-preview/exchange`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code}),cache:'no-store'}),data=await response.json();if(!response.ok)throw Error(data.error||'Preview failed');sessionStorage.setItem('signal_maintenance_preview_token',data.previewToken);sessionStorage.setItem('signal_maintenance_preview_expires',data.expiresAt);location.replace(url.href);return true;}catch{return false;}
 }
-const SIGNAL_FRONTEND_VERSION='3.0.0',SIGNAL_SW_VERSION='v93',SIGNAL_CACHE_VERSION='signal-shell-v93-client-ui';
+const SIGNAL_FRONTEND_VERSION='3.0.0',SIGNAL_SW_VERSION='v93',SIGNAL_CACHE_VERSION='signal-shell-v93-orbit';
 window.SIGNAL_APP_VERSION=SIGNAL_FRONTEND_VERSION;
 window.addEventListener('load',async()=>{
   if(typeof API_URL==='undefined')return;

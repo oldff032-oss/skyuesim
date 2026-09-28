@@ -7,6 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="signal-v5.css">
 <link rel="manifest" href="/manifest.json">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <meta name="theme-color" content="#05060d">
@@ -16,23 +17,17 @@
 <meta name="apple-mobile-web-app-title" content="Сигнал">
 <script src="pwa.js"></script>
 </head>
-<body>
-  <div class="wrap" style="justify-content:center; align-items:center; text-align:center;">
-    <div class="ring-wrap">
-      <svg><defs><linearGradient id="ringGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#22D3EE"/><stop offset="100%" stop-color="#34E4B8"/></linearGradient></defs>
-        <circle class="ring-track" cx="85" cy="85" r="78"></circle>
-        <circle class="ring-fill" cx="85" cy="85" r="78" stroke-dasharray="490" stroke-dashoffset="0"></circle>
-      </svg>
-      <div class="ring-center pulse check-draw">✅</div>
-    </div>
-
-    <h1 data-i18n-uk="Акаунт готовий" data-i18n-en="Account ready" style="margin-top:24px; font-size:24px;">Акаунт <em>готовий</em></h1>
-    <p class="lead" data-i18n-uk="Усе готово. Тепер обери пакет і підключай інтернет у подорожі." data-i18n-en="You're all set. Choose a plan and connect while travelling." style="max-width:300px; margin:10px auto 18px;">Усе готово. Тепер обери пакет і підключай інтернет у подорожі.</p>
+<body class="signal-v5 created-v5">
+  <div class="o-shell">
+    <div class="o-brand" style="align-self:flex-start"><img src="signal-premium-logo.png" alt=""><span><strong>Signal</strong><small>eSIM для подорожей</small></span></div>
+    <div class="o-stepper" style="width:100%" aria-label="Крок 4 з 4"><span class="o-step done" data-step="1">Мова</span><span class="o-step done" data-step="2">Акаунт</span><span class="o-step done" data-step="3">Підтвердження</span><span class="o-step active" data-step="4">Готово</span></div>
+    <div class="done-orb">✓</div>
+    <h1 data-i18n-uk="Ваш профіль готовий" data-i18n-en="Your profile is ready" style="font:700 32px 'Space Grotesk'">Ваш профіль готовий</h1>
+    <p class="lead" data-i18n-uk="Тепер ви можете підключати eSIM і залишатися на зв’язку в будь-якій точці світу." data-i18n-en="Now you can connect an eSIM and stay online anywhere in the world." style="max-width:360px">Тепер ви можете підключати eSIM і залишатися на зв’язку в будь-якій точці світу.</p>
     <div id="referralNotice" class="glass" style="display:none;max-width:320px;padding:14px;margin-bottom:18px;font-size:13px;line-height:1.5;"></div>
 
-    <div style="width:100%; max-width:320px;">
-      <a class="btn" href="device-check.html" data-i18n-uk="Почати" data-i18n-en="Get started">Почати</a>
-    </div>
+    <div class="finish-list"><a class="o-card" href="profile.html"><i>◉</i><span><b>Додати фото</b><small>Це необов’язково — можна зробити пізніше.</small></span>›</a><a class="o-card" href="security.html"><i>♙</i><span><b>Налаштувати захист</b><small>PIN, Face ID або графічний ключ.</small></span>›</a></div>
+    <a class="o-btn" href="device-check.html" data-i18n-uk="Почати подорож" data-i18n-en="Start your journey">Почати подорож　→</a>
   </div>
   <script src="config.js"></script>
   <script>

@@ -13,7 +13,7 @@ test('active eSIM top-ups are authenticated, server-priced, and fulfilled after 
   assert.match(server, /type:'TOPUP'/);
   assert.match(server, /changeMode:'topup_existing'/);
   assert.match(server, /await topupEsim\(\{esimTranNo:current\.esim\.esimTranNo,iccid:current\.esim\.iccid,packageCode/);
-  assert.match(read('esim-topup.html'), /Новий QR-код не потрібний/);
+  assert.match(read('esim-topup.html'), /новий QR-код не потрібний/i);
 });
 
 test('family eSIM sharing stores only a token hash and supports revoke and install acknowledgement', () => {
@@ -55,7 +55,7 @@ test('global update assets use one coherent cache and app version', () => {
   const worker = read('sw.js');
   const pwa = read('pwa.js');
   for (const page of ['/travel-assistant.html','/esim-topup.html','/family-share.html','/notifications.html','/activity.html','/savings.html','/family-center.html']) assert.match(worker, new RegExp(page.replace('.', '\\.')));
-  assert.match(worker, /signal-shell-v93-client-ui/);
+  assert.match(worker, /signal-shell-v93-orbit/);
   assert.match(worker, /neverCache[^\n]+admin-common\.js/);
   assert.match(pwa, /SIGNAL_FRONTEND_VERSION='3\.0\.0'/);
   assert.match(pwa, /SIGNAL_SW_VERSION='v93'/);

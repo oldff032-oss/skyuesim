@@ -229,7 +229,7 @@ test('maintenance and security modes enforce a server-side Super Admin lockdown'
 test('service worker bypasses stale cache for maintenance and localization assets', () => {
   const worker=read('sw.js');
   const support=read('support.html');
-  assert.match(worker, /signal-shell-v93-client-ui/);
+  assert.match(worker, /signal-shell-v93-orbit/);
   assert.match(worker, /fetch\(event\.request, \{ cache:'no-store' \}\)/);
   assert.match(worker, /'\/i18n\.js'/);
   assert.match(worker, /'\/style\.css'/);
@@ -403,8 +403,8 @@ test('bottom navigation always identifies usage and charts stay visible without 
   assert.doesNotMatch(css, /navBreathe[\s\S]{0,80}infinite/);
   assert.match(headers, /\/pwa\.js[\s\S]*Cache-Control: no-store/);
   for(const page of ['dashboard.html','plans.html','usage.html','profile.html']){
-    const html=read(page),nav=html.match(/<nav class="bottomnav"[\s\S]*?<\/nav>/)?.[0]||'';
-    assert.match(nav, /<svg class="nav-art nav-vector"/);
+    const html=read(page),nav=html.match(/<nav class="(?:bottomnav|o-bottomnav)"[\s\S]*?<\/nav>/)?.[0]||'';
+    assert.match(nav, /<svg(?: class="nav-art nav-vector")? viewBox=/);
     assert.doesNotMatch(nav, /<img class="nav-art"/);
     assert.doesNotMatch(nav, />Моя eSIM<\/a>/);
     assert.doesNotMatch(nav, />Головна<\/a>/);

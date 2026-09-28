@@ -7,6 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="signal-v5.css">
 <link rel="manifest" href="/manifest.json">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <meta name="theme-color" content="#05060d">
@@ -16,10 +17,10 @@
 <meta name="apple-mobile-web-app-title" content="Сигнал">
 <script src="pwa.js"></script>
 </head>
-<body>
-  <div class="wrap">
-    <div class="brand"><div class="mark">📶</div><span>Сигнал</span></div>
-    <div class="signal-step-progress" aria-label="Крок 3 з 4"><i class="done"></i><i class="done"></i><i class="active"></i><i></i></div>
+<body class="signal-v5 verify-v5">
+  <div class="o-shell">
+    <div class="o-brand"><img src="signal-premium-logo.png" alt=""><span><strong>Signal</strong><small>eSIM для подорожей</small></span></div>
+    <div class="o-stepper" aria-label="Крок 3 з 4"><span class="o-step done" data-step="1">Мова</span><span class="o-step done" data-step="2">Акаунт</span><span class="o-step active" data-step="3">Підтвердження</span><span class="o-step" data-step="4">Готово</span></div>
 
     <h1 data-i18n-uk="Підтверди email" data-i18n-en="Verify your email">Підтверди email</h1>
     <p class="lead"><span data-i18n-uk="Ми надіслали 6-значний код на" data-i18n-en="We sent a 6-digit code to">Ми надіслали 6-значний код на</span> <b id="emailShown" style="color:var(--text);"></b></p>
@@ -33,6 +34,8 @@
       <input class="otp-cell" maxlength="1" inputmode="numeric" />
     </div>
     <div class="err-text" id="err" style="display:none; justify-content:center;"></div>
+
+    <button class="o-btn" type="button" onclick="checkComplete()" style="margin-top:28px">Продовжити　→</button>
 
     <p class="muted" style="text-align:center; margin-top:22px;" id="resendWrap">
       <span data-i18n-uk="Не прийшов код?" data-i18n-en="Didn't get a code?">Не прийшов код?</span> <a href="#" id="resendLink" data-i18n-uk="Надіслати ще раз" data-i18n-en="Send again" style="color:var(--cyan); text-decoration:none;">Надіслати ще раз</a>
