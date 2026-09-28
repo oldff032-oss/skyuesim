@@ -3,9 +3,10 @@
 // Кешує тільки статичну "оболонку" — самі дані (підписка, тікети) завжди
 // тягнуться наживо з бекенду, ніколи не кешуються.
 
-const CACHE_NAME = 'signal-shell-v92-security-foundation';
+const CACHE_NAME = 'signal-shell-v93-client-ui';
 const SHELL_FILES = [
   '/dashboard.html',
+  '/app-guide.html',
   '/profile.html',
   '/security.html',
   '/notifications.html',
@@ -36,6 +37,8 @@ const SHELL_FILES = [
   '/help.html',
   '/style.css',
   '/experience.css',
+  '/client-ui.css',
+  '/client-ui.js',
   '/experience.js',
   '/vendor/heic-worker-1.5.2.js',
   '/vendor/libheif-1.22.2.js',
@@ -66,7 +69,7 @@ self.addEventListener('activate', (event) => {
   );
   self.clients.claim();
 });
-self.addEventListener('message',event=>{if(event.data?.type!=='REFRESH_CRITICAL')return;const allowed=new Set(['/i18n.js','/style.css','/experience.css','/experience.js','/pwa.js','/signal-pattern.js','/sw.js','/config.js','/admin-common.js']),assets=(event.data.assets||[]).filter(item=>allowed.has(item));event.waitUntil(caches.open(CACHE_NAME).then(cache=>Promise.all(assets.map(path=>cache.delete(path)))));});
+self.addEventListener('message',event=>{if(event.data?.type!=='REFRESH_CRITICAL')return;const allowed=new Set(['/i18n.js','/style.css','/experience.css','/experience.js','/client-ui.css','/client-ui.js','/pwa.js','/signal-pattern.js','/sw.js','/config.js','/admin-common.js']),assets=(event.data.assets||[]).filter(item=>allowed.has(item));event.waitUntil(caches.open(CACHE_NAME).then(cache=>Promise.all(assets.map(path=>cache.delete(path)))));});
 
 self.addEventListener('fetch', (event) => {
   // Ніколи не кешуємо запити до API — там завжди мають бути свіжі дані
@@ -75,7 +78,7 @@ self.addEventListener('fetch', (event) => {
   // HTML and critical scripts are network-first so a newly deployed auth,
   // push or payment fix is not hidden behind an old PWA cache.
   const url = new URL(event.request.url);
-  const neverCache = ['/pwa.js','/signal-pattern.js','/config.js','/sw.js','/i18n.js','/style.css','/experience.css','/experience.js','/admin-common.js'].includes(url.pathname);
+  const neverCache = ['/pwa.js','/signal-pattern.js','/config.js','/sw.js','/i18n.js','/style.css','/experience.css','/experience.js','/client-ui.css','/client-ui.js','/admin-common.js'].includes(url.pathname);
   if (neverCache) {
     event.respondWith(fetch(event.request, { cache:'no-store' }).then(response=>{
       const copy=response.clone();caches.open(CACHE_NAME).then(cache=>cache.put(event.request,copy));return response;

@@ -23,8 +23,33 @@ test('home has one compact header, a hidden zero badge and an in-app guide',()=>
   assert.match(dashboard,/function setNotificationBadge\(unread\)/);
   assert.match(dashboard,/setInterval\(refreshNotifications,60000\)/);
   assert.match(dashboard,/Як користуватися Signal eSIM/);
-  assert.match(dashboard,/Сповіщення підключаються автоматично/);
-  assert.match(dashboard,/Діагностика підключення/);
+  assert.match(dashboard,/Сповіщення працюють автоматично/);
+  assert.match(dashboard,/href="app-guide\.html"/);
+  assert.match(dashboard,/signal_full_guide_seen/);
+  assert.doesNotMatch(dashboard,/class="quick-row"/);
+});
+
+test('full customer guide is bilingual, mobile friendly and available offline',()=>{
+  const page=read('app-guide.html'),worker=read('sw.js');
+  assert.match(page,/viewport-fit=cover/);
+  assert.match(page,/const english=localStorage\.getItem\('signal_language'\)==='en'/);
+  assert.match(page,/Оператор оновлює лічильник не миттєво/);
+  assert.match(page,/Without a new QR/);
+  assert.match(page,/Після трьох неправильних спроб/);
+  assert.match(worker,/\/app-guide\.html/);
+});
+
+test('every signed-in customer screen receives the shared v4 interface',()=>{
+  const pwa=read('pwa.js'),ui=read('client-ui.js'),css=read('client-ui.css'),worker=read('sw.js');
+  assert.match(pwa,/client-ui\.css/);
+  assert.match(pwa,/client-ui\.js/);
+  assert.match(ui,/signal-v4-app/);
+  assert.match(ui,/api\/account\/notifications/);
+  assert.match(ui,/badge\.hidden = unread === 0/);
+  assert.match(css,/\.signal-v4-bar/);
+  assert.match(css,/\.signal-v4-app \.bottomnav/);
+  assert.match(worker,/'\/client-ui\.css'/);
+  assert.match(worker,/'\/client-ui\.js'/);
 });
 
 test('customer pages receive one shared bottom navigation',()=>{

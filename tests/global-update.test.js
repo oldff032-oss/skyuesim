@@ -55,10 +55,10 @@ test('global update assets use one coherent cache and app version', () => {
   const worker = read('sw.js');
   const pwa = read('pwa.js');
   for (const page of ['/travel-assistant.html','/esim-topup.html','/family-share.html','/notifications.html','/activity.html','/savings.html','/family-center.html']) assert.match(worker, new RegExp(page.replace('.', '\\.')));
-  assert.match(worker, /signal-shell-v92-security-foundation/);
+  assert.match(worker, /signal-shell-v93-client-ui/);
   assert.match(worker, /neverCache[^\n]+admin-common\.js/);
-  assert.match(pwa, /SIGNAL_FRONTEND_VERSION='2\.9\.0'/);
-  assert.match(pwa, /SIGNAL_SW_VERSION='v92'/);
+  assert.match(pwa, /SIGNAL_FRONTEND_VERSION='3\.0\.0'/);
+  assert.match(pwa, /SIGNAL_SW_VERSION='v93'/);
 });
 
 test('customer pages render immediately and admin navigation stays compact', () => {

@@ -20,7 +20,12 @@ const defaults = () => ({
   },
   featureRules: { disabledCountries:[], disabledPackages:[], paymentMethods:{stripeCard:true} },
   providerBalance: { amount:null, currency:'USD', averageOrderCost:null, updatedAt:null, source:'not_configured' },
-  versionInfo: { frontend:'2.9.0', backend:'2.9.0', serviceWorker:'v91', cache:'signal-shell-v91-support-studio', deployedAt:null, changelog:['Новий мобільний центр підтримки без білих системних полів','До 5 фото або PDF в одному зверненні з прев’ю та видаленням перед відправленням','Повний текст технічних робіт до 5000 символів із зручним читанням і прокруткою на телефоні','Миттєве відображення сторінок без порожнього екрана під час перевірки технічних робіт','Компактне меню адмін-панелі без повторів із логічними групами операцій і системи','Стабільні мобільні таблиці, довгі адреси та технічні ідентифікатори','Нова адмін-панель керування всіма eSIM і складом невстановлених профілів','Безпечне призначення доступної eSIM іншому користувачу з перевіркою провайдера','Призупинення, відновлення, скасування та остаточне відкликання eSIM захищені 2FA','Використаний код активації більше не пропонується для повторного встановлення'],criticalRefreshToken:null,criticalAssets:['/dashboard.html','/plans.html','/esim-management.html','/signal-card-scenes-v1.png','/profile.html','/notifications.html','/activity.html','/savings.html','/family-center.html','/family-trip.html','/signal-universe.html','/support.html','/new-ticket.html','/ticket.html','/i18n.js','/style.css','/experience.css','/experience.js','/wallet-pass.html','/pwa.js','/sw.js'] },
+  versionInfo: {
+    frontend:'3.0.0', backend:'3.0.0', serviceWorker:'v93', cache:'signal-shell-v93-client-ui', deployedAt:null,
+    changelog:['Повністю новий єдиний дизайн усіх клієнтських екранів','Однакова шапка, навігація та кнопка назад у всьому застосунку','Червоний індикатор дзвіночка з’являється лише за наявності непрочитаних повідомлень','Повна двомовна інструкція користувача, доступна офлайн','Захищений PIN і графічний ключ із блокуванням після невдалих спроб','Оновлений темний інтерфейс для телефона, планшета та комп’ютера'],
+    criticalRefreshToken:null,
+    criticalAssets:['/dashboard.html','/plans.html','/esim-management.html','/signal-card-scenes-v1.png','/profile.html','/notifications.html','/activity.html','/savings.html','/family-center.html','/family-trip.html','/signal-universe.html','/support.html','/new-ticket.html','/ticket.html','/app-guide.html','/i18n.js','/style.css','/experience.css','/experience.js','/client-ui.css','/client-ui.js','/wallet-pass.html','/pwa.js','/sw.js']
+  },
   clientVersions: {},
   dailyReports: [], reportSettings: { enabled:true, hour:8, lastSentDate:null },
 });
