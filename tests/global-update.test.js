@@ -55,10 +55,27 @@ test('global update assets use one coherent cache and app version', () => {
   const worker = read('sw.js');
   const pwa = read('pwa.js');
   for (const page of ['/travel-assistant.html','/esim-topup.html','/family-share.html','/notifications.html','/activity.html','/savings.html','/family-center.html']) assert.match(worker, new RegExp(page.replace('.', '\\.')));
-  assert.match(worker, /signal-shell-v94-exact/);
+  assert.match(worker, /signal-shell-v100-exact-screens/);
   assert.match(worker, /neverCache[^\n]+admin-common\.js/);
-  assert.match(pwa, /SIGNAL_FRONTEND_VERSION='3\.1\.0'/);
-  assert.match(pwa, /SIGNAL_SW_VERSION='v94'/);
+  assert.match(pwa, /SIGNAL_FRONTEND_VERSION='4\.0\.0'/);
+  assert.match(pwa, /SIGNAL_SW_VERSION='v100'/);
+  assert.match(pwa, /caches\.keys\(\)/);
+  assert.match(pwa, /registration=>registration\.unregister\(\)/);
+  assert.match(read('security-setup.html'), /Захист акаунта/);
+  assert.match(worker, /\/security-pin\.html/);
+});
+
+test('four-step registration matches the approved screen and never persists a plain password',()=>{
+  const registration=read('register-email.html');
+  const verification=read('verify-code.html');
+  const auth=read('authService.js');
+  assert.match(registration,/id="displayName"/);
+  assert.match(registration,/id="password"/);
+  assert.doesNotMatch(registration,/id="avatar"|id="referralCode"/);
+  assert.match(auth,/passwordHash=registrationPassword\?await bcrypt\.hash/);
+  assert.match(auth,/appLock:\{enabled:false/);
+  assert.match(verification,/data\.registrationComplete&&data\.sessionToken/);
+  assert.match(verification,/security-setup\.html\?onboarding=1/);
 });
 
 test('customer pages render immediately and admin navigation stays compact', () => {

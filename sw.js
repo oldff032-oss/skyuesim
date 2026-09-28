@@ -3,18 +3,21 @@
 // Кешує тільки статичну "оболонку" — самі дані (підписка, тікети) завжди
 // тягнуться наживо з бекенду, ніколи не кешуються.
 
-const CACHE_NAME = 'signal-shell-v94-exact';
+const CACHE_NAME = 'signal-shell-v100-exact-screens';
 const SHELL_FILES = [
   '/index.html',
   '/welcome.html',
   '/login.html',
   '/register-email.html',
   '/verify-code.html',
+  '/set-password.html',
   '/account-created.html',
   '/admin-dashboard.html',
   '/dashboard.html',
   '/profile.html',
   '/security.html',
+  '/security-setup.html',
+  '/security-pin.html',
   '/security-pattern.html',
   '/security-recovery.html',
   '/notifications.html',
@@ -72,7 +75,7 @@ self.addEventListener('install', (event) => {
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches.keys().then((keys) => Promise.all(keys.map((key) => caches.delete(key))))
+    caches.keys().then((keys) => Promise.all(keys.filter((key)=>key!==CACHE_NAME).map((key) => caches.delete(key))))
       .then(() => caches.open(CACHE_NAME)).then((cache) => cache.addAll(SHELL_FILES))
   );
   self.clients.claim();

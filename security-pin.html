@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="uk">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>PIN-код — Signal</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="signal-v5.css?v=100"><link rel="manifest" href="/manifest.json"><meta name="theme-color" content="#020713"><script src="pwa.js"></script>
+</head>
+<body class="signal-v5 recovery-page">
+  <main class="recovery-shell pin-setup-shell">
+    <header><a href="security-setup.html?onboarding=1" aria-label="Назад">×</a><span><img src="signal-premium-logo.png" alt=""><b>Signal</b></span><i></i></header>
+    <div class="pattern-lock">▦</div><h1>Створіть PIN-код</h1><p>Введіть 6 цифр для захисту застосунку</p>
+    <section class="recovery-card pin-create-card"><label for="newPin">Новий PIN-код</label><input class="recovery-pin" id="newPin" type="password" inputmode="numeric" maxlength="6" placeholder="••••••"><label for="confirmPin">Повторіть PIN-код</label><input class="recovery-pin" id="confirmPin" type="password" inputmode="numeric" maxlength="6" placeholder="••••••"><p id="pinMessage"></p><button id="savePin" type="button">Зберегти PIN</button></section>
+    <div class="pattern-note">ⓘ　Після трьох невдалих спроб вхід тимчасово блокується. Доступ можна відновити через email.</div>
+  </main>
+  <script src="config.js"></script>
+  <script>
+    const token=localStorage.getItem('signal_session_token');if(!token)location.href='login.html';
+    savePin.onclick=async()=>{const pin=newPin.value,confirmation=confirmPin.value;pinMessage.textContent='';if(!/^\d{6}$/.test(pin)){pinMessage.textContent='PIN має містити рівно 6 цифр';return}if(pin!==confirmation){pinMessage.textContent='PIN-коди не збігаються';return}savePin.disabled=true;try{const response=await fetch(`${API_URL}/api/account/lock`,{method:'PUT',headers:{'Content-Type':'application/json','x-session-token':token},body:JSON.stringify({pin})}),data=await response.json();if(!response.ok)throw Error(data.error);sessionStorage.setItem(`signal_app_unlocked:${token}`,'1');pinMessage.style.color='#55e8c4';pinMessage.textContent='PIN-код увімкнено';setTimeout(()=>location.href='account-created.html',650)}catch(error){pinMessage.textContent=error.message;savePin.disabled=false}};
+  </script>
+</body>
+</html>

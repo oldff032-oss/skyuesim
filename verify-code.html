@@ -90,8 +90,16 @@
         if(!res.ok) throw new Error(data.error || 'Невірний код');
 
         cells.forEach(c => c.classList.add('success'));
-        localStorage.setItem('signal_verify_token', data.verifyToken);
-        setTimeout(() => { window.location.href = 'set-password.html'; }, 500);
+        if(data.registrationComplete&&data.sessionToken){
+          localStorage.setItem('signal_session_token',data.sessionToken);
+          localStorage.setItem('signal_email',data.email);
+          localStorage.setItem('signal_language',data.language||localStorage.getItem('signal_language')||'uk');
+          localStorage.removeItem('signal_pending_email');
+          setTimeout(()=>{window.location.href='security-setup.html?onboarding=1'},500);
+        }else{
+          localStorage.setItem('signal_verify_token', data.verifyToken);
+          setTimeout(() => { window.location.href = 'set-password.html'; }, 500);
+        }
       }catch(e){
         cells.forEach(c => { c.classList.add('error'); });
         err.textContent = e.message;

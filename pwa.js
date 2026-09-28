@@ -1,13 +1,28 @@
-// Register from every entry page so a fresh "Add to Home Screen" install has
-// a service worker even when it starts directly on dashboard.html.
-if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('/sw.js?v=94', { updateViaCache: 'none' }).then(registration => registration.update()).catch(() => {});
-  navigator.serviceWorker.addEventListener('controllerchange',()=>{
-    if(sessionStorage.getItem('signal_sw_reloaded_v94')==='1')return;
-    sessionStorage.setItem('signal_sw_reloaded_v94','1');
-    location.reload();
-  });
+// v100 is a hard visual reset. It removes obsolete application shells once
+// while preserving the customer's account, eSIM and preferences.
+const SIGNAL_RELEASE_ID='v100-exact-screens';
+async function signalInstallFreshShell(){
+  if(!('serviceWorker' in navigator))return;
+  const releaseKey='signal_installed_release';
+  const needsReset=localStorage.getItem(releaseKey)!==SIGNAL_RELEASE_ID;
+  if(needsReset){
+    localStorage.setItem(releaseKey,SIGNAL_RELEASE_ID);
+    if('caches' in window){const names=await caches.keys();await Promise.all(names.map(name=>caches.delete(name)));}
+    const registrations=await navigator.serviceWorker.getRegistrations();
+    await Promise.all(registrations.map(registration=>registration.unregister()));
+  }
+  const registration=await navigator.serviceWorker.register('/sw.js?v=100',{updateViaCache:'none'});
+  await registration.update();
+  if(needsReset&&!new URL(location.href).searchParams.has('signal_release')){
+    const next=new URL(location.href);next.searchParams.set('signal_release','v100');location.replace(next.href);
+  }
 }
+signalInstallFreshShell().catch(()=>{});
+if('serviceWorker' in navigator)navigator.serviceWorker.addEventListener('controllerchange',()=>{
+  if(sessionStorage.getItem('signal_sw_reloaded_v100')==='1')return;
+  sessionStorage.setItem('signal_sw_reloaded_v100','1');
+  location.reload();
+});
 const applyTheme = () => document.documentElement.classList.toggle('light-theme', localStorage.getItem('signal_theme') === 'light');
 applyTheme();
 const signalAuthPages=new Set(['login.html','register-email.html','verify-code.html','set-password.html','forgot-password.html','reset-code.html','new-password.html','account-created.html']);
@@ -30,7 +45,7 @@ const signalNavItems={
   'usage.html':{label:'Витрати',labelEn:'Usage',icon:'<svg class="nav-art nav-vector" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V5M16 20v-8M22 20V3M2 20h21"/></svg>'},
   'profile.html':{label:'Профіль',labelEn:'Profile',icon:'<svg class="nav-art nav-vector" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="7.5" r="3.5"/><path d="M5 21c.4-4.6 2.8-7 7-7s6.6 2.4 7 7"/></svg>'}
 };
-const signalNoBottomNavPages=new Set([...signalAuthPages,'index.html','welcome.html','access-recovery.html','access-recovery-complete.html','rescue-mode.html','account-created.html']);
+const signalNoBottomNavPages=new Set([...signalAuthPages,'index.html','welcome.html','access-recovery.html','access-recovery-complete.html','rescue-mode.html','account-created.html','security-setup.html','security-pin.html','security-pattern.html','security-recovery.html']);
 const signalPlanPages=new Set(['plans.html','esim-topup.html','mobile-topup.html','travel-plans.html']);
 const signalUsagePages=new Set(['usage.html','traffic-alerts.html','activity.html','savings.html','smart-assist.html']);
 function signalBottomNavMarkup(){return `<nav class="bottomnav" aria-label="Головна навігація">${Object.entries(signalNavItems).map(([page,item])=>`<a href="${page}" aria-label="${item.label}"></a>`).join('')}</nav>`;}
@@ -113,7 +128,7 @@ async function signalConsumeMaintenancePreviewCode(){
   url.searchParams.delete('maintenance_preview');history.replaceState(null,'',`${url.pathname}${url.search}${url.hash}`);
   try{const response=await signalOriginalFetch(`${API_URL}/api/maintenance-preview/exchange`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code}),cache:'no-store'}),data=await response.json();if(!response.ok)throw Error(data.error||'Preview failed');sessionStorage.setItem('signal_maintenance_preview_token',data.previewToken);sessionStorage.setItem('signal_maintenance_preview_expires',data.expiresAt);location.replace(url.href);return true;}catch{return false;}
 }
-const SIGNAL_FRONTEND_VERSION='3.1.0',SIGNAL_SW_VERSION='v94',SIGNAL_CACHE_VERSION='signal-shell-v94-exact';
+const SIGNAL_FRONTEND_VERSION='4.0.0',SIGNAL_SW_VERSION='v100',SIGNAL_CACHE_VERSION='signal-shell-v100-exact-screens';
 window.SIGNAL_APP_VERSION=SIGNAL_FRONTEND_VERSION;
 window.addEventListener('load',async()=>{
   if(typeof API_URL==='undefined')return;

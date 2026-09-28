@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="uk">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>Захист акаунта — Signal</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="signal-v5.css?v=100">
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#020713">
+  <script src="pwa.js"></script>
+</head>
+<body class="signal-v5 protection-page">
+  <main class="protection-shell">
+    <div class="protection-shield" aria-hidden="true"><span></span></div>
+    <h1>Захист акаунта</h1>
+    <p>Оберіть зручний спосіб розблокування<br>застосунку</p>
+    <section class="protection-options">
+      <button id="faceId" type="button" class="protection-option"><i class="face">⌗</i><b>Face ID</b><span>›</span></button>
+      <a class="protection-option" href="security-pin.html?onboarding=1"><i class="pin">⠿</i><b>PIN-код</b><span>›</span></a>
+      <a class="protection-option" href="security-pattern.html?onboarding=1"><i class="pattern">⌘</i><b>Графічний ключ</b><span>›</span></a>
+    </section>
+    <p id="setupMessage" class="protection-message"></p>
+    <div class="protection-safe"><i></i><span>▢</span><i></i><small>Твої дані під надійним захистом</small></div>
+    <a class="protection-skip" href="account-created.html">Налаштувати пізніше</a>
+    <div class="protection-horizon" aria-hidden="true"></div>
+  </main>
+  <script src="config.js"></script>
+  <script type="module">
+    const token=localStorage.getItem('signal_session_token'),localPreview=['localhost','127.0.0.1'].includes(location.hostname)&&new URLSearchParams(location.search).get('preview')==='1';if(!token&&!localPreview)location.href='login.html';
+    const headers={'x-session-token':token};
+    faceId.onclick=async()=>{if(localPreview)return;faceId.disabled=true;setupMessage.textContent='Підключаємо Face ID…';try{const {startRegistration}=await import('https://cdn.jsdelivr.net/npm/@simplewebauthn/browser@13.3.0/+esm');let response=await fetch(`${API_URL}/api/account/passkeys/register/options`,{method:'POST',headers}),options=await response.json();if(!response.ok)throw Error(options.error);const registration=await startRegistration({optionsJSON:options});response=await fetch(`${API_URL}/api/account/passkeys/register/verify`,{method:'POST',headers:{...headers,'Content-Type':'application/json'},body:JSON.stringify(registration)});const data=await response.json();if(!response.ok)throw Error(data.error);setupMessage.style.color='#55e9c4';setupMessage.textContent='Face ID увімкнено';setTimeout(()=>location.href='account-created.html',600)}catch(error){setupMessage.textContent=error.message;faceId.disabled=false}};
+  </script>
+</body>
+</html>

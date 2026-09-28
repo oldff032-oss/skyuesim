@@ -620,10 +620,10 @@ app.post('/api/auth/request-code',requireFeature('registration','Реєстра�
     const { email } = req.body;
     if (!email || !email.includes('@')) return res.status(400).json({ error: 'Введи коректний email' });
     if (operationsStore.store().blacklist.emails.includes(email.toLowerCase())) return res.status(403).json({ error: 'Цей email недоступний для реєстрації' });
-    await authService.requestCode(email, req.body?.language, req.body?.referralCode, { displayName: req.body?.displayName, avatarDataUrl: req.body?.avatarDataUrl });
+    await authService.requestCode(email, req.body?.language, req.body?.referralCode, { displayName: req.body?.displayName, avatarDataUrl: req.body?.avatarDataUrl, password:req.body?.password });
     res.json({ sent: true });
   } catch (err) {
-    const status = err.code === 'COOLDOWN' ? 429 : 500;
+    const status = err.code === 'COOLDOWN' ? 429 : err.code === 'WEAK_PASSWORD' ? 400 : 500;
     res.status(status).json({ error: err.message, code: err.code, waitSec: err.waitSec });
   }
 });

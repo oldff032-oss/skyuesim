@@ -49,7 +49,10 @@ async function requestCode(email, language = 'uk', referralCode = '', profile = 
   const code = randomCode();
   const displayName = String(profile?.displayName || existing?.displayName || '').trim().slice(0, 60);
   const avatarDataUrl = typeof profile?.avatarDataUrl === 'string' && /^data:image\/(png|jpeg|webp);base64,/i.test(profile.avatarDataUrl) && profile.avatarDataUrl.length <= 700000 ? profile.avatarDataUrl : (existing?.avatarDataUrl || null);
-  store.codes[email] = { codeHash:verificationCodeHash(email,code), sentAt: Date.now(), attempts: 0, language: language === 'en' ? 'en' : 'uk', referralCode: String(referralCode || existing?.referralCode || '').trim().toUpperCase().slice(0, 32), displayName, avatarDataUrl };
+  const registrationPassword=String(profile?.password||'');
+  if(registrationPassword&&registrationPassword.length<8)throw Object.assign(new Error('Пароль має бути не менше 8 символів'),{code:'WEAK_PASSWORD'});
+  const passwordHash=registrationPassword?await bcrypt.hash(registrationPassword,10):(existing?.passwordHash||null);
+  store.codes[email] = { codeHash:verificationCodeHash(email,code), sentAt: Date.now(), attempts: 0, language: language === 'en' ? 'en' : 'uk', referralCode: String(referralCode || existing?.referralCode || '').trim().toUpperCase().slice(0, 32), displayName, avatarDataUrl, passwordHash };
   writeAll(store);
 
   await sendVerificationCode(email, code);
@@ -73,7 +76,22 @@ function verifyCode(email, code) {
     throw Object.assign(new Error('Невірний код'), { code: 'WRONG_CODE' });
   }
 
-  // Код правильний -> видаємо тимчасовий токен для встановлення пароля
+  // Новий чотирикроковий сценарій уже отримує пароль на екрані акаунта.
+  // У тимчасовому сховищі тримаємо лише bcrypt-хеш, ніколи відкритий пароль.
+  if(entry.passwordHash){
+    store.users[email]={email,passwordHash:entry.passwordHash,createdAt:Date.now()};
+    if(!getUser(email)){
+      const inviter=Object.values(getAllUsers()).find(user=>user.referralCode&&user.referralCode===entry.referralCode&&user.email!==email);
+      saveUser(email,{email,status:'registered',language:entry.language||'uk',displayName:entry.displayName||'',avatarDataUrl:entry.avatarDataUrl||null,appLock:{enabled:false,preferredMethod:null,failedAttempts:0,lockedUntil:null},createdAt:new Date().toISOString(),...(inviter?{referredBy:inviter.email,referralRewardStatus:'pending_first_payment'}:{})});
+      if(inviter)saveUser(inviter.email,{referrals:[...(inviter.referrals||[]),{email,createdAt:new Date().toISOString(),status:'pending_first_payment'}]});
+    }
+    delete store.codes[email];
+    const sessionToken=createSession(store,email,'Новий пристрій');
+    writeAll(store);
+    return{registrationComplete:true,sessionToken,email,language:getUser(email)?.language||entry.language||'uk'};
+  }
+
+  // Сумісність зі старим сценарієм: видаємо тимчасовий токен.
   delete store.codes[email];
   const verifyToken = randomToken();
   store.verifyTokens[verifyToken] = { email, language: entry.language || 'uk', referralCode: entry.referralCode || '', displayName: entry.displayName || '', avatarDataUrl: entry.avatarDataUrl || null, createdAt: Date.now() };

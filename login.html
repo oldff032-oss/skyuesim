@@ -1,3 +1,37 @@
-<!doctype html><html lang="uk"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Вхід — Signal</title><link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet"><link rel="stylesheet" href="signal-v5.css"><link rel="manifest" href="/manifest.json"><meta name="theme-color" content="#020713"><script src="pwa.js"></script></head><body class="signal-v5 auth-v5"><div class="orbit-bg"></div><main class="o-shell"><div class="o-logo-center"><img src="signal-premium-logo.png" alt="Signal"><h1>Signal</h1><p>Подорожуй без меж</p></div><section class="o-glass auth-panel"><div id="resetBanner" style="display:none;margin-bottom:14px;padding:12px;border:1px solid #49ecc455;border-radius:12px;color:#64f2cf">✓ Пароль оновлено. Увійди з новим паролем.</div><div class="o-field"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m4 7 8 6 8-6"/></svg><input class="o-input" type="email" id="email" placeholder="Електронна пошта" autocomplete="email"></div><div class="o-field"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg><input class="o-input" type="password" id="password" placeholder="Пароль" autocomplete="current-password"><button type="button" onclick="togglePw()" aria-label="Показати пароль" style="position:absolute;right:12px;top:12px;width:38px;height:38px;border:0;background:transparent;color:#8ea3c8;font-size:18px">◉</button></div><div class="auth-actions"><a class="o-link" href="forgot-password.html">Забули пароль?</a></div><div id="err" class="o-error" style="display:none"></div><button class="o-btn" id="loginBtn" onclick="doLogin()">Увійти　→</button></section><div class="auth-bottom"><span>або</span><p>Ще немає акаунта? <a class="o-link" href="register-email.html">Створити</a></p><a class="o-link" href="access-recovery.html">Немає доступу до email?</a></div><div class="planet-horizon" aria-hidden="true"></div></main><script src="config.js"></script><script>
-if(new URLSearchParams(location.search).get('reset')==='success')resetBanner.style.display='block';function togglePw(){password.type=password.type==='password'?'text':'password'}async function doLogin(){const mail=email.value.trim(),pass=password.value;err.style.display='none';if(!mail||!pass){err.textContent='Заповни обидва поля';err.style.display='block';return}loginBtn.disabled=true;loginBtn.textContent='Входимо…';window.signalAuthLoading?.(true,'Перевіряємо дані','Безпечно підключаємо твій акаунт');try{const res=await fetch(`${API_URL}/api/auth/login`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:mail,password:pass})}),data=await res.json();if(!res.ok)throw Error(data.error||'Помилка входу');localStorage.setItem('signal_session_token',data.sessionToken);localStorage.setItem('signal_email',data.email);localStorage.setItem('signal_language',data.language||'uk');for(const key of Object.keys(sessionStorage))if(key.startsWith('signal_app_unlocked:'))sessionStorage.removeItem(key);window.signalAuthSuccess?.('Вхід успішний!');setTimeout(()=>location.href='dashboard.html',650)}catch(e){err.textContent=e.message+'. Перевір мережу і спробуй ще раз.';err.style.display='block';window.signalAuthLoading?.(false);loginBtn.disabled=false;loginBtn.textContent='Увійти　→'}}password.addEventListener('keydown',e=>{if(e.key==='Enter')doLogin()});
-</script></body></html>
+<!doctype html>
+<html lang="uk">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>Вхід — Signal</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="signal-v5.css?v=100">
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#020713">
+  <script src="pwa.js"></script>
+</head>
+<body class="signal-v5 auth-v5">
+  <div class="orbit-bg"></div>
+  <main class="o-shell">
+    <div class="o-logo-center"><img src="signal-premium-logo.png" alt="Signal"><h1>Signal</h1><p>Подорожуй без меж</p></div>
+    <section class="o-glass auth-panel">
+      <div id="resetBanner" hidden>✓ Пароль оновлено. Увійди з новим паролем.</div>
+      <div class="o-field"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m4 7 8 6 8-6"/></svg><input class="o-input" type="email" id="email" placeholder="Електронна пошта" autocomplete="email"></div>
+      <div class="o-field"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg><input class="o-input" type="password" id="password" placeholder="Пароль" autocomplete="current-password"><button type="button" id="showPassword" aria-label="Показати пароль">◉</button></div>
+      <div class="auth-actions"><a class="o-link" href="forgot-password.html">Забули пароль?</a></div>
+      <div id="err" class="o-error" hidden></div>
+      <button class="o-btn" id="loginBtn" type="button">Увійти　→</button>
+    </section>
+    <div class="auth-bottom"><span class="auth-divider">або</span><p class="auth-slogan">ЗВ’ЯЗОК, ЩО ВІДКРИВАЄ<br>НОВІ ГОРИЗОНТИ</p></div>
+    <div class="planet-horizon" aria-hidden="true"></div>
+  </main>
+  <script src="config.js"></script>
+  <script>
+    if(new URLSearchParams(location.search).get('reset')==='success')resetBanner.hidden=false;
+    showPassword.onclick=()=>{password.type=password.type==='password'?'text':'password'};
+    async function doLogin(){const mail=email.value.trim(),pass=password.value;err.hidden=true;if(!mail||!pass){err.textContent='Заповни обидва поля';err.hidden=false;return}loginBtn.disabled=true;loginBtn.textContent='Входимо…';window.signalAuthLoading?.(true,'Перевіряємо дані','Безпечно підключаємо твій акаунт');try{const response=await fetch(`${API_URL}/api/auth/login`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:mail,password:pass})}),data=await response.json();if(!response.ok)throw Error(data.error||'Помилка входу');localStorage.setItem('signal_session_token',data.sessionToken);localStorage.setItem('signal_email',data.email);localStorage.setItem('signal_language',data.language||'uk');for(const key of Object.keys(sessionStorage))if(key.startsWith('signal_app_unlocked:'))sessionStorage.removeItem(key);window.signalAuthSuccess?.('Вхід успішний!');setTimeout(()=>location.href='dashboard.html',650)}catch(error){err.textContent=error.message+'. Перевір мережу і спробуй ще раз.';err.hidden=false;window.signalAuthLoading?.(false);loginBtn.disabled=false;loginBtn.textContent='Увійти　→'}}
+    loginBtn.onclick=doLogin;password.addEventListener('keydown',event=>{if(event.key==='Enter')doLogin()});
+  </script>
+</body>
+</html>
