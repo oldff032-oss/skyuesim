@@ -1,10 +1,10 @@
 // Register from every entry page so a fresh "Add to Home Screen" install has
 // a service worker even when it starts directly on dashboard.html.
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('/sw.js?v=93', { updateViaCache: 'none' }).then(registration => registration.update()).catch(() => {});
+  navigator.serviceWorker.register('/sw.js?v=94', { updateViaCache: 'none' }).then(registration => registration.update()).catch(() => {});
   navigator.serviceWorker.addEventListener('controllerchange',()=>{
-    if(sessionStorage.getItem('signal_sw_reloaded_v93')==='1')return;
-    sessionStorage.setItem('signal_sw_reloaded_v93','1');
+    if(sessionStorage.getItem('signal_sw_reloaded_v94')==='1')return;
+    sessionStorage.setItem('signal_sw_reloaded_v94','1');
     location.reload();
   });
 }
@@ -18,7 +18,7 @@ function signalMountAuthExperience(){
   const wrap=document.querySelector('.wrap');
   if(wrap&&!wrap.querySelector('.auth-atmosphere'))wrap.insertAdjacentHTML('afterbegin','<div class="auth-atmosphere" aria-hidden="true"><i></i><i></i><i></i></div>');
   if(!document.getElementById('signal-auth-loader'))document.body.insertAdjacentHTML('beforeend','<div id="signal-auth-loader" class="auth-loader" role="status" aria-live="polite" aria-hidden="true"><div class="auth-loader-core"><span class="auth-logo-stage"><span class="auth-globe" aria-hidden="true"><u></u><u></u><u></u></span><img src="signal-premium-logo.png" alt=""><i></i><b></b></span><strong id="signal-auth-loader-title">Захищений вхід</strong><small id="signal-auth-loader-copy">Підключаємо твій акаунт до Signal</small><span class="auth-loader-progress"><i></i></span></div></div>');
-  const splashAllowed=['login.html','register-email.html'].includes(signalCurrentPage),splashKey=`signal_auth_intro:${signalCurrentPage}`;
+  const splashAllowed=false,splashKey=`signal_auth_intro:${signalCurrentPage}`;
   if(splashAllowed&&!sessionStorage.getItem(splashKey)){sessionStorage.setItem(splashKey,'1');signalAuthLoading(true,signalCurrentPage==='login.html'?'Ласкаво просимо':'Створюємо твій Signal');setTimeout(()=>signalAuthLoading(false),1400);}
 }
 window.signalAuthLoading=function(active,title,copy){const loader=document.getElementById('signal-auth-loader');if(!loader)return;if(title)document.getElementById('signal-auth-loader-title').textContent=title;if(copy)document.getElementById('signal-auth-loader-copy').textContent=copy;loader.classList.toggle('visible',Boolean(active));loader.setAttribute('aria-hidden',active?'false':'true');document.body.classList.toggle('auth-busy',Boolean(active));};
@@ -113,7 +113,7 @@ async function signalConsumeMaintenancePreviewCode(){
   url.searchParams.delete('maintenance_preview');history.replaceState(null,'',`${url.pathname}${url.search}${url.hash}`);
   try{const response=await signalOriginalFetch(`${API_URL}/api/maintenance-preview/exchange`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code}),cache:'no-store'}),data=await response.json();if(!response.ok)throw Error(data.error||'Preview failed');sessionStorage.setItem('signal_maintenance_preview_token',data.previewToken);sessionStorage.setItem('signal_maintenance_preview_expires',data.expiresAt);location.replace(url.href);return true;}catch{return false;}
 }
-const SIGNAL_FRONTEND_VERSION='3.0.0',SIGNAL_SW_VERSION='v93',SIGNAL_CACHE_VERSION='signal-shell-v93-orbit';
+const SIGNAL_FRONTEND_VERSION='3.1.0',SIGNAL_SW_VERSION='v94',SIGNAL_CACHE_VERSION='signal-shell-v94-exact';
 window.SIGNAL_APP_VERSION=SIGNAL_FRONTEND_VERSION;
 window.addEventListener('load',async()=>{
   if(typeof API_URL==='undefined')return;
@@ -268,6 +268,7 @@ document.addEventListener('click',event=>{
 window.addEventListener('load', async () => {
   const token = localStorage.getItem('signal_session_token');
   if (!token || typeof API_URL === 'undefined') return;
+  if(signalCurrentPage==='security-recovery.html')return;
   const unlockKey = `signal_app_unlocked:${token}`;
   if (sessionStorage.getItem(unlockKey) === '1') return;
 
@@ -313,7 +314,7 @@ window.addEventListener('load', async () => {
       if(request?.status==='expired'){title.textContent=lockEnglish?'Approval expired':'Час підтвердження минув';copy.textContent=lockEnglish?'Send a new code to reset the PIN.':'Надішліть новий код для скидання PIN.';}
     };
     const checkResetStatus=async()=>{try{const response=await fetch(`${API_URL}/api/account/lock/reset-request`,{headers:{'x-session-token':token},cache:'no-store'}),data=await response.json();if(response.ok&&data.request)renderResetStatus(data.request);}catch{}};
-    const openRecovery=()=>{recoveryDismissed=false;showRecovery();requestButton.hidden=false;checkResetStatus();};
+    const openRecovery=()=>{location.href='/security-recovery.html';};
     document.getElementById('forgotPin').onclick=openRecovery;
     document.getElementById('forgotPattern').onclick=openRecovery;
     document.getElementById('backToPin').onclick=showPin;
@@ -323,7 +324,7 @@ window.addEventListener('load', async () => {
     document.getElementById('saveNewPin').onclick=async()=>{const pin=document.getElementById('newPin').value,confirmation=document.getElementById('confirmNewPin').value,errorBox=document.getElementById('newPinError'),button=document.getElementById('saveNewPin');errorBox.textContent='';if(!/^\d{6}$/.test(pin)){errorBox.textContent=lockEnglish?'Enter exactly 6 digits.':'Введіть рівно 6 цифр.';return;}if(pin!==confirmation){errorBox.textContent=lockEnglish?'PINs do not match.':'PIN-коди не збігаються.';return;}button.disabled=true;button.textContent=lockEnglish?'Saving…':'Зберігаємо…';try{const response=await fetch(`${API_URL}/api/account/lock/reset-complete`,{method:'POST',headers:{'Content-Type':'application/json','x-session-token':token},body:JSON.stringify({pin,confirmation})}),data=await response.json();if(!response.ok)throw Error(data.error||'Reset failed');sessionStorage.setItem(unlockKey,'1');clearInterval(recoveryTimer);document.removeEventListener('keydown',lockKeyHandler);document.getElementById('lock')?.remove();}catch(error){errorBox.textContent=error.message;button.disabled=false;button.textContent=lockEnglish?'Save new PIN':'Зберегти новий PIN';}};
     const finishUnlock=()=>{sessionStorage.setItem(unlockKey,'1');clearInterval(recoveryTimer);clearInterval(lockCountdownTimer);lockCountdownTimer=null;document.removeEventListener('keydown',lockKeyHandler);document.getElementById('lock')?.remove();};
     const formatWait=seconds=>`${String(Math.floor(seconds/60)).padStart(2,'0')}:${String(seconds%60).padStart(2,'0')}`;
-    const startLockCountdown=seconds=>{let remaining=Math.max(1,Number(seconds||300));input.disabled=true;unlockPatternWidget?.setDisabled(true);document.querySelectorAll('#pinPad button').forEach(button=>button.disabled=true);clearInterval(lockCountdownTimer);const paint=()=>{const message=lockEnglish?`Too many attempts. Try again in ${formatWait(remaining)}`:`Забагато спроб. Спробуй через ${formatWait(remaining)}`;document.getElementById('pinError').textContent=message;document.getElementById('patternError').textContent=message;document.getElementById('lockHint').textContent=lockEnglish?'Access is temporarily locked':'Доступ тимчасово заблоковано';};paint();lockCountdownTimer=setInterval(()=>{remaining-=1;if(remaining<=0){clearInterval(lockCountdownTimer);lockCountdownTimer=null;input.disabled=false;unlockPatternWidget?.setDisabled(false);document.querySelectorAll('#pinPad button').forEach(button=>button.disabled=false);document.getElementById('pinError').textContent='';document.getElementById('patternError').textContent='';document.getElementById('lockHint').textContent=lockHint;return;}paint();},1000);};
+    const startLockCountdown=seconds=>{const remaining=Math.max(1,Number(seconds||300));location.href=`/security-recovery.html?locked=1&retry=${remaining}`;};
     const verifyCredential=async(method,credential)=>{const errorBox=document.getElementById(method==='pattern'?'patternError':'pinError');try{const result=await fetch(`${API_URL}/api/account/lock/verify`,{method:'POST',headers:{'Content-Type':'application/json','x-session-token':token},body:JSON.stringify({method,credential})}),data=await result.json();if(result.ok){finishUnlock();return true;}if(result.status===423){startLockCountdown(data.retryAfterSeconds||300);return false;}errorBox.textContent=data.attemptsRemaining===1?(lockEnglish?'Incorrect. One attempt remains.':'Невірно. Залишилася одна спроба.'):(data.error||(lockEnglish?'Incorrect. Try again.':'Невірно. Спробуй ще раз.'));return false;}catch{errorBox.textContent=lockEnglish?'Connection error. Try again.':'Помилка з’єднання. Спробуй ще раз.';return false;}};
     if(patternPreferred){import('./signal-pattern.js').then(({mountSignalPattern})=>{unlockPatternWidget=mountSignalPattern(document.getElementById('unlockPattern'),{label:lockEnglish?'Unlock pattern':'Графічний ключ',onComplete:async pattern=>{if(!pattern){document.getElementById('patternError').textContent=lockEnglish?'Connect at least 4 dots.':'З’єднай щонайменше 4 точки.';setTimeout(()=>unlockPatternWidget.reset(),500);return;}unlockPatternWidget.setDisabled(true);const unlocked=await verifyCredential('pattern',pattern);if(!unlocked&&!lockCountdownTimer){unlockPatternWidget.setDisabled(false);setTimeout(()=>unlockPatternWidget.reset(),500);}}});if(lock.retryAfterSeconds)startLockCountdown(lock.retryAfterSeconds);}).catch(()=>{patternPanel.hidden=true;pinEntry.hidden=false;document.getElementById('lockHint').textContent=lockEnglish?'Enter your PIN to continue':'Введи свій PIN, щоб продовжити';});}else if(lock.retryAfterSeconds)startLockCountdown(lock.retryAfterSeconds);
     recoveryTimer=setInterval(()=>{if(document.getElementById('lock'))checkResetStatus();else clearInterval(recoveryTimer);},7000);

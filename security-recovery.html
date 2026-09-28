@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="uk">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>Відновлення доступу — Signal</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="signal-v5.css">
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#020713">
+  <script src="pwa.js"></script>
+</head>
+<body class="signal-v5 recovery-page">
+  <main class="recovery-shell">
+    <header><a href="login.html" aria-label="Закрити">×</a><span><img src="signal-premium-logo.png" alt=""><b>Signal</b></span><i></i></header>
+    <div class="recovery-lock" aria-hidden="true"></div>
+    <h1>Забагато спроб</h1>
+    <p class="recovery-timer">Спробуйте через <b id="countdown">04:59</b></p>
+    <div class="recovery-warning">Задля безпеки ваш акаунт тимчасово заблоковано після 3 невдалих спроб.</div>
+    <div class="recovery-divider"><i></i><span>Або</span><i></i></div>
+    <section class="recovery-card">
+      <div class="recovery-email"><span>✉</span><p><b>Відновити через email</b><small>Ми надішлемо код підтвердження на ваш email.</small></p></div>
+      <div id="codePanel">
+        <label>Код підтвердження</label>
+        <div class="recovery-code" id="codeInputs"><input inputmode="numeric" maxlength="1" aria-label="Цифра 1"><input inputmode="numeric" maxlength="1" aria-label="Цифра 2"><input inputmode="numeric" maxlength="1" aria-label="Цифра 3"><input inputmode="numeric" maxlength="1" aria-label="Цифра 4"><input inputmode="numeric" maxlength="1" aria-label="Цифра 5"><input inputmode="numeric" maxlength="1" aria-label="Цифра 6"></div>
+        <div class="recovery-meta"><span id="emailHint">Надсилаємо код…</span><b id="resendTimer">00:58</b></div>
+        <button id="verifyBtn" type="button">Підтвердити код</button>
+        <button id="resendBtn" type="button">Надіслати код ще раз</button>
+        <p id="error"></p>
+      </div>
+      <div id="newPinPanel" hidden>
+        <label>Новий PIN-код</label>
+        <input id="newPin" class="recovery-pin" type="password" inputmode="numeric" maxlength="6" placeholder="••••••">
+        <input id="confirmPin" class="recovery-pin" type="password" inputmode="numeric" maxlength="6" placeholder="Повторіть PIN">
+        <button id="savePin" type="button">Створити новий PIN</button>
+        <p id="pinError"></p>
+      </div>
+    </section>
+  </main>
+  <script src="config.js"></script>
+  <script>
+    const token=localStorage.getItem('signal_session_token');if(!token)location.href='login.html';
+    const headers={'Content-Type':'application/json','x-session-token':token},cells=[...document.querySelectorAll('#codeInputs input')];
+    let retry=Math.max(1,Number(new URLSearchParams(location.search).get('retry'))||299),resend=58;
+    const format=value=>`${String(Math.floor(value/60)).padStart(2,'0')}:${String(value%60).padStart(2,'0')}`;
+    setInterval(()=>{if(retry>0)retry--;countdown.textContent=format(retry);if(resend>0)resend--;resendTimer.textContent=format(resend);resendBtn.disabled=resend>0},1000);
+    cells.forEach((cell,index)=>{cell.oninput=()=>{cell.value=cell.value.replace(/\D/g,'');if(cell.value&&cells[index+1])cells[index+1].focus()};cell.onkeydown=event=>{if(event.key==='Backspace'&&!cell.value&&cells[index-1])cells[index-1].focus()}});
+    async function requestCode(resendRequest=false){error.textContent='';const path=resendRequest?'/api/account/lock/reset-request/email-code':'/api/account/lock/reset-request';const response=await fetch(`${API_URL}${path}`,{method:'POST',headers,body:'{}'}),data=await response.json();if(!response.ok)throw Error(data.error);emailHint.textContent=`Надіслано на ${data.request?.maskedEmail||'ваш email'}`;resend=58}
+    verifyBtn.onclick=async()=>{const code=cells.map(cell=>cell.value).join('');error.textContent='';if(!/^\d{6}$/.test(code)){error.textContent='Введіть усі 6 цифр';return}verifyBtn.disabled=true;try{const response=await fetch(`${API_URL}/api/account/lock/reset-request/verify-code`,{method:'POST',headers,body:JSON.stringify({code})}),data=await response.json();if(!response.ok)throw Error(data.error);codePanel.hidden=true;newPinPanel.hidden=false}catch(errorValue){error.textContent=errorValue.message;verifyBtn.disabled=false}};
+    resendBtn.onclick=async()=>{try{await requestCode(true)}catch(errorValue){error.textContent=errorValue.message}};
+    savePin.onclick=async()=>{pinError.textContent='';const pin=newPin.value,confirmation=confirmPin.value;if(!/^\d{6}$/.test(pin)){pinError.textContent='PIN має містити 6 цифр';return}if(pin!==confirmation){pinError.textContent='PIN-коди не збігаються';return}savePin.disabled=true;try{const response=await fetch(`${API_URL}/api/account/lock/reset-complete`,{method:'POST',headers,body:JSON.stringify({pin,confirmation})}),data=await response.json();if(!response.ok)throw Error(data.error);sessionStorage.setItem(`signal_app_unlocked:${token}`,'1');location.href='dashboard.html'}catch(errorValue){pinError.textContent=errorValue.message;savePin.disabled=false}};
+    (async()=>{try{await requestCode(false)}catch(errorValue){error.textContent=errorValue.message}})();
+  </script>
+</body>
+</html>

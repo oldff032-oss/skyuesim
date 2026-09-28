@@ -16,19 +16,22 @@ test('Signal V3 protects both PIN and graphical pattern attempts',()=>{
 });
 
 test('graphical pattern is validated and shared by setup and unlock screens',()=>{
-  const pattern=read('signal-pattern.js'),security=read('security.html'),pwa=read('pwa.js');
+  const pattern=read('signal-pattern.js'),security=read('security.html'),setup=read('security-pattern.html'),pwa=read('pwa.js');
   assert.match(pattern,/nodes\.length<4\|\|nodes\.length>9/);
   assert.match(pattern,/new Set\(nodes\)\.size!==nodes\.length/);
-  assert.match(security,/mountSignalPattern/);
-  assert.match(security,/method:'pattern'/);
+  assert.match(security,/security-pattern\.html/);
+  assert.match(setup,/mountSignalPattern/);
+  assert.match(setup,/method:'pattern'/);
   assert.match(pwa,/import\('\.\/signal-pattern\.js'\)/);
   assert.match(pwa,/retryAfterSeconds/);
 });
 
 test('V3 security screen, animated globe and bilingual registration are wired',()=>{
-  const security=read('security.html'),pwa=read('pwa.js'),style=read('style.css'),worker=read('sw.js');
-  assert.match(security,/Безпека акаунта/);
+  const security=read('security.html'),recovery=read('security-recovery.html'),pwa=read('pwa.js'),style=read('style.css'),worker=read('sw.js');
+  assert.match(security,/Центр безпеки/);
   assert.match(security,/Довірені пристрої/);
+  assert.match(recovery,/Забагато спроб/);
+  assert.match(recovery,/Відновити через email/);
   assert.match(pwa,/auth-globe/);
   assert.match(style,/@keyframes authGlobe/);
   assert.match(read('verify-code.html'),/Підтверди email/);
