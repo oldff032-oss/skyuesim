@@ -14,17 +14,17 @@ test('updated inline application scripts are valid JavaScript',()=>{
   }
 });
 
-test('home has one compact header, a hidden zero badge and an in-app guide',()=>{
+test('home has one compact branded header, a hidden zero badge and support access',()=>{
   const dashboard=read('dashboard.html');
-  const header=dashboard.match(/<header class="home-head">[\s\S]*?<\/header>/)?.[0]||'';
+  const header=dashboard.match(/<header class="home-top">[\s\S]*?<\/header>/)?.[0]||'';
   assert.doesNotMatch(dashboard,/aria-label="Меню"/);
-  assert.doesNotMatch(header,/href="profile\.html"/);
-  assert.match(dashboard,/\.head-badge\[hidden\]\{display:none!important\}/);
-  assert.match(dashboard,/function setNotificationBadge\(unread\)/);
-  assert.match(dashboard,/setInterval\(refreshNotifications,60000\)/);
-  assert.match(dashboard,/Як користуватися Signal eSIM/);
-  assert.match(dashboard,/Сповіщення підключаються автоматично/);
-  assert.match(dashboard,/Діагностика підключення/);
+  assert.match(header,/signal-premium-logo\.png/);
+  assert.match(header,/href="profile\.html"/);
+  assert.match(dashboard,/\.notice-badge\[hidden\]\{display:none\}/);
+  assert.match(dashboard,/function setBadge\(count\)/);
+  assert.match(dashboard,/setInterval\(loadNotifications,60000\)/);
+  assert.match(dashboard,/Потрібна допомога\?/);
+  assert.match(dashboard,/href="support\.html"/);
 });
 
 test('customer pages receive one shared bottom navigation',()=>{

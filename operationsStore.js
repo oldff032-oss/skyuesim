@@ -15,12 +15,12 @@ const defaults = () => ({
     ],
   },
   featureFlags: {
-    registration:true, monthlyPlans:true, travelPackages:true, mobileTopups:true, referrals:true,
+    registration:true, monthlyPlans:true, travelPackages:true, mobileTopups:false, referrals:true,
     autoRenew:true, push:true, deepl:true, photoUploads:true, cardPayments:true,
   },
   featureRules: { disabledCountries:[], disabledPackages:[], paymentMethods:{stripeCard:true} },
   providerBalance: { amount:null, currency:'USD', averageOrderCost:null, updatedAt:null, source:'not_configured' },
-  versionInfo: { frontend:'4.0.0', backend:'3.0.0', serviceWorker:'v100', cache:'signal-shell-v100-exact-screens', deployedAt:null, changelog:['Повне автоматичне очищення старої оболонки та кешу без видалення даних акаунта','Екрани входу, реєстрації, головної, трафіку й продовження пакета за затвердженими макетами','Додано вибір захисту акаунта, графічний ключ і відновлення через email','Однакове компактне нижнє меню на всіх основних екранах','Новий кеш v100 примусово встановлює актуальний інтерфейс'],criticalRefreshToken:null,criticalAssets:['/index.html','/welcome.html','/login.html','/register-email.html','/verify-code.html','/set-password.html','/security-setup.html','/account-created.html','/dashboard.html','/usage.html','/esim-topup.html','/security.html','/security-pattern.html','/security-recovery.html','/admin-dashboard.html','/signal-v5.css','/signal-earth-v1.png','/signal-premium-logo.png','/i18n.js','/style.css','/experience.css','/experience.js','/pwa.js','/sw.js'] },
+  versionInfo: { frontend:'4.1.0', backend:'3.0.0', serviceWorker:'v102', cache:'signal-shell-v102-premium-home', deployedAt:null, changelog:['Новий головний екран точно за затвердженим космічним макетом','Живі дані eSIM, залишку, витрат і пакетів зібрано на одному екрані','Поповнення звичайного мобільного номера вимкнено','Автоматичне очищення старого кешу v102 без видалення акаунта чи eSIM'],criticalRefreshToken:null,criticalAssets:['/index.html','/welcome.html','/login.html','/register-email.html','/verify-code.html','/set-password.html','/security-setup.html','/security-pin.html','/account-created.html','/dashboard.html','/usage.html','/esim-topup.html','/security.html','/security-pattern.html','/security-recovery.html','/admin-dashboard.html','/signal-v5.css','/signal-earth-v1.png','/signal-premium-logo.png','/i18n.js','/style.css','/experience.css','/experience.js','/pwa.js','/sw.js'] },
   clientVersions: {},
   dailyReports: [], reportSettings: { enabled:true, hour:8, lastSentDate:null },
 });
@@ -29,7 +29,7 @@ async function bootstrap(){
   const loaded = await storage.load('operations.json', defaults());
   store = {...defaults(), ...loaded};
   store.blacklist = {...defaults().blacklist, ...(loaded.blacklist||{})};
-  store.featureFlags = {...defaults().featureFlags, ...(loaded.featureFlags||{})};
+  store.featureFlags = {...defaults().featureFlags, ...(loaded.featureFlags||{}), mobileTopups:false};
   store.featureRules = {...defaults().featureRules, ...(loaded.featureRules||{}),paymentMethods:{...defaults().featureRules.paymentMethods,...(loaded.featureRules?.paymentMethods||{})}};
   store.providerBalance = {...defaults().providerBalance, ...(loaded.providerBalance||{})};
   store.engagementSettings = {...defaults().engagementSettings, ...(loaded.engagementSettings||{}),rewards:Array.isArray(loaded.engagementSettings?.rewards)?loaded.engagementSettings.rewards:defaults().engagementSettings.rewards};
@@ -44,7 +44,7 @@ async function refresh(){
   const loaded=await storage.reload('operations.json',defaults());
   store={...defaults(),...loaded};
   store.blacklist={...defaults().blacklist,...(loaded.blacklist||{})};
-  store.featureFlags={...defaults().featureFlags,...(loaded.featureFlags||{})};
+  store.featureFlags={...defaults().featureFlags,...(loaded.featureFlags||{}),mobileTopups:false};
   store.engagementSettings={...defaults().engagementSettings,...(loaded.engagementSettings||{}),rewards:Array.isArray(loaded.engagementSettings?.rewards)?loaded.engagementSettings.rewards:defaults().engagementSettings.rewards};
   store.esimInventory=Array.isArray(loaded.esimInventory)?loaded.esimInventory:[];
   store.esimAssignmentEvents=Array.isArray(loaded.esimAssignmentEvents)?loaded.esimAssignmentEvents:[];

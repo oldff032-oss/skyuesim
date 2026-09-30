@@ -55,14 +55,16 @@ test('global update assets use one coherent cache and app version', () => {
   const worker = read('sw.js');
   const pwa = read('pwa.js');
   for (const page of ['/travel-assistant.html','/esim-topup.html','/family-share.html','/notifications.html','/activity.html','/savings.html','/family-center.html']) assert.match(worker, new RegExp(page.replace('.', '\\.')));
-  assert.match(worker, /signal-shell-v100-exact-screens/);
+  assert.match(worker, /signal-shell-v102-premium-home/);
   assert.match(worker, /neverCache[^\n]+admin-common\.js/);
-  assert.match(pwa, /SIGNAL_FRONTEND_VERSION='4\.0\.0'/);
-  assert.match(pwa, /SIGNAL_SW_VERSION='v100'/);
+  assert.match(pwa, /SIGNAL_FRONTEND_VERSION='4\.1\.0'/);
+  assert.match(pwa, /SIGNAL_SW_VERSION='v102'/);
   assert.match(pwa, /caches\.keys\(\)/);
   assert.match(pwa, /registration=>registration\.unregister\(\)/);
   assert.match(read('security-setup.html'), /Захист акаунта/);
   assert.match(worker, /\/security-pin\.html/);
+  assert.match(pwa,/signalForcedDarkPages/);
+  assert.match(pwa,/classList\.contains\('auth-v5'\)\)return/);
 });
 
 test('four-step registration matches the approved screen and never persists a plain password',()=>{
@@ -101,7 +103,7 @@ test('travel planner dates fit mobile cards and secondary tools stay off the hom
   assert.match(planner, /endDate\.min=startDate\.value\|\|today/);
   assert.doesNotMatch(dashboard, /tripSlot|topupPromo|Стан підключення|Поповнити звичайну SIM|Запланувати подорож/);
   assert.match(universe, /href="travel-assistant\.html"/);
-  assert.match(plans, /href="mobile-topup\.html"/);
+  assert.doesNotMatch(plans, /href="mobile-topup\.html"/);
 });
 
 test('forgotten app PIN uses an audited admin approval instead of exposing the old PIN', () => {

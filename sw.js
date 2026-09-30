@@ -3,7 +3,7 @@
 // Кешує тільки статичну "оболонку" — самі дані (підписка, тікети) завжди
 // тягнуться наживо з бекенду, ніколи не кешуються.
 
-const CACHE_NAME = 'signal-shell-v100-exact-screens';
+const CACHE_NAME = 'signal-shell-v102-premium-home';
 const SHELL_FILES = [
   '/index.html',
   '/welcome.html',
@@ -62,7 +62,6 @@ const SHELL_FILES = [
   '/signal-premium-logo.png',
   '/signal-earth-v1.png',
   '/signal-card-scenes-v1.png',
-  '/mobile-topup.html',
   '/manifest.json',
 ];
 

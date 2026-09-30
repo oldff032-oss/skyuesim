@@ -1,6 +1,6 @@
-// v100 is a hard visual reset. It removes obsolete application shells once
+// v102 is a hard visual reset. It removes obsolete application shells once
 // while preserving the customer's account, eSIM and preferences.
-const SIGNAL_RELEASE_ID='v100-exact-screens';
+const SIGNAL_RELEASE_ID='v102-premium-home';
 async function signalInstallFreshShell(){
   if(!('serviceWorker' in navigator))return;
   const releaseKey='signal_installed_release';
@@ -11,25 +11,29 @@ async function signalInstallFreshShell(){
     const registrations=await navigator.serviceWorker.getRegistrations();
     await Promise.all(registrations.map(registration=>registration.unregister()));
   }
-  const registration=await navigator.serviceWorker.register('/sw.js?v=100',{updateViaCache:'none'});
+  const registration=await navigator.serviceWorker.register('/sw.js?v=102',{updateViaCache:'none'});
   await registration.update();
   if(needsReset&&!new URL(location.href).searchParams.has('signal_release')){
-    const next=new URL(location.href);next.searchParams.set('signal_release','v100');location.replace(next.href);
+    const next=new URL(location.href);next.searchParams.set('signal_release','v102');location.replace(next.href);
   }
 }
 signalInstallFreshShell().catch(()=>{});
 if('serviceWorker' in navigator)navigator.serviceWorker.addEventListener('controllerchange',()=>{
-  if(sessionStorage.getItem('signal_sw_reloaded_v100')==='1')return;
-  sessionStorage.setItem('signal_sw_reloaded_v100','1');
+  if(sessionStorage.getItem('signal_sw_reloaded_v102')==='1')return;
+  sessionStorage.setItem('signal_sw_reloaded_v102','1');
   location.reload();
 });
-const applyTheme = () => document.documentElement.classList.toggle('light-theme', localStorage.getItem('signal_theme') === 'light');
+const signalCurrentPage=location.pathname.split('/').pop()||'index.html';
+const signalForcedDarkPages=new Set(['index.html','welcome.html','login.html','register-email.html','verify-code.html','set-password.html','account-created.html','dashboard.html','usage.html','esim-topup.html','security.html','security-setup.html','security-pin.html','security-pattern.html','security-recovery.html','admin-dashboard.html']);
+const applyTheme = () => document.documentElement.classList.toggle('light-theme', !signalForcedDarkPages.has(signalCurrentPage)&&localStorage.getItem('signal_theme') === 'light');
 applyTheme();
 const signalAuthPages=new Set(['login.html','register-email.html','verify-code.html','set-password.html','forgot-password.html','reset-code.html','new-password.html','account-created.html']);
-const signalCurrentPage=location.pathname.split('/').pop()||'index.html';
 if(signalAuthPages.has(signalCurrentPage))document.documentElement.classList.add('signal-auth-page');
 function signalMountAuthExperience(){
   if(!signalAuthPages.has(signalCurrentPage)||!document.body)return;
+  // The approved v5 login screen has its own compact loading state. Injecting
+  // the legacy full-screen loader here creates the giant logo seen on phones.
+  if(document.body.classList.contains('auth-v5'))return;
   const wrap=document.querySelector('.wrap');
   if(wrap&&!wrap.querySelector('.auth-atmosphere'))wrap.insertAdjacentHTML('afterbegin','<div class="auth-atmosphere" aria-hidden="true"><i></i><i></i><i></i></div>');
   if(!document.getElementById('signal-auth-loader'))document.body.insertAdjacentHTML('beforeend','<div id="signal-auth-loader" class="auth-loader" role="status" aria-live="polite" aria-hidden="true"><div class="auth-loader-core"><span class="auth-logo-stage"><span class="auth-globe" aria-hidden="true"><u></u><u></u><u></u></span><img src="signal-premium-logo.png" alt=""><i></i><b></b></span><strong id="signal-auth-loader-title">Захищений вхід</strong><small id="signal-auth-loader-copy">Підключаємо твій акаунт до Signal</small><span class="auth-loader-progress"><i></i></span></div></div>');
@@ -41,12 +45,12 @@ window.signalAuthSuccess=function(title='Готово!'){const loader=document.g
 document.readyState==='loading'?document.addEventListener('DOMContentLoaded',signalMountAuthExperience):signalMountAuthExperience();
 const signalNavItems={
   'dashboard.html':{label:'Головна',labelEn:'Home',icon:'<svg class="nav-art nav-vector" viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 10.5 12 3l8.5 7.5"/><path d="M5.5 9.3V21h13V9.3M9.5 21v-6h5v6"/></svg>'},
-  'plans.html':{label:'Тарифи',labelEn:'Plans',icon:'<svg class="nav-art nav-vector" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3.5 12h17M12 3c2.5 2.6 3.8 5.6 3.8 9S14.5 18.4 12 21M12 3C9.5 5.6 8.2 8.6 8.2 12s1.3 6.4 3.8 9"/></svg>'},
+  'plans.html':{label:'Пакети',labelEn:'Plans',icon:'<svg class="nav-art nav-vector" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3.5 12h17M12 3c2.5 2.6 3.8 5.6 3.8 9S14.5 18.4 12 21M12 3C9.5 5.6 8.2 8.6 8.2 12s1.3 6.4 3.8 9"/></svg>'},
   'usage.html':{label:'Витрати',labelEn:'Usage',icon:'<svg class="nav-art nav-vector" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V5M16 20v-8M22 20V3M2 20h21"/></svg>'},
   'profile.html':{label:'Профіль',labelEn:'Profile',icon:'<svg class="nav-art nav-vector" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="7.5" r="3.5"/><path d="M5 21c.4-4.6 2.8-7 7-7s6.6 2.4 7 7"/></svg>'}
 };
 const signalNoBottomNavPages=new Set([...signalAuthPages,'index.html','welcome.html','access-recovery.html','access-recovery-complete.html','rescue-mode.html','account-created.html','security-setup.html','security-pin.html','security-pattern.html','security-recovery.html']);
-const signalPlanPages=new Set(['plans.html','esim-topup.html','mobile-topup.html','travel-plans.html']);
+const signalPlanPages=new Set(['plans.html','esim-topup.html','travel-plans.html']);
 const signalUsagePages=new Set(['usage.html','traffic-alerts.html','activity.html','savings.html','smart-assist.html']);
 function signalBottomNavMarkup(){return `<nav class="bottomnav" aria-label="Головна навігація">${Object.entries(signalNavItems).map(([page,item])=>`<a href="${page}" aria-label="${item.label}"></a>`).join('')}</nav>`;}
 function signalActiveNavPage(current){if(signalNavItems[current])return current;if(signalPlanPages.has(current))return'plans.html';if(signalUsagePages.has(current))return'usage.html';return'profile.html';}
@@ -128,7 +132,7 @@ async function signalConsumeMaintenancePreviewCode(){
   url.searchParams.delete('maintenance_preview');history.replaceState(null,'',`${url.pathname}${url.search}${url.hash}`);
   try{const response=await signalOriginalFetch(`${API_URL}/api/maintenance-preview/exchange`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code}),cache:'no-store'}),data=await response.json();if(!response.ok)throw Error(data.error||'Preview failed');sessionStorage.setItem('signal_maintenance_preview_token',data.previewToken);sessionStorage.setItem('signal_maintenance_preview_expires',data.expiresAt);location.replace(url.href);return true;}catch{return false;}
 }
-const SIGNAL_FRONTEND_VERSION='4.0.0',SIGNAL_SW_VERSION='v100',SIGNAL_CACHE_VERSION='signal-shell-v100-exact-screens';
+const SIGNAL_FRONTEND_VERSION='4.1.0',SIGNAL_SW_VERSION='v102',SIGNAL_CACHE_VERSION='signal-shell-v102-premium-home';
 window.SIGNAL_APP_VERSION=SIGNAL_FRONTEND_VERSION;
 window.addEventListener('load',async()=>{
   if(typeof API_URL==='undefined')return;
