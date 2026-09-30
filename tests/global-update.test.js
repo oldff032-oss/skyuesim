@@ -55,10 +55,10 @@ test('global update assets use one coherent cache and app version', () => {
   const worker = read('sw.js');
   const pwa = read('pwa.js');
   for (const page of ['/travel-assistant.html','/esim-topup.html','/family-share.html','/notifications.html','/activity.html','/savings.html','/family-center.html']) assert.match(worker, new RegExp(page.replace('.', '\\.')));
-  assert.match(worker, /signal-shell-v102-premium-home/);
+  assert.match(worker, /signal-shell-v103-registration-offer/);
   assert.match(worker, /neverCache[^\n]+admin-common\.js/);
-  assert.match(pwa, /SIGNAL_FRONTEND_VERSION='4\.1\.0'/);
-  assert.match(pwa, /SIGNAL_SW_VERSION='v102'/);
+  assert.match(pwa, /SIGNAL_FRONTEND_VERSION='4\.2\.0'/);
+  assert.match(pwa, /SIGNAL_SW_VERSION='v103'/);
   assert.match(pwa, /caches\.keys\(\)/);
   assert.match(pwa, /registration=>registration\.unregister\(\)/);
   assert.match(read('security-setup.html'), /Захист акаунта/);
@@ -78,6 +78,25 @@ test('four-step registration matches the approved screen and never persists a pl
   assert.match(auth,/appLock:\{enabled:false/);
   assert.match(verification,/data\.registrationComplete&&data\.sessionToken/);
   assert.match(verification,/security-setup\.html\?onboarding=1/);
+});
+
+test('registration is visible and the first-ten 20 GB offer is reserved only after email verification',()=>{
+  const login=read('login.html');
+  const registration=read('register-email.html');
+  const verification=read('verify-code.html');
+  const server=read('server.js');
+  const operations=read('operationsStore.js');
+  assert.match(login,/class="auth-register" href="register-email\.html"/);
+  assert.match(login,/id="welcomeOfferSlots"/);
+  assert.match(registration,/Перші 10 акаунтів отримають 20 ГБ/);
+  assert.match(registration,/Подарунок резервується після підтвердження email/);
+  assert.match(server,/app\.get\('\/api\/auth\/welcome-offer'/);
+  assert.match(server,/if\(result\.registrationComplete\)result\.welcomeOffer=claimWelcomeRegistrationOffer/);
+  assert.match(operations,/welcomeRegistrationOffer/);
+  assert.match(operations,/type:'welcome_20gb_esim_fulfillment'/);
+  assert.match(operations,/function fulfillWelcomeOffer/);
+  assert.match(server,/operationsStore\.fulfillWelcomeOffer\(targetEmail/);
+  assert.match(verification,/signal_welcome_offer/);
 });
 
 test('customer pages render immediately and admin navigation stays compact', () => {

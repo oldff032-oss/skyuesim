@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
-  <link rel="stylesheet" href="signal-v5.css?v=101">
+  <link rel="stylesheet" href="signal-v5.css?v=104">
   <link rel="manifest" href="/manifest.json">
   <meta name="theme-color" content="#020713">
   <script src="pwa.js"></script>
@@ -18,6 +18,10 @@
     <div class="o-stepper" aria-label="Крок 2 з 4"><span class="o-step done" data-step="1" data-i18n-uk="Мова" data-i18n-en="Language">Мова</span><span class="o-step active" data-step="2" data-i18n-uk="Акаунт" data-i18n-en="Account">Акаунт</span><span class="o-step" data-step="3" data-i18n-uk="Підтвердження" data-i18n-en="Verification">Підтвердження</span><span class="o-step" data-step="4" data-i18n-uk="Готово" data-i18n-en="Done">Готово</span></div>
     <h1 data-i18n-uk="Створити акаунт" data-i18n-en="Create account">Створити акаунт</h1>
     <p class="lead" data-i18n-uk="Декілька кроків — і ви готові досліджувати світ." data-i18n-en="Just a few steps and you are ready to explore the world.">Декілька кроків — і ви готові досліджувати світ.</p>
+    <section class="registration-offer" id="registrationOffer" aria-live="polite">
+      <span class="registration-offer-icon"><b>20</b><small>ГБ</small></span>
+      <span><small data-i18n-uk="СТАРТОВИЙ ПОДАРУНОК" data-i18n-en="WELCOME GIFT">СТАРТОВИЙ ПОДАРУНОК</small><strong data-i18n-uk="Перші 10 акаунтів отримають 20 ГБ" data-i18n-en="The first 10 accounts receive 20 GB">Перші 10 акаунтів отримають 20 ГБ</strong><em id="registrationOfferSlots">Перевіряємо доступні місця…</em></span>
+    </section>
     <section class="registration-fields visible">
       <div class="field-group field-with-icon"><label class="field-label" data-i18n-uk="Ім’я" data-i18n-en="Name">Ім’я</label><svg class="field-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="4"/><path d="M4.5 21a7.5 7.5 0 0 1 15 0"/></svg><input type="text" id="displayName" placeholder="Юлія" autocomplete="name" maxlength="60"></div>
       <div class="field-group field-with-icon"><label class="field-label" data-i18n-uk="Електронна пошта" data-i18n-en="Email">Електронна пошта</label><svg class="field-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="m4 7 8 6 8-6"/></svg><input type="email" id="email" placeholder="yuliia@gmail.com" autocomplete="email"></div>
@@ -25,6 +29,8 @@
       <div class="password-rules"><b data-i18n-uk="Пароль має містити:" data-i18n-en="Password must contain:">Пароль має містити:</b><span data-rule="length">✓ <i data-i18n-uk="мінімум 8 символів" data-i18n-en="at least 8 characters">мінімум 8 символів</i></span><span data-rule="letters">✓ <i data-i18n-uk="велику та малу літери" data-i18n-en="upper and lowercase letters">велику та малу літери</i></span><span data-rule="number">✓ <i data-i18n-uk="цифру" data-i18n-en="a number">цифру</i></span><span data-rule="symbol">✓ <i data-i18n-uk="спеціальний символ" data-i18n-en="a special character">спеціальний символ</i></span></div>
       <div id="err" class="o-error" hidden></div>
       <button class="o-btn" id="continueBtn" type="button" data-i18n-uk="Продовжити　→" data-i18n-en="Continue　→">Продовжити　→</button>
+      <p class="registration-offer-note" data-i18n-uk="Подарунок резервується після підтвердження email. Одна пропозиція на один акаунт. eSIM з’явиться після підготовки." data-i18n-en="The gift is reserved after email verification. One offer per account. Your eSIM will appear after preparation.">Подарунок резервується після підтвердження email. Одна пропозиція на один акаунт. eSIM з’явиться після підготовки.</p>
+      <a class="registration-login-link" href="login.html" data-i18n-uk="Вже є акаунт? Увійти" data-i18n-en="Already have an account? Sign in">Вже є акаунт? Увійти</a>
     </section>
   </main>
   <script src="config.js"></script>
@@ -33,6 +39,10 @@
     const rules={length:value=>value.length>=8,letters:value=>/[a-zа-яіїє]/.test(value)&&/[A-ZА-ЯІЇЄ]/.test(value),number:value=>/\d/.test(value),symbol:value=>/[^A-Za-zА-Яа-яІіЇїЄє0-9]/.test(value)};
     function updateRules(){const value=password.value;Object.entries(rules).forEach(([name,test])=>document.querySelector(`[data-rule="${name}"]`).classList.toggle('valid',test(value)))}
     password.addEventListener('input',updateRules);togglePassword.onclick=()=>{password.type=password.type==='password'?'text':'password'};
+    async function loadWelcomeOffer(){
+      const offerText=(uk,en)=>language==='en'?en:uk;
+      try{const response=await fetch(`${API_URL}/api/auth/welcome-offer`,{cache:'no-store'}),offer=await response.json();if(!response.ok)throw Error();if(offer.available){registrationOfferSlots.textContent=offerText(`Залишилось ${offer.remaining} з ${offer.limit} місць`,`${offer.remaining} of ${offer.limit} spots left`);registrationOffer.classList.remove('ended')}else{registrationOfferSlots.textContent=offerText('Акцію завершено — звичайна реєстрація відкрита','The offer has ended — regular registration is open');registrationOffer.classList.add('ended')}}catch{registrationOfferSlots.textContent=offerText('Місце визначиться після підтвердження email','Availability is confirmed after email verification')}
+    }
     async function requestCode(){
       const mail=email.value.trim(),name=displayName.value.trim(),secret=password.value;
       err.hidden=true;
@@ -42,7 +52,7 @@
       continueBtn.disabled=true;continueBtn.textContent=window.signalT('Надсилаємо код…','Sending code…');window.signalAuthLoading?.(true,window.signalT('Надсилаємо код','Sending your code'),window.signalT('Готуємо захищене підтвердження email','Preparing secure email verification'));
       try{const response=await fetch(`${API_URL}/api/auth/request-code`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:mail,language,displayName:name,password:secret})}),data=await response.json();if(!response.ok)throw Error(data.error||'Помилка сервера');password.value='';localStorage.setItem('signal_pending_email',mail);window.signalAuthSuccess?.(window.signalT('Код надіслано!','Code sent!'));setTimeout(()=>location.href='verify-code.html',550)}catch(error){window.signalAuthLoading?.(false);err.textContent=error.message;err.hidden=false;continueBtn.disabled=false;continueBtn.textContent=window.signalT('Продовжити　→','Continue　→')}
     }
-    continueBtn.onclick=requestCode;password.addEventListener('keydown',event=>{if(event.key==='Enter')requestCode()});
+    continueBtn.onclick=requestCode;password.addEventListener('keydown',event=>{if(event.key==='Enter')requestCode()});loadWelcomeOffer();
   </script>
 </body>
 </html>

@@ -601,7 +601,7 @@ app.use('/api',(req,res,next)=>{
   const lock=activeSystemLock();
   if(!lock)return next();
   const path=`/api${req.path}`;
-  const alwaysAvailable=new Set(['/api/service-status','/api/announcements','/api/maintenance-support','/api/maintenance-preview/exchange','/api/app-version','/api/webhook','/api/inbound-email']);
+  const alwaysAvailable=new Set(['/api/service-status','/api/announcements','/api/maintenance-support','/api/maintenance-preview/exchange','/api/app-version','/api/auth/welcome-offer','/api/webhook','/api/inbound-email']);
   if(alwaysAvailable.has(path)||path.startsWith('/api/admin/login'))return next();
   const adminSession=adminAuth.getSession(req.headers['x-admin-token']);
   if(adminSession?.role==='super_admin')return next();
@@ -612,6 +612,17 @@ app.use('/api',(req,res,next)=>{
 // =========================================================
 // АВТЕНТИФІКАЦІЯ: email -> код -> пароль -> акаунт, і логін
 // =========================================================
+
+app.get('/api/auth/welcome-offer', (req,res) => res.json(operationsStore.welcomeOfferStatus()));
+
+function claimWelcomeRegistrationOffer(email){
+  const result=operationsStore.claimWelcomeOffer(email);
+  if(result.claimed){
+    const current=getUser(email)||{};
+    saveUser(email,{welcomeOffer:{...(current.welcomeOffer||{}),claimId:result.claimId,dataLimitGb:result.dataLimitGb,status:result.status,claimedAt:result.claimedAt}});
+  }
+  return result;
+}
 
 app.post('/api/auth/request-code',requireFeature('registration','Реєстрацію тимчасово призупинено'),rateLimit('request_code',15*60*1000,10,req=>req.body?.email), async (req, res) => {
   try {
@@ -633,6 +644,7 @@ app.post('/api/auth/verify-code',rateLimit('verify_code',15*60*1000,15,req=>req.
     const { email, code } = req.body;
     if (!email || !code) return res.status(400).json({ error: 'Потрібні email і code' });
     const result = authService.verifyCode(email, code);
+    if(result.registrationComplete)result.welcomeOffer=claimWelcomeRegistrationOffer(result.email);
     res.json(result);
   } catch (err) {
     recordSecurityFailure(req,'email_verification_code',err.code,req.body?.email);
@@ -2597,6 +2609,8 @@ app.post('/api/admin/esims/:id/assign',adminAuth.requireAdmin,adminAuth.requireR
       saveUser(record.ownerEmail,{esim:null,status:sourceOwner?.status==='blocked'?'blocked':'esim_transferred',esimHistory:sourceHistory.slice(0,20),lastEsimAdminActionAt:grantedAt});
     }
     saveUser(targetEmail,{email:targetEmail,status:'active',plan,esim:{...profile,plan,packageName:record.packageName||profile.packageName||null,location:record.profile?.location||profile.location||null,dataLimitGb:record.profile?.dataLimitGb??profile.dataLimitGb??null,durationDays:record.profile?.durationDays??profile.durationDays??null,inventoryProfileId:id,grantType,priceCents:0,assignedAt:grantedAt,assignedBy:req.admin.email},esimGrants:[grant,...(target?.esimGrants||[])].slice(0,100),lastEsimProvisionError:null});
+    const fulfilledWelcomeOffer=operationsStore.fulfillWelcomeOffer(targetEmail,{profileId:id,dataLimitGb:record.profile?.dataLimitGb??profile.dataLimitGb??0});
+    if(fulfilledWelcomeOffer)saveUser(targetEmail,{welcomeOffer:{...(getUser(targetEmail)?.welcomeOffer||{}),status:'fulfilled',profileId:id,fulfilledAt:fulfilledWelcomeOffer.fulfilledAt}});
     if(record.source==='pool')removeEsimFromPool(id);
     await storage.saveNow('users.json',getAllUsers());
     await operationsStore.saveNow();

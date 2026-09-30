@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
-<link rel="stylesheet" href="signal-v5.css">
+<link rel="stylesheet" href="signal-v5.css?v=104">
 <link rel="manifest" href="/manifest.json">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <meta name="theme-color" content="#05060d">
@@ -94,6 +94,7 @@
           localStorage.setItem('signal_session_token',data.sessionToken);
           localStorage.setItem('signal_email',data.email);
           localStorage.setItem('signal_language',data.language||localStorage.getItem('signal_language')||'uk');
+          if(data.welcomeOffer)localStorage.setItem('signal_welcome_offer',JSON.stringify(data.welcomeOffer));
           localStorage.removeItem('signal_pending_email');
           setTimeout(()=>{window.location.href='security-setup.html?onboarding=1'},500);
         }else{

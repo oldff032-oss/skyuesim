@@ -6,7 +6,7 @@
   <title>Вхід — Signal</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="signal-v5.css?v=101">
+  <link rel="stylesheet" href="signal-v5.css?v=104">
   <link rel="manifest" href="/manifest.json">
   <meta name="theme-color" content="#020713">
   <script src="pwa.js"></script>
@@ -22,7 +22,13 @@
       <div class="auth-actions"><a class="o-link" href="forgot-password.html">Забули пароль?</a></div>
       <div id="err" class="o-error" hidden></div>
       <button class="o-btn" id="loginBtn" type="button">Увійти　→</button>
+      <a class="auth-register" href="register-email.html"><span data-i18n-uk="Ще немає акаунта?" data-i18n-en="New to Signal?">Ще немає акаунта?</span><strong data-i18n-uk="Створити акаунт" data-i18n-en="Create account">Створити акаунт</strong><b aria-hidden="true">→</b></a>
     </section>
+    <a class="welcome-offer-card" id="welcomeOfferCard" href="register-email.html">
+      <span class="welcome-offer-orb"><b>20</b><small>ГБ</small></span>
+      <span class="welcome-offer-copy"><small data-i18n-uk="ПОДАРУНОК НОВИМ КОРИСТУВАЧАМ" data-i18n-en="WELCOME GIFT">ПОДАРУНОК НОВИМ КОРИСТУВАЧАМ</small><strong data-i18n-uk="Інтернет для перших 10 акаунтів" data-i18n-en="20 GB for the first 10 accounts">Інтернет для перших 10 акаунтів</strong><em id="welcomeOfferSlots">Перевіряємо доступні місця…</em></span>
+      <span class="welcome-offer-arrow" aria-hidden="true">›</span>
+    </a>
     <div class="auth-bottom"><span class="auth-divider">або</span><p class="auth-slogan">ЗВ’ЯЗОК, ЩО ВІДКРИВАЄ<br>НОВІ ГОРИЗОНТИ</p></div>
     <div class="planet-horizon" aria-hidden="true"></div>
   </main>
@@ -30,8 +36,12 @@
   <script>
     if(new URLSearchParams(location.search).get('reset')==='success')resetBanner.hidden=false;
     showPassword.onclick=()=>{password.type=password.type==='password'?'text':'password'};
+    async function loadWelcomeOffer(){
+      const english=localStorage.getItem('signal_language')==='en';
+      try{const response=await fetch(`${API_URL}/api/auth/welcome-offer`,{cache:'no-store'}),offer=await response.json();if(!response.ok)throw Error();if(offer.available){welcomeOfferSlots.textContent=english?`${offer.remaining} of ${offer.limit} spots left`:`Залишилось ${offer.remaining} з ${offer.limit} місць`;welcomeOfferCard.classList.remove('ended')}else{welcomeOfferSlots.textContent=english?'The offer has ended — registration is open':'Акцію завершено — реєстрація відкрита';welcomeOfferCard.classList.add('ended')}}catch{welcomeOfferSlots.textContent=english?'Create an account and start exploring':'Створи акаунт і почни подорож'}
+    }
     async function doLogin(){const mail=email.value.trim(),pass=password.value;err.hidden=true;if(!mail||!pass){err.textContent='Заповни обидва поля';err.hidden=false;return}loginBtn.disabled=true;loginBtn.textContent='Входимо…';window.signalAuthLoading?.(true,'Перевіряємо дані','Безпечно підключаємо твій акаунт');try{const response=await fetch(`${API_URL}/api/auth/login`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:mail,password:pass})}),data=await response.json();if(!response.ok)throw Error(data.error||'Помилка входу');localStorage.setItem('signal_session_token',data.sessionToken);localStorage.setItem('signal_email',data.email);localStorage.setItem('signal_language',data.language||'uk');for(const key of Object.keys(sessionStorage))if(key.startsWith('signal_app_unlocked:'))sessionStorage.removeItem(key);window.signalAuthSuccess?.('Вхід успішний!');setTimeout(()=>location.href='dashboard.html',650)}catch(error){err.textContent=error.message+'. Перевір мережу і спробуй ще раз.';err.hidden=false;window.signalAuthLoading?.(false);loginBtn.disabled=false;loginBtn.textContent='Увійти　→'}}
-    loginBtn.onclick=doLogin;password.addEventListener('keydown',event=>{if(event.key==='Enter')doLogin()});
+    loginBtn.onclick=doLogin;password.addEventListener('keydown',event=>{if(event.key==='Enter')doLogin()});loadWelcomeOffer();
   </script>
 </body>
 </html>
