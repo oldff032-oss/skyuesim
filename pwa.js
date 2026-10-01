@@ -1,6 +1,6 @@
-// v103 is a hard visual reset. It removes obsolete application shells once
+// v105 is a hard visual reset. It removes obsolete application shells once
 // while preserving the customer's account, eSIM and preferences.
-const SIGNAL_RELEASE_ID='v103-registration-offer';
+const SIGNAL_RELEASE_ID='v105-visible-world';
 async function signalInstallFreshShell(){
   if(!('serviceWorker' in navigator))return;
   const releaseKey='signal_installed_release';
@@ -11,16 +11,16 @@ async function signalInstallFreshShell(){
     const registrations=await navigator.serviceWorker.getRegistrations();
     await Promise.all(registrations.map(registration=>registration.unregister()));
   }
-  const registration=await navigator.serviceWorker.register('/sw.js?v=103',{updateViaCache:'none'});
+  const registration=await navigator.serviceWorker.register('/sw.js?v=105',{updateViaCache:'none'});
   await registration.update();
   if(needsReset&&!new URL(location.href).searchParams.has('signal_release')){
-    const next=new URL(location.href);next.searchParams.set('signal_release','v103');location.replace(next.href);
+    const next=new URL(location.href);next.searchParams.set('signal_release','v105');location.replace(next.href);
   }
 }
 signalInstallFreshShell().catch(()=>{});
 if('serviceWorker' in navigator)navigator.serviceWorker.addEventListener('controllerchange',()=>{
-  if(sessionStorage.getItem('signal_sw_reloaded_v103')==='1')return;
-  sessionStorage.setItem('signal_sw_reloaded_v103','1');
+  if(sessionStorage.getItem('signal_sw_reloaded_v105')==='1')return;
+  sessionStorage.setItem('signal_sw_reloaded_v105','1');
   location.reload();
 });
 const signalCurrentPage=location.pathname.split('/').pop()||'index.html';
@@ -132,7 +132,7 @@ async function signalConsumeMaintenancePreviewCode(){
   url.searchParams.delete('maintenance_preview');history.replaceState(null,'',`${url.pathname}${url.search}${url.hash}`);
   try{const response=await signalOriginalFetch(`${API_URL}/api/maintenance-preview/exchange`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code}),cache:'no-store'}),data=await response.json();if(!response.ok)throw Error(data.error||'Preview failed');sessionStorage.setItem('signal_maintenance_preview_token',data.previewToken);sessionStorage.setItem('signal_maintenance_preview_expires',data.expiresAt);location.replace(url.href);return true;}catch{return false;}
 }
-const SIGNAL_FRONTEND_VERSION='4.2.0',SIGNAL_SW_VERSION='v103',SIGNAL_CACHE_VERSION='signal-shell-v103-registration-offer';
+const SIGNAL_FRONTEND_VERSION='4.3.0',SIGNAL_SW_VERSION='v105',SIGNAL_CACHE_VERSION='signal-shell-v105-visible-world';
 window.SIGNAL_APP_VERSION=SIGNAL_FRONTEND_VERSION;
 window.addEventListener('load',async()=>{
   if(typeof API_URL==='undefined')return;

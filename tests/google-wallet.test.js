@@ -43,7 +43,8 @@ test('Google Wallet creates a short-lived signed personal pass without eSIM secr
 test('Google Wallet exposes live travel status and safe built-in reminders',()=>{
   const {privateKey}=crypto.generateKeyPairSync('rsa',{modulusLength:2048});
   const env={FRONTEND_URL:'https://esimsignalapp.com',GOOGLE_WALLET_ISSUER_ID:'3388000000023179296',GOOGLE_WALLET_SERVICE_ACCOUNT_EMAIL:'wallet@signal-test.iam.gserviceaccount.com',GOOGLE_WALLET_PRIVATE_KEY:privateKey.export({type:'pkcs8',format:'pem'})};
-  const resources=wallet.passResources({serial:'signal-live',plan:'Europe 20 GB',destination:'Italy',status:'active',remainingGb:13.04,usedGb:6.96,totalGb:20,usagePercent:34.8,dataStatus:'healthy',esimReadiness:'ready',tripStartDate:'2026-09-10',tripEndDate:'2026-09-17',daysUntilTrip:12,tripStatus:'upcoming',validUntil:'2026-09-30T23:59:59.000Z',daysUntilExpiry:32,lastSyncAt:'2026-08-29T10:00:00.000Z',familyReady:2,familyTotal:3},env);
+  const futureExpiry=new Date(Date.now()+32*24*60*60*1000).toISOString();
+  const resources=wallet.passResources({serial:'signal-live',plan:'Europe 20 GB',destination:'Italy',status:'active',remainingGb:13.04,usedGb:6.96,totalGb:20,usagePercent:34.8,dataStatus:'healthy',esimReadiness:'ready',tripStartDate:'2026-09-10',tripEndDate:'2026-09-17',daysUntilTrip:12,tripStatus:'upcoming',validUntil:futureExpiry,daysUntilExpiry:32,lastSyncAt:'2026-08-29T10:00:00.000Z',familyReady:2,familyTotal:3},env);
   const object=resources.genericObject,modules=Object.fromEntries(object.textModulesData.map(item=>[item.id,item]));
   assert.equal(resources.genericClass.multipleDevicesAndHoldersAllowedStatus,'ONE_USER_ALL_DEVICES');
   assert.match(object.header.defaultValue.value,/13,04 GB/);
