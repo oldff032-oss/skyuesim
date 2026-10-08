@@ -2,7 +2,7 @@
   "name": "Сигнал — інтернет без кордонів",
   "short_name": "Сигнал",
   "description": "Одна підписка — покриття по всій Європі. Активуй eSIM за хвилину.",
-  "start_url": "/index.html?signal_release=v106",
+  "start_url": "/index.html?signal_release=v107",
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait",

@@ -23,7 +23,7 @@ test('home has one compact branded header, a hidden zero badge and support acces
   assert.match(dashboard,/\.notice-badge\[hidden\]\{display:none\}/);
   assert.match(dashboard,/function setBadge\(count\)/);
   assert.match(dashboard,/setInterval\(loadNotifications,60000\)/);
-  assert.match(dashboard,/Потрібна допомога\?/);
+  assert.match(dashboard,/Підтримка/);
   assert.match(dashboard,/href="support\.html"/);
 });
 

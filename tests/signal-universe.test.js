@@ -52,10 +52,10 @@ test('new customer experiences are authenticated and cached as one mobile shell'
 
 test('home keeps the approved usage and package cards without secondary operational cards',()=>{
   const dashboard=read('dashboard.html');
-  assert.match(dashboard,/class="feature-grid"/);
+  assert.match(dashboard,/class="quick-grid"/);
   assert.match(dashboard,/href="usage\.html"/);
   assert.match(dashboard,/href="plans\.html"/);
-  assert.match(dashboard,/Продовжити пакет/);
+  assert.match(dashboard,/Додати пакет/);
   assert.doesNotMatch(dashboard,/mobile-topup\.html/);
   assert.doesNotMatch(dashboard,/space-launch|topup-promo|trip-promo|smart-card|Стан підключення|Поповнити звичайну SIM|Запланувати подорож/);
 });

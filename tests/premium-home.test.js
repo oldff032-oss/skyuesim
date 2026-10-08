@@ -85,7 +85,8 @@ test('Signal Orbit visual system keeps real provider data on mobile home', () =>
   assert.match(dashboard, /networkLabel/);
   assert.match(dashboard, /esim-card/);
   assert.match(dashboard, /usage-core/);
-  for (const action of ['Продовжити пакет','Витрати','Мої пакети','Потрібна допомога']) assert.match(dashboard, new RegExp(action));
+  for (const action of ['Smart Assist','Швидкі дії','Додати пакет','Витрати','Мої пакети','Підтримка']) assert.match(dashboard, new RegExp(action));
+  assert.doesNotMatch(dashboard, /Добрий вечір|greetingName/);
   assert.doesNotMatch(dashboard, /mobile-topup\.html|Поповнення мобільного/);
   assert.match(theme, /signal-earth-v1\.png/);
   assert.match(theme, /\.o-bottomnav/);
@@ -103,8 +104,8 @@ test('premium atlas is shipped in the offline shell and version is coherent', ()
   const pwa = read('pwa.js');
   const operations = read('operationsStore.js');
   assert.match(worker, /'\/signal-card-scenes-v1\.png'/);
-  assert.match(worker, /signal-shell-v106-smart-assist/);
-  assert.match(pwa, /SIGNAL_FRONTEND_VERSION='4\.4\.0'/);
-  assert.match(operations, /frontend:'4\.4\.0', backend:'3\.1\.0', serviceWorker:'v106'/);
+  assert.match(worker, /signal-shell-v107-orbit-home/);
+  assert.match(pwa, /SIGNAL_FRONTEND_VERSION='4\.5\.0'/);
+  assert.match(operations, /frontend:'4\.5\.0', backend:'3\.1\.0', serviceWorker:'v107'/);
   assert.ok(fs.statSync(path.join(root, 'signal-card-scenes-v1.png')).size > 100000);
 });

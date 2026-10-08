@@ -3,7 +3,7 @@
 // Кешує тільки статичну "оболонку" — самі дані (підписка, тікети) завжди
 // тягнуться наживо з бекенду, ніколи не кешуються.
 
-const CACHE_NAME = 'signal-shell-v106-smart-assist';
+const CACHE_NAME = 'signal-shell-v107-orbit-home';
 const SHELL_FILES = [
   '/index.html',
   '/welcome.html',
