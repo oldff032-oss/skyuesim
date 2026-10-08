@@ -17,7 +17,7 @@
     "@simplewebauthn/server": "^13.3.2",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
-    "dotenv": "^16.4.5",
+    "dotenv": "^17.4.2",
     "express": "^4.19.2",
     "pg": "^8.13.0",
     "stripe": "^16.2.0",
