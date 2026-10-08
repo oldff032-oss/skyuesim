@@ -15,10 +15,12 @@ async function sendToEmail(email, notification) {
   const delivery=operationsStore.recordDelivery({channel:'push',recipient:email,subject:notification.title||'Signal',status:'pending'});
   try{configure();}catch(error){operationsStore.updateDelivery(delivery.id,{status:'disabled',error:error.message});throw error;}
   const payload = JSON.stringify({
-    title: notification.title || 'Сигнал',
+    title: notification.title || 'Нове повідомлення',
     body: notification.body || '',
     url: notification.url || '/dashboard.html',
     tag: notification.tag || 'signal-update',
+    actions: Array.isArray(notification.actions) ? notification.actions.slice(0, 2) : [],
+    requireInteraction: notification.requireInteraction === true,
   });
   const subscriptions = pushStore.subscriptionsFor(email);
   const results = await Promise.allSettled(subscriptions.map(async (subscription) => {

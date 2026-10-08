@@ -3,7 +3,7 @@
 // Кешує тільки статичну "оболонку" — самі дані (підписка, тікети) завжди
 // тягнуться наживо з бекенду, ніколи не кешуються.
 
-const CACHE_NAME = 'signal-shell-v105-visible-world';
+const CACHE_NAME = 'signal-shell-v106-smart-assist';
 const SHELL_FILES = [
   '/index.html',
   '/welcome.html',
@@ -31,6 +31,7 @@ const SHELL_FILES = [
   '/signal-passport.html',
   '/signal-club.html',
   '/smart-assist.html',
+  '/traffic-alerts.html',
   '/family-trip.html',
   '/wallet-pass.html',
   '/rescue-mode.html',
@@ -109,18 +110,22 @@ self.addEventListener('fetch', (event) => {
 
 self.addEventListener('push', (event) => {
   const data = event.data ? event.data.json() : {};
-  event.waitUntil(self.registration.showNotification(data.title || 'Сигнал', {
+  event.waitUntil(self.registration.showNotification(data.title || 'Нове повідомлення', {
     body: data.body || '',
     icon: '/icon-192.png',
     badge: '/icon-192.png',
     tag: data.tag || 'signal-update',
+    renotify: false,
+    requireInteraction: data.requireInteraction === true,
+    actions: Array.isArray(data.actions) ? data.actions.slice(0, 2) : [],
     data: { url: data.url || '/dashboard.html' },
   }));
 });
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  const target = new URL(event.notification.data?.url || '/dashboard.html', self.location.origin).href;
+  const actionUrl = event.action === 'topup' ? '/esim-topup.html' : event.action === 'usage' ? '/usage.html' : event.notification.data?.url;
+  const target = new URL(actionUrl || '/dashboard.html', self.location.origin).href;
   event.waitUntil(clients.matchAll({ type: 'window', includeUncontrolled: true }).then(windows => {
     const existing = windows.find(client => client.url.startsWith(self.location.origin));
     if (existing) { existing.navigate(target); return existing.focus(); }

@@ -26,9 +26,9 @@ const defaults = () => ({
   },
   featureRules: { disabledCountries:[], disabledPackages:[], paymentMethods:{stripeCard:true} },
   providerBalance: { amount:null, currency:'USD', averageOrderCost:null, updatedAt:null, source:'not_configured' },
-  versionInfo: { frontend:'4.3.0', backend:'3.0.0', serviceWorker:'v105', cache:'signal-shell-v105-visible-world', deployedAt:null, changelog:['Планета, зорі, орбіти та вогні міст тепер залишаються видимими','Форми входу й реєстрації перенесено на напівпрозоре скло','Перші 10 підтверджених акаунтів отримують резерв 20 ГБ','Автоматичне очищення старого кешу v105 без видалення акаунта чи eSIM'],criticalRefreshToken:null,criticalAssets:['/index.html','/welcome.html','/login.html','/register-email.html','/verify-code.html','/set-password.html','/security-setup.html','/security-pin.html','/account-created.html','/dashboard.html','/usage.html','/esim-topup.html','/security.html','/security-pattern.html','/security-recovery.html','/admin-dashboard.html','/signal-v5.css','/signal-earth-v1.png','/signal-premium-logo.png','/i18n.js','/style.css','/experience.css','/experience.js','/pwa.js','/sw.js'] },
+  versionInfo: { frontend:'4.4.0', backend:'3.1.0', serviceWorker:'v106', cache:'signal-shell-v106-smart-assist', deployedAt:null, changelog:['Smart Assist отримав прогноз, гнучкі пороги та тихі години','Попередження про трафік надсилаються лише один раз на поріг і пакет','Щоденний звіт Super Admin захищено від повторної відправки','Push-повідомлення отримали зрозумілі заголовки та швидкі дії'],criticalRefreshToken:null,criticalAssets:['/index.html','/welcome.html','/login.html','/register-email.html','/verify-code.html','/set-password.html','/security-setup.html','/security-pin.html','/account-created.html','/dashboard.html','/usage.html','/smart-assist.html','/traffic-alerts.html','/esim-topup.html','/security.html','/security-pattern.html','/security-recovery.html','/admin-dashboard.html','/signal-v5.css','/signal-earth-v1.png','/signal-premium-logo.png','/i18n.js','/style.css','/experience.css','/experience.js','/pwa.js','/sw.js'] },
   clientVersions: {},
-  dailyReports: [], reportSettings: { enabled:true, hour:8, lastSentDate:null },
+  dailyReports: [], reportSettings: { enabled:true, hour:8, timezone:'Europe/Prague', lastSentDate:null, lastSuccessfulAt:null, deliveries:{} },
 });
 let store = defaults();
 async function bootstrap(){
@@ -57,6 +57,7 @@ async function refresh(){
   store.esimAssignmentEvents=Array.isArray(loaded.esimAssignmentEvents)?loaded.esimAssignmentEvents:[];
   store.welcomeRegistrationOffer={...defaults().welcomeRegistrationOffer,...(loaded.welcomeRegistrationOffer||{}),claims:Array.isArray(loaded.welcomeRegistrationOffer?.claims)?loaded.welcomeRegistrationOffer.claims:[]};
   store.versionInfo={...defaults().versionInfo,...(loaded.versionInfo||{}),frontend:defaults().versionInfo.frontend,backend:defaults().versionInfo.backend,serviceWorker:defaults().versionInfo.serviceWorker,cache:defaults().versionInfo.cache,changelog:defaults().versionInfo.changelog};
+  store.reportSettings={...defaults().reportSettings,...(loaded.reportSettings||{}),deliveries:{...(loaded.reportSettings?.deliveries||{})}};
   return store;
 }
 function activeAnnouncements(email){ const now=Date.now(); return store.announcements.filter(a => (!a.startsAt || new Date(a.startsAt)<=now) && (!a.expiresAt || new Date(a.expiresAt)>now) && (a.audience==='all'||a.audience===email)); }

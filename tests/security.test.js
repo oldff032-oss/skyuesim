@@ -231,7 +231,7 @@ test('maintenance and security modes enforce a server-side Super Admin lockdown'
 test('service worker bypasses stale cache for maintenance and localization assets', () => {
   const worker=read('sw.js');
   const support=read('support.html');
-  assert.match(worker, /signal-shell-v105-visible-world/);
+  assert.match(worker, /signal-shell-v106-smart-assist/);
   assert.match(worker, /fetch\(event\.request, \{ cache:'no-store' \}\)/);
   assert.match(worker, /'\/i18n\.js'/);
   assert.match(worker, /'\/style\.css'/);
@@ -333,6 +333,7 @@ test('daily Super Admin report is branded and switches between green and red sta
   assert.match(templates,/function dailyAdminReport/);assert.match(templates,/ЩОДЕННИЙ ЗВІТ · SUPER ADMIN/);
   for(const label of ['Нові користувачі','Покупки','Виторг','Повернення','Видані eSIM','Невдалі операції','Відкриті звернення','Середній час відповіді','Середня оцінка','Підозрілі входи','Баланс провайдера','Stripe','Email','Push','eSIM Access'])assert.match(templates,new RegExp(label));
   assert.match(server,/emailTemplates\.dailyAdminReport/);assert.match(server,/lastSentDate===localDate/);
+  assert.match(server,/claimExternalEvent\('daily_admin_report'/);assert.match(server,/24\*60\*60\*1000/);assert.match(server,/lastSuccessfulAt/);
 });
 
 test('Super Admin feature switches are enforced and fully audited',()=>{

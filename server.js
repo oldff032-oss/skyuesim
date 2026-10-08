@@ -33,6 +33,7 @@ const controlCenter = require('./controlCenterService');
 const mobileTopups = require('./mobileTopupService');
 const engagement = require('./engagementService');
 const googleWallet = require('./googleWalletService');
+const notificationPolicy = require('./notificationPolicyService');
 
 function refreshGoogleWallet(email) {
   const user=getUser(email);
@@ -894,8 +895,8 @@ app.put('/api/account/profile', requireUserSession, async (req, res) => {
 });
 
 app.get('/api/account/preferences', requireUserSession, (req, res) => {
-  const preferences = getUser(req.userEmail)?.preferences || {};
-  res.json({ trafficAlertThresholds: preferences.trafficAlertThresholds || [50, 80, 95], marketingEmails:preferences.marketingEmails===true, language: getUser(req.userEmail)?.language || 'uk' });
+  const user = getUser(req.userEmail) || {}, preferences = user.preferences || {};
+  res.json({ trafficAlertThresholds: notificationPolicy.normalizeThresholds(preferences.trafficAlertThresholds), availableTrafficAlertThresholds:notificationPolicy.AVAILABLE_TRAFFIC_THRESHOLDS, marketingEmails:preferences.marketingEmails===true, language:user.language || 'uk' });
 });
 
 app.post('/api/account/diagnostics', requireUserSession, (req, res) => {
@@ -958,15 +959,17 @@ app.put('/api/account/preferences', requireUserSession, (req, res) => {
   const raw = req.body?.trafficAlertThresholds;
   const language = req.body?.language;
   const marketingEmails=req.body?.marketingEmails;
-  if (raw !== undefined && (!Array.isArray(raw) || raw.some((value) => !Number.isInteger(value) || value < 1 || value > 100))) {
-    return res.status(400).json({ error: 'Вкажи коректні пороги від 1 до 100' });
+  if (raw !== undefined && (!Array.isArray(raw) || !raw.length || raw.some((value) => !notificationPolicy.AVAILABLE_TRAFFIC_THRESHOLDS.includes(value)))) {
+    return res.status(400).json({ error: 'Обери хоча б один поріг: 20%, 50%, 70%, 80% або 100%' });
   }
   if (language !== undefined && !['uk','en'].includes(language)) return res.status(400).json({ error: 'Некоректна мова' });
-  const trafficAlertThresholds = raw === undefined ? null : [...new Set(raw)].sort((a, b) => a - b);
+  const trafficAlertThresholds = raw === undefined ? null : notificationPolicy.normalizeThresholds(raw);
   const user = getUser(req.userEmail);
   if(marketingEmails!==undefined&&typeof marketingEmails!=='boolean')return res.status(400).json({error:'Некоректне налаштування email'});
-  saveUser(req.userEmail, { ...(language ? { language } : {}), preferences: { ...(user?.preferences || {}), ...(trafficAlertThresholds ? { trafficAlertThresholds } : {}),...(marketingEmails!==undefined?{marketingEmails}:{}) } });
-  res.json({ ok: true, trafficAlertThresholds: trafficAlertThresholds || user?.preferences?.trafficAlertThresholds || [50,80,95],marketingEmails:marketingEmails??user?.preferences?.marketingEmails===true, language: language || user?.language || 'uk' });
+  const patch={ ...(language ? { language } : {}), preferences: { ...(user?.preferences || {}), ...(trafficAlertThresholds ? { trafficAlertThresholds } : {}),...(marketingEmails!==undefined?{marketingEmails}:{}) } };
+  if(trafficAlertThresholds)patch.trafficAlertState=notificationPolicy.rebaseTrafficAlertState(user,trafficAlertThresholds);
+  saveUser(req.userEmail,patch);
+  res.json({ ok: true, trafficAlertThresholds: trafficAlertThresholds || notificationPolicy.normalizeThresholds(user?.preferences?.trafficAlertThresholds),marketingEmails:marketingEmails??user?.preferences?.marketingEmails===true, language: language || user?.language || 'uk' });
 });
 
 function safeTravelMode(value={}) {
@@ -1025,13 +1028,23 @@ app.post('/api/account/club/redeem',requireUserSession,rateLimit('club_redeem',6
 app.get('/api/account/usage-insights',requireUserSession,(req,res)=>res.json(engagement.usageInsights(getUser(req.userEmail)||{})));
 
 app.get('/api/account/smart-assist',requireUserSession,(req,res)=>{
-  const user=getUser(req.userEmail)||{},preference=user.smartAssist||{enabled:false,thresholdGb:1,maxMonthlySpendCents:2000};
-  res.json({preference,insights:engagement.usageInsights(user),requiresConfirmation:true,explanation:'Signal попереджає та відкриває захищену оплату. Картка не списується без підтвердження.'});
+  const user=getUser(req.userEmail)||{},preference=notificationPolicy.smartAssistPreference(user),thresholds=notificationPolicy.normalizeThresholds(user.preferences?.trafficAlertThresholds),alertState=user.trafficAlertState||null;
+  const sent=new Set(alertState?.sentThresholds||[]),nextThreshold=thresholds.find(value=>!sent.has(value))||null;
+  res.json({preference,thresholds,availableThresholds:notificationPolicy.AVAILABLE_TRAFFIC_THRESHOLDS,alertStatus:{sentThresholds:[...sent].sort((a,b)=>a-b),nextThreshold,lastSentAt:alertState?.lastSentAt||null,history:(alertState?.history||[]).slice(-10).reverse()},insights:engagement.usageInsights(user),requiresConfirmation:true,explanation:'Асистент попереджає та відкриває захищену оплату. Жодного списання без твого підтвердження.'});
 });
 app.put('/api/account/smart-assist',requireUserSession,(req,res)=>{
   const thresholdGb=Number(req.body?.thresholdGb),maxMonthlySpendCents=Math.trunc(Number(req.body?.maxMonthlySpendCents));
   if(!Number.isFinite(thresholdGb)||thresholdGb<.1||thresholdGb>10||!Number.isInteger(maxMonthlySpendCents)||maxMonthlySpendCents<500||maxMonthlySpendCents>50000)return res.status(400).json({error:'Вкажіть поріг 0,1–10 ГБ і місячний ліміт від $5 до $500'});
-  const preference={enabled:req.body?.enabled===true,thresholdGb:+thresholdGb.toFixed(2),maxMonthlySpendCents,requiresConfirmation:true,updatedAt:new Date().toISOString()};saveUser(req.userEmail,{smartAssist:preference});res.json({ok:true,preference});
+  const rawThresholds=req.body?.trafficAlertThresholds;
+  if(!Array.isArray(rawThresholds)||!rawThresholds.length||rawThresholds.some(value=>!notificationPolicy.AVAILABLE_TRAFFIC_THRESHOLDS.includes(value)))return res.status(400).json({error:'Обери хоча б один поріг сповіщення'});
+  const forecastDays=Number(req.body?.forecastDays),expiryReminderDays=(Array.isArray(req.body?.expiryReminderDays)?req.body.expiryReminderDays:[]).map(Number).filter(value=>[1,3,7].includes(value));
+  if(![1,3,5,7].includes(forecastDays))return res.status(400).json({error:'Некоректний прогноз завершення пакета'});
+  const time=value=>/^([01]\d|2[0-3]):[0-5]\d$/.test(String(value||''))?String(value):null,quietStart=time(req.body?.quietHours?.start),quietEnd=time(req.body?.quietHours?.end);
+  if(!quietStart||!quietEnd)return res.status(400).json({error:'Вкажіть правильний час тихих годин'});
+  const channels={push:req.body?.channels?.push!==false,inApp:req.body?.channels?.inApp!==false,email:req.body?.channels?.email===true};
+  const preference={enabled:req.body?.enabled===true,thresholdGb:+thresholdGb.toFixed(2),maxMonthlySpendCents,forecastDays,expiryReminderDays:[...new Set(expiryReminderDays)].sort((a,b)=>b-a),channels,quietHours:{enabled:req.body?.quietHours?.enabled===true,start:quietStart,end:quietEnd},packageRecommendations:req.body?.packageRecommendations!==false,requiresConfirmation:true,updatedAt:new Date().toISOString()};
+  const user=getUser(req.userEmail)||{},thresholds=notificationPolicy.normalizeThresholds(rawThresholds),preferences={...(user.preferences||{}),trafficAlertThresholds:thresholds},trafficAlertState=notificationPolicy.rebaseTrafficAlertState(user,thresholds);
+  saveUser(req.userEmail,{smartAssist:preference,preferences,trafficAlertState});res.json({ok:true,preference,thresholds});
 });
 
 app.get('/api/account/family-trips',requireUserSession,(req,res)=>res.json({trips:getUser(req.userEmail)?.familyTrips||[],availableEsims:(getUser(req.userEmail)?.sharedEsims||[]).map(item=>({id:item.id,recipientName:item.recipientName,packageName:item.packageName,status:item.share?.installedAt?'installed':item.share?.viewedAt?'opened':item.share?'shared':'ready'}))}));
@@ -2099,16 +2112,42 @@ function controlContext(){
   return {users,tickets,diagnostics,operations,audit,support,attention};
 }
 async function runDailySuperAdminReport(){
+  await operationsStore.refresh();
   const c=controlContext(),settings=c.operations.reportSettings||{};
   if(settings.enabled===false)return;
-  const now=new Date(),localDate=new Intl.DateTimeFormat('en-CA',{timeZone:process.env.REPORT_TIMEZONE||'Europe/Prague'}).format(now);
-  const localHour=Number(new Intl.DateTimeFormat('en-US',{timeZone:process.env.REPORT_TIMEZONE||'Europe/Prague',hour:'2-digit',hour12:false}).format(now));
-  if(settings.lastSentDate===localDate||localHour<Number(settings.hour??8))return;
-  const report=controlCenter.dailyReport(c);c.operations.dailyReports.unshift(report);c.operations.dailyReports=c.operations.dailyReports.slice(0,90);settings.lastSentDate=localDate;c.operations.reportSettings=settings;operationsStore.save();
+  const now=new Date(),timezone=settings.timezone||process.env.REPORT_TIMEZONE||'Europe/Prague',localDate=new Intl.DateTimeFormat('en-CA',{timeZone:timezone}).format(now);
+  const localHour=Number(new Intl.DateTimeFormat('en-US',{timeZone:timezone,hour:'2-digit',hour12:false}).format(now));
+  if(localHour<Number(settings.hour??8))return;
+  // Compatibility guard for an existing installation on the day it upgrades.
+  // New deliveries below use an atomic per-admin key and a strict 24-hour window.
+  if(settings.lastSentDate===localDate&&!settings.lastSuccessfulAt&&!Object.keys(settings.deliveries||{}).length)return;
+  const report=controlCenter.dailyReport(c);
   const since=Date.now()-86400000,hasRecentFailure=source=>c.diagnostics.some(item=>item.source===source&&item.severity==='error'&&new Date(item.createdAt).getTime()>=since),deliveryFailed=channel=>(c.operations.deliveryEvents||[]).some(item=>item.channel===channel&&item.status==='failed'&&new Date(item.updatedAt).getTime()>=since);
   const services={stripe:Boolean(process.env.STRIPE_SECRET_KEY)&&!hasRecentFailure('stripe'),email:isEmailConfigured()&&!deliveryFailed('email'),push:isPushConfigured()&&!deliveryFailed('push'),esim:Boolean(process.env.ESIM_PROVIDER_API_KEY||process.env.ESIM_ACCESS_CODE)&&!hasRecentFailure('esim_access')};
   const healthy=report.status==='healthy'&&Object.values(services).every(Boolean);
-  for(const admin of adminAuth.listAdmins().filter(a=>a.role==='super_admin'&&!a.blocked))await sendEmail({to:admin.email,subject:`${healthy?'✅':'🚨'} Щоденний звіт Signal — ${healthy?'усе добре':'потрібна увага'}`,html:emailTemplates.dailyAdminReport({report,services})}).catch(error=>console.error('[daily report]',error.message));
+  settings.deliveries={...(settings.deliveries||{})};
+  const successful=[];
+  for(const admin of adminAuth.listAdmins().filter(a=>a.role==='super_admin'&&!a.blocked)){
+    const hasPerRecipientHistory=Object.keys(settings.deliveries).length>0;
+    const previous=settings.deliveries[admin.email]?.lastSuccessfulAt||(!hasPerRecipientHistory?settings.lastSuccessfulAt:null);
+    if(previous&&now.getTime()-new Date(previous).getTime()<24*60*60*1000)continue;
+    const recipientKey=crypto.createHash('sha256').update(admin.email).digest('hex').slice(0,20),eventId=`${localDate}:${recipientKey}`;
+    if(!await storage.claimExternalEvent('daily_admin_report',eventId,'daily_health_email'))continue;
+    try{
+      await sendEmail({to:admin.email,subject:`${healthy?'✅':'🚨'} Щоденний звіт Signal — ${healthy?'усе працює':'потрібна увага'}`,html:emailTemplates.dailyAdminReport({report,services})});
+      await storage.finishExternalEvent('daily_admin_report',eventId,'completed');
+      settings.deliveries[admin.email]={lastSuccessfulAt:now.toISOString(),lastStatus:healthy?'healthy':'attention',lastReportDate:localDate};
+      successful.push(admin.email);
+    }catch(error){
+      await storage.finishExternalEvent('daily_admin_report',eventId,'failed',error.message);
+      console.error('[daily report]',error.message);
+    }
+  }
+  if(!successful.length)return;
+  report.deliveredTo=successful;report.deliveredAt=now.toISOString();
+  c.operations.dailyReports.unshift(report);c.operations.dailyReports=c.operations.dailyReports.slice(0,90);
+  settings.lastSentDate=localDate;settings.lastSuccessfulAt=now.toISOString();c.operations.reportSettings=settings;
+  await operationsStore.saveNow();
 }
 app.get('/api/admin/control-center',adminAuth.requireAdmin,(req,res)=>{
   const c=controlContext(),recon=controlCenter.reconciliation(c.users),balance=c.operations.providerBalance||{},estimated=balance.amount!=null&&balance.averageOrderCost>0?Math.floor(balance.amount/balance.averageOrderCost):null;

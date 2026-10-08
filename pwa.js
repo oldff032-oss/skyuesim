@@ -1,6 +1,6 @@
-// v105 is a hard visual reset. It removes obsolete application shells once
+// v106 refreshes the Smart Assist shell and notification controls once
 // while preserving the customer's account, eSIM and preferences.
-const SIGNAL_RELEASE_ID='v105-visible-world';
+const SIGNAL_RELEASE_ID='v106-smart-assist';
 async function signalInstallFreshShell(){
   if(!('serviceWorker' in navigator))return;
   const releaseKey='signal_installed_release';
@@ -14,13 +14,13 @@ async function signalInstallFreshShell(){
   const registration=await navigator.serviceWorker.register('/sw.js?v=105',{updateViaCache:'none'});
   await registration.update();
   if(needsReset&&!new URL(location.href).searchParams.has('signal_release')){
-    const next=new URL(location.href);next.searchParams.set('signal_release','v105');location.replace(next.href);
+    const next=new URL(location.href);next.searchParams.set('signal_release','v106');location.replace(next.href);
   }
 }
 signalInstallFreshShell().catch(()=>{});
 if('serviceWorker' in navigator)navigator.serviceWorker.addEventListener('controllerchange',()=>{
-  if(sessionStorage.getItem('signal_sw_reloaded_v105')==='1')return;
-  sessionStorage.setItem('signal_sw_reloaded_v105','1');
+  if(sessionStorage.getItem('signal_sw_reloaded_v106')==='1')return;
+  sessionStorage.setItem('signal_sw_reloaded_v106','1');
   location.reload();
 });
 const signalCurrentPage=location.pathname.split('/').pop()||'index.html';
@@ -132,7 +132,7 @@ async function signalConsumeMaintenancePreviewCode(){
   url.searchParams.delete('maintenance_preview');history.replaceState(null,'',`${url.pathname}${url.search}${url.hash}`);
   try{const response=await signalOriginalFetch(`${API_URL}/api/maintenance-preview/exchange`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code}),cache:'no-store'}),data=await response.json();if(!response.ok)throw Error(data.error||'Preview failed');sessionStorage.setItem('signal_maintenance_preview_token',data.previewToken);sessionStorage.setItem('signal_maintenance_preview_expires',data.expiresAt);location.replace(url.href);return true;}catch{return false;}
 }
-const SIGNAL_FRONTEND_VERSION='4.3.0',SIGNAL_SW_VERSION='v105',SIGNAL_CACHE_VERSION='signal-shell-v105-visible-world';
+const SIGNAL_FRONTEND_VERSION='4.4.0',SIGNAL_SW_VERSION='v106',SIGNAL_CACHE_VERSION='signal-shell-v106-smart-assist';
 window.SIGNAL_APP_VERSION=SIGNAL_FRONTEND_VERSION;
 window.addEventListener('load',async()=>{
   if(typeof API_URL==='undefined')return;
