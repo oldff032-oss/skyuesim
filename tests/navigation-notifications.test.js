@@ -28,13 +28,16 @@ test('home has one compact branded header, a hidden zero badge and support acces
 });
 
 test('customer pages receive one shared bottom navigation',()=>{
-  const pwa=read('pwa.js'),experience=read('experience.js');
+  const pwa=read('pwa.js'),experience=read('experience.js'),style=read('style.css');
   assert.match(pwa,/function signalBottomNavMarkup\(english=false\)/);
   assert.match(pwa,/document\.querySelectorAll\('\.xp-nav'\)\.forEach\(nav=>nav\.remove\(\)\)/);
   assert.match(pwa,/document\.body\?\.classList\.toggle\('has-bottomnav'/);
   assert.match(pwa,/class="signal-nav-assist" href="smart-assist\.html"/);
+  assert.match(pwa,/signal-nav-orb[^`]+signal-premium-logo\.png/);
   assert.match(pwa,/support\.html/);
   assert.match(pwa,/nav\.classList\.remove\('o-bottomnav'\)/);
+  assert.match(style,/\.signal-bottomnav>a:not\(\.signal-nav-assist\):before\{[^}]+width:auto;height:auto/);
+  assert.match(style,/\.signal-bottomnav>\.signal-nav-assist:before\{[^}]+width:auto;height:auto/);
   for(const page of ['dashboard.html','plans.html','usage.html','profile.html'])assert.match(pwa,new RegExp(page.replace('.','\\.')));
   assert.match(experience,/function xpNav\(\)\{return '<nav class="bottomnav"/);
   assert.doesNotMatch(experience,/nav-home-v2\.png/);

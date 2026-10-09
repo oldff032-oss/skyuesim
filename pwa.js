@@ -1,6 +1,6 @@
-// v109 installs one luminous navigation system on every protected customer
+// v110 installs the corrected luminous navigation on every protected customer
 // screen while preserving the customer's account, eSIM and preferences.
-const SIGNAL_RELEASE_ID='v109-unified-nav';
+const SIGNAL_RELEASE_ID='v110-nav-visual-fix';
 async function signalInstallFreshShell(){
   if(!('serviceWorker' in navigator))return;
   const releaseKey='signal_installed_release';
@@ -11,16 +11,16 @@ async function signalInstallFreshShell(){
     const registrations=await navigator.serviceWorker.getRegistrations();
     await Promise.all(registrations.map(registration=>registration.unregister()));
   }
-  const registration=await navigator.serviceWorker.register('/sw.js?v=109',{updateViaCache:'none'});
+  const registration=await navigator.serviceWorker.register('/sw.js?v=110',{updateViaCache:'none'});
   await registration.update();
   if(needsReset&&!new URL(location.href).searchParams.has('signal_release')){
-    const next=new URL(location.href);next.searchParams.set('signal_release','v109');location.replace(next.href);
+    const next=new URL(location.href);next.searchParams.set('signal_release','v110');location.replace(next.href);
   }
 }
 signalInstallFreshShell().catch(()=>{});
 if('serviceWorker' in navigator)navigator.serviceWorker.addEventListener('controllerchange',()=>{
-  if(sessionStorage.getItem('signal_sw_reloaded_v109')==='1')return;
-  sessionStorage.setItem('signal_sw_reloaded_v109','1');
+  if(sessionStorage.getItem('signal_sw_reloaded_v110')==='1')return;
+  sessionStorage.setItem('signal_sw_reloaded_v110','1');
   location.reload();
 });
 const signalCurrentPage=location.pathname.split('/').pop()||'index.html';
@@ -64,7 +64,7 @@ const signalProfilePages=new Set(['profile.html','account-settings.html','securi
 function signalBottomNavItemsMarkup(english=false){
   const items=Object.entries(signalNavItems).map(([page,item])=>{const label=english?item.labelEn:item.label;return `<a href="${page}" data-nav="${page.replace('.html','')}" aria-label="${label}" title="${label}"><span class="nav-icon" aria-hidden="true">${item.icon}</span><span class="nav-label" data-no-auto-translate>${label}</span></a>`;}).join('');
   const assistLabel=english?'Smart Assist':'Smart Assist';
-  return `${items}<a class="signal-nav-assist" href="smart-assist.html" aria-label="${assistLabel}" title="${assistLabel}"><span class="signal-nav-orb" aria-hidden="true"><svg viewBox="0 0 32 32"><path d="M16 3.5 18.8 12l8.2 4-8.2 4L16 28.5 13.2 20 5 16l8.2-4L16 3.5Z"/><circle cx="16" cy="16" r="3.2"/></svg></span><span>${assistLabel}</span></a>`;
+  return `${items}<a class="signal-nav-assist" href="smart-assist.html" aria-label="${assistLabel}" title="${assistLabel}"><span class="signal-nav-orb" aria-hidden="true"><img src="/signal-premium-logo.png" alt=""></span><span>${assistLabel}</span></a>`;
 }
 function signalBottomNavMarkup(english=false){return `<nav class="bottomnav signal-bottomnav" aria-label="${english?'Main navigation':'Головна навігація'}">${signalBottomNavItemsMarkup(english)}</nav>`;}
 function signalActiveNavPage(current){if(signalHomePages.has(current))return'dashboard.html';if(signalPlanPages.has(current))return'plans.html';if(signalUsagePages.has(current))return'usage.html';if(signalProfilePages.has(current))return'profile.html';return signalNavItems[current]?current:'profile.html';}
@@ -151,7 +151,7 @@ async function signalConsumeMaintenancePreviewCode(){
   url.searchParams.delete('maintenance_preview');history.replaceState(null,'',`${url.pathname}${url.search}${url.hash}`);
   try{const response=await signalOriginalFetch(`${API_URL}/api/maintenance-preview/exchange`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code}),cache:'no-store'}),data=await response.json();if(!response.ok)throw Error(data.error||'Preview failed');sessionStorage.setItem('signal_maintenance_preview_token',data.previewToken);sessionStorage.setItem('signal_maintenance_preview_expires',data.expiresAt);location.replace(url.href);return true;}catch{return false;}
 }
-const SIGNAL_FRONTEND_VERSION='4.7.0',SIGNAL_SW_VERSION='v109',SIGNAL_CACHE_VERSION='signal-shell-v109-unified-nav';
+const SIGNAL_FRONTEND_VERSION='4.7.1',SIGNAL_SW_VERSION='v110',SIGNAL_CACHE_VERSION='signal-shell-v110-nav-visual-fix';
 window.SIGNAL_APP_VERSION=SIGNAL_FRONTEND_VERSION;
 window.addEventListener('load',async()=>{
   if(typeof API_URL==='undefined')return;
