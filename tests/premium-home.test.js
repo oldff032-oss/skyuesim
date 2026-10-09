@@ -104,8 +104,8 @@ test('premium atlas is shipped in the offline shell and version is coherent', ()
   const pwa = read('pwa.js');
   const operations = read('operationsStore.js');
   assert.match(worker, /'\/signal-card-scenes-v1\.png'/);
-  assert.match(worker, /signal-shell-v110-nav-visual-fix/);
-  assert.match(pwa, /SIGNAL_FRONTEND_VERSION='4\.7\.1'/);
-  assert.match(operations, /frontend:'4\.7\.1', backend:'3\.2\.0', serviceWorker:'v110'/);
+  assert.match(worker, /signal-shell-v111-glass-pin-lock/);
+  assert.match(pwa, /SIGNAL_FRONTEND_VERSION='4\.8\.0'/);
+  assert.match(operations, /frontend:'4\.8\.0', backend:'3\.2\.0', serviceWorker:'v111'/);
   assert.ok(fs.statSync(path.join(root, 'signal-card-scenes-v1.png')).size > 100000);
 });

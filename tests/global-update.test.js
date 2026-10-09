@@ -55,10 +55,10 @@ test('global update assets use one coherent cache and app version', () => {
   const worker = read('sw.js');
   const pwa = read('pwa.js');
   for (const page of ['/travel-assistant.html','/esim-topup.html','/family-share.html','/notifications.html','/activity.html','/savings.html','/family-center.html']) assert.match(worker, new RegExp(page.replace('.', '\\.')));
-  assert.match(worker, /signal-shell-v110-nav-visual-fix/);
+  assert.match(worker, /signal-shell-v111-glass-pin-lock/);
   assert.match(worker, /neverCache[^\n]+admin-common\.js/);
-  assert.match(pwa, /SIGNAL_FRONTEND_VERSION='4\.7\.1'/);
-  assert.match(pwa, /SIGNAL_SW_VERSION='v110'/);
+  assert.match(pwa, /SIGNAL_FRONTEND_VERSION='4\.8\.0'/);
+  assert.match(pwa, /SIGNAL_SW_VERSION='v111'/);
   assert.match(pwa, /caches\.keys\(\)/);
   assert.match(pwa, /registration=>registration\.unregister\(\)/);
   assert.match(read('security-setup.html'), /Захист акаунта/);
@@ -139,7 +139,8 @@ test('forgotten app PIN uses an audited admin approval instead of exposing the o
   assert.doesNotMatch(server, /oldPin|plainPin|pinValue/);
   assert.match(operations, /pinResetRequests:\s*\[\]/);
   assert.match(pwa, /Забули PIN\?/);
-  assert.match(pwa, /reset-complete/);
+  assert.match(pwa, /location\.href='\/security-recovery\.html'/);
+  assert.match(pwa, /querySelectorAll\('#pinRecovery,#newPinPanel'\)\.forEach\(panel=>panel\.remove\(\)\)/);
   assert.match(nav, /admin-pin-resets\.html/);
   assert.match(admin, /Схвалення діє лише 30 хвилин/);
   assert.match(admin, /підтвердженою 2FA/);
@@ -148,14 +149,16 @@ test('forgotten app PIN uses an audited admin approval instead of exposing the o
 test('PIN recovery can verify account email once and completed requests never reopen recovery', () => {
   const server = read('server.js');
   const pwa = read('pwa.js');
+  const recovery = read('security-recovery.html');
   assert.match(server, /crypto\.randomInt\(100000,1000000\)/);
   assert.match(server, /emailCodeHash=await bcrypt\.hash\(code,10\)/);
   assert.match(server, /app\.post\('\/api\/account\/lock\/reset-request\/verify-code',requireUserSession,rateLimit/);
   assert.match(server, /bcrypt\.compare\(code,item\.emailCodeHash\)/);
   assert.match(server, /emailCodeAttempts>5/);
   assert.match(server, /app_pin_reset_email_verified/);
-  assert.match(pwa, /request\?\.status==='completed'.*showPin\(\)/);
-  assert.match(pwa, /reset-request\/verify-code/);
-  assert.match(pwa, /reset-request\/email-code/);
-  assert.match(pwa, /let recoveryTimer=null,recoveryDismissed=true/);
+  assert.match(recovery, /reset-request\/verify-code/);
+  assert.match(recovery, /reset-request\/email-code/);
+  assert.match(recovery, /status\.request\?\.status==='approved'/);
+  assert.doesNotMatch(pwa, /let recoveryTimer=null,recoveryDismissed=true/);
+  assert.doesNotMatch(pwa, /if\(lock\.resetApproved\)/);
 });
