@@ -231,7 +231,7 @@ test('maintenance and security modes enforce a server-side Super Admin lockdown'
 test('service worker bypasses stale cache for maintenance and localization assets', () => {
   const worker=read('sw.js');
   const support=read('support.html');
-  assert.match(worker, /signal-shell-v107-orbit-home/);
+  assert.match(worker, /signal-shell-v109-unified-nav/);
   assert.match(worker, /fetch\(event\.request, \{ cache:'no-store' \}\)/);
   assert.match(worker, /'\/i18n\.js'/);
   assert.match(worker, /'\/style\.css'/);
@@ -390,7 +390,7 @@ test('Stripe profiles recover automatically and checkout reuses one customer',()
 test('bottom navigation always identifies usage and charts stay visible without motion',()=>{
   const pwa=read('pwa.js'),usage=read('usage.html'),css=read('style.css'),headers=read('_headers');
   assert.match(pwa, /'usage\.html':\{label:'Витрати',labelEn:'Usage'/);
-  assert.match(pwa, /classList\.toggle\('active',page===activePage\)/);
+  assert.match(pwa, /classList\.toggle\('active',!assistActive&&page===activePage\)/);
   assert.match(pwa, /setTimeout\(enhanceSignalNavigation,500\)/);
   assert.match(usage, /height:var\(--bar-height\)/);
   assert.match(usage, /width:var\(--usage-pct\)!important/);
@@ -399,8 +399,8 @@ test('bottom navigation always identifies usage and charts stay visible without 
   assert.match(css, /navSelect/);
   assert.match(css, /nav-art/);
   assert.match(css, /clip:rect\(0,0,0,0\)/);
-  assert.match(pwa, /setAttribute\('aria-label',label\)/);
-  assert.match(pwa, /\/sw\.js\?v=107/);
+  assert.match(pwa, /aria-label="\$\{label\}"/);
+  assert.match(pwa, /\/sw\.js\?v=109/);
   assert.doesNotMatch(pwa, /nav-(?:home|plans|usage|profile)-v2\.png/);
   for(const marker of ['M3.5 10.5 12 3l8.5 7.5','circle cx="12" cy="12" r="9"','M4 20V10M10 20V5','circle cx="12" cy="7.5" r="3.5"']) assert.match(pwa,new RegExp(marker.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')));
   assert.doesNotMatch(css, /navBreathe[\s\S]{0,80}infinite/);

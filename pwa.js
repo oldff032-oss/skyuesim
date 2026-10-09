@@ -1,6 +1,6 @@
-// v107 refreshes the complete Signal Orbit customer interface once
-// while preserving the customer's account, eSIM and preferences.
-const SIGNAL_RELEASE_ID='v107-orbit-home';
+// v109 installs one luminous navigation system on every protected customer
+// screen while preserving the customer's account, eSIM and preferences.
+const SIGNAL_RELEASE_ID='v109-unified-nav';
 async function signalInstallFreshShell(){
   if(!('serviceWorker' in navigator))return;
   const releaseKey='signal_installed_release';
@@ -11,16 +11,16 @@ async function signalInstallFreshShell(){
     const registrations=await navigator.serviceWorker.getRegistrations();
     await Promise.all(registrations.map(registration=>registration.unregister()));
   }
-  const registration=await navigator.serviceWorker.register('/sw.js?v=107',{updateViaCache:'none'});
+  const registration=await navigator.serviceWorker.register('/sw.js?v=109',{updateViaCache:'none'});
   await registration.update();
   if(needsReset&&!new URL(location.href).searchParams.has('signal_release')){
-    const next=new URL(location.href);next.searchParams.set('signal_release','v107');location.replace(next.href);
+    const next=new URL(location.href);next.searchParams.set('signal_release','v109');location.replace(next.href);
   }
 }
 signalInstallFreshShell().catch(()=>{});
 if('serviceWorker' in navigator)navigator.serviceWorker.addEventListener('controllerchange',()=>{
-  if(sessionStorage.getItem('signal_sw_reloaded_v107')==='1')return;
-  sessionStorage.setItem('signal_sw_reloaded_v107','1');
+  if(sessionStorage.getItem('signal_sw_reloaded_v109')==='1')return;
+  sessionStorage.setItem('signal_sw_reloaded_v109','1');
   location.reload();
 });
 const signalCurrentPage=location.pathname.split('/').pop()||'index.html';
@@ -29,6 +29,13 @@ const applyTheme = () => document.documentElement.classList.toggle('light-theme'
 applyTheme();
 const signalAuthPages=new Set(['login.html','register-email.html','verify-code.html','set-password.html','forgot-password.html','reset-code.html','new-password.html','account-created.html']);
 if(signalAuthPages.has(signalCurrentPage))document.documentElement.classList.add('signal-auth-page');
+const signalLockGateExcluded=new Set([...signalAuthPages,'security-recovery.html','security-setup.html','security-pin.html','security-pattern.html']);
+const signalShouldGateImmediately=Boolean(localStorage.getItem('signal_session_token'))&&!signalLockGateExcluded.has(signalCurrentPage)&&!signalCurrentPage.startsWith('admin-');
+if(signalShouldGateImmediately&&!sessionStorage.getItem(`signal_app_unlocked:${localStorage.getItem('signal_session_token')}`)){
+  document.documentElement.classList.add('signal-lock-pending');
+  const gateStyle=document.createElement('style');gateStyle.id='signal-lock-gate-style';gateStyle.textContent=`html.signal-lock-pending{min-height:100%;background:#020611 url('/signal-earth-v1.png') center/cover fixed no-repeat!important}html.signal-lock-pending:before{content:"";position:fixed;z-index:2147483645;inset:0;background:linear-gradient(180deg,rgba(1,6,17,.15),rgba(1,6,17,.72)),radial-gradient(circle at 50% 18%,rgba(34,190,255,.22),transparent 32%)}html.signal-lock-pending:after{content:"";position:fixed;z-index:2147483646;left:50%;top:42%;width:82px;height:82px;border-radius:24px;background:#071126 url('/signal-premium-logo.png') center/cover no-repeat;box-shadow:0 0 45px rgba(45,169,255,.62);transform:translate(-50%,-50%);animation:signalLockGatePulse 1.35s ease-in-out infinite}html.signal-lock-pending body{opacity:0!important;pointer-events:none!important}@keyframes signalLockGatePulse{50%{transform:translate(-50%,-50%) scale(1.06);filter:brightness(1.18)}}@media(prefers-reduced-motion:reduce){html.signal-lock-pending:after{animation:none}}`;
+  document.head.append(gateStyle);
+}
 function signalMountAuthExperience(){
   if(!signalAuthPages.has(signalCurrentPage)||!document.body)return;
   // The approved v5 login screen has its own compact loading state. Injecting
@@ -50,19 +57,31 @@ const signalNavItems={
   'profile.html':{label:'Профіль',labelEn:'Profile',icon:'<svg class="nav-art nav-vector" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="7.5" r="3.5"/><path d="M5 21c.4-4.6 2.8-7 7-7s6.6 2.4 7 7"/></svg>'}
 };
 const signalNoBottomNavPages=new Set([...signalAuthPages,'index.html','welcome.html','access-recovery.html','access-recovery-complete.html','rescue-mode.html','account-created.html','security-setup.html','security-pin.html','security-pattern.html','security-recovery.html']);
-const signalPlanPages=new Set(['plans.html','esim-topup.html','travel-plans.html']);
-const signalUsagePages=new Set(['usage.html','traffic-alerts.html','activity.html','savings.html','smart-assist.html']);
-function signalBottomNavMarkup(){return `<nav class="bottomnav" aria-label="Головна навігація">${Object.entries(signalNavItems).map(([page,item])=>`<a href="${page}" aria-label="${item.label}"></a>`).join('')}</nav>`;}
-function signalActiveNavPage(current){if(signalNavItems[current])return current;if(signalPlanPages.has(current))return'plans.html';if(signalUsagePages.has(current))return'usage.html';return'profile.html';}
+const signalHomePages=new Set(['dashboard.html','notifications.html','signal-universe.html']);
+const signalPlanPages=new Set(['plans.html','esim-topup.html','travel-plans.html','travel-assistant.html','esim-management.html','installing.html','success.html','offline-esim.html','family-esims.html','family-share.html','family-trip.html','mobile-topup.html']);
+const signalUsagePages=new Set(['usage.html','traffic-alerts.html','activity.html','savings.html']);
+const signalProfilePages=new Set(['profile.html','account-settings.html','security.html','help.html','support.html','new-ticket.html','ticket.html','feedback.html','payments.html','language.html','device-check.html','family-center.html','wallet-pass.html','signal-passport.html','signal-club.html','app-tools.html']);
+function signalBottomNavItemsMarkup(english=false){
+  const items=Object.entries(signalNavItems).map(([page,item])=>{const label=english?item.labelEn:item.label;return `<a href="${page}" data-nav="${page.replace('.html','')}" aria-label="${label}" title="${label}"><span class="nav-icon" aria-hidden="true">${item.icon}</span><span class="nav-label" data-no-auto-translate>${label}</span></a>`;}).join('');
+  const assistLabel=english?'Smart Assist':'Smart Assist';
+  return `${items}<a class="signal-nav-assist" href="smart-assist.html" aria-label="${assistLabel}" title="${assistLabel}"><span class="signal-nav-orb" aria-hidden="true"><svg viewBox="0 0 32 32"><path d="M16 3.5 18.8 12l8.2 4-8.2 4L16 28.5 13.2 20 5 16l8.2-4L16 3.5Z"/><circle cx="16" cy="16" r="3.2"/></svg></span><span>${assistLabel}</span></a>`;
+}
+function signalBottomNavMarkup(english=false){return `<nav class="bottomnav signal-bottomnav" aria-label="${english?'Main navigation':'Головна навігація'}">${signalBottomNavItemsMarkup(english)}</nav>`;}
+function signalActiveNavPage(current){if(signalHomePages.has(current))return'dashboard.html';if(signalPlanPages.has(current))return'plans.html';if(signalUsagePages.has(current))return'usage.html';if(signalProfilePages.has(current))return'profile.html';return signalNavItems[current]?current:'profile.html';}
 function enhanceSignalNavigation(){
   const current=location.pathname.split('/').pop()||'index.html',english=localStorage.getItem('signal_language')==='en',hasSession=Boolean(localStorage.getItem('signal_session_token')),isCustomerPage=hasSession&&!signalNoBottomNavPages.has(current)&&!current.startsWith('admin-');
   document.querySelectorAll('.xp-nav').forEach(nav=>nav.remove());
   let nav=document.querySelector('.bottomnav,.o-bottomnav');
-  if(isCustomerPage&&!nav){document.body?.insertAdjacentHTML('beforeend',signalBottomNavMarkup());nav=document.querySelector('.bottomnav');}
+  if(isCustomerPage&&!nav){document.body?.insertAdjacentHTML('beforeend',signalBottomNavMarkup(english));nav=document.querySelector('.bottomnav');}
+  if(isCustomerPage&&nav){
+    nav.classList.remove('o-bottomnav');nav.classList.add('bottomnav','signal-bottomnav');
+    const languageKey=english?'en':'uk';
+    if(nav.dataset.signalLanguage!==languageKey||!nav.querySelector('.signal-nav-assist')){nav.innerHTML=signalBottomNavItemsMarkup(english);nav.dataset.signalLanguage=languageKey;nav.setAttribute('aria-label',english?'Main navigation':'Головна навігація');}
+  }
   document.body?.classList.toggle('has-bottomnav',Boolean(isCustomerPage&&nav));
-  if(nav?.classList.contains('o-bottomnav'))return;
-  const activePage=signalActiveNavPage(current);
-  nav?.querySelectorAll('a').forEach(link=>{const page=(link.getAttribute('href')||'').split(/[?#]/)[0].split('/').pop(),item=signalNavItems[page];if(!item)return;const label=english?item.labelEn:item.label;link.classList.toggle('active',page===activePage);link.dataset.nav=page.replace('.html','');link.setAttribute('aria-label',label);link.setAttribute('title',label);link.innerHTML=`<span class="nav-icon" aria-hidden="true">${item.icon}</span><span class="nav-label" data-no-auto-translate>${label}</span>`;});
+  const activePage=signalActiveNavPage(current),assistActive=current==='smart-assist.html';
+  nav?.querySelectorAll(':scope > a:not(.signal-nav-assist)').forEach(link=>{const page=(link.getAttribute('href')||'').split(/[?#]/)[0].split('/').pop();link.classList.toggle('active',!assistActive&&page===activePage);if(page===activePage&&!assistActive)link.setAttribute('aria-current','page');else link.removeAttribute('aria-current');});
+  const assist=nav?.querySelector('.signal-nav-assist');assist?.classList.toggle('active',assistActive);if(assistActive)assist.setAttribute('aria-current','page');else assist?.removeAttribute('aria-current');
   const dashboardLogo=document.querySelector('.logo-orbit');if(dashboardLogo&&!dashboardLogo.querySelector('img'))dashboardLogo.innerHTML='<img src="signal-premium-logo.png" alt="Signal">';
 }
 document.readyState==='loading'?document.addEventListener('DOMContentLoaded',enhanceSignalNavigation):enhanceSignalNavigation();
@@ -132,7 +151,7 @@ async function signalConsumeMaintenancePreviewCode(){
   url.searchParams.delete('maintenance_preview');history.replaceState(null,'',`${url.pathname}${url.search}${url.hash}`);
   try{const response=await signalOriginalFetch(`${API_URL}/api/maintenance-preview/exchange`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code}),cache:'no-store'}),data=await response.json();if(!response.ok)throw Error(data.error||'Preview failed');sessionStorage.setItem('signal_maintenance_preview_token',data.previewToken);sessionStorage.setItem('signal_maintenance_preview_expires',data.expiresAt);location.replace(url.href);return true;}catch{return false;}
 }
-const SIGNAL_FRONTEND_VERSION='4.5.0',SIGNAL_SW_VERSION='v107',SIGNAL_CACHE_VERSION='signal-shell-v107-orbit-home';
+const SIGNAL_FRONTEND_VERSION='4.7.0',SIGNAL_SW_VERSION='v109',SIGNAL_CACHE_VERSION='signal-shell-v109-unified-nav';
 window.SIGNAL_APP_VERSION=SIGNAL_FRONTEND_VERSION;
 window.addEventListener('load',async()=>{
   if(typeof API_URL==='undefined')return;
@@ -282,20 +301,22 @@ document.addEventListener('click',event=>{
   }
 },true);
 // sessionStorage survives navigation between app pages, but is cleared when a
-// standalone PWA/browser session is closed. This makes the PIN an entry lock,
-// not a prompt on every bottom-navigation click.
-window.addEventListener('load', async () => {
+// standalone PWA/browser session is closed. The visual gate is mounted in the
+// document head and the PIN is resolved as soon as the DOM and API config exist.
+document.addEventListener('DOMContentLoaded', async () => {
+  const revealProtectedApp=()=>document.documentElement.classList.remove('signal-lock-pending');
   const token = localStorage.getItem('signal_session_token');
-  if (!token || typeof API_URL === 'undefined') return;
-  if(signalCurrentPage==='security-recovery.html')return;
+  if (!token || typeof API_URL === 'undefined'){revealProtectedApp();return;}
+  if(signalLockGateExcluded.has(signalCurrentPage)||signalCurrentPage.startsWith('admin-')){revealProtectedApp();return;}
   const unlockKey = `signal_app_unlocked:${token}`;
-  if (sessionStorage.getItem(unlockKey) === '1') return;
+  if (sessionStorage.getItem(unlockKey) === '1'){revealProtectedApp();return;}
 
   try {
     const response = await fetch(`${API_URL}/api/account/lock`, { headers: { 'x-session-token': token } });
     const lock = await response.json();
     if (!response.ok || !lock.enabled) {
       sessionStorage.setItem(unlockKey, '1');
+      revealProtectedApp();
       return;
     }
 
@@ -304,6 +325,7 @@ window.addEventListener('load', async () => {
     const lockTitle=lockEnglish?'Signal is protected':'Signal захищено',lockHint=patternPreferred?(lockEnglish?'Draw your pattern to continue':'Намалюй графічний ключ, щоб продовжити'):(lockEnglish?'Enter your PIN to continue':'Введи свій PIN, щоб продовжити'),lockDelete=lockEnglish?'Delete':'Видалити';
     const forgotLabel=patternPreferred?(lockEnglish?'Forgot access key?':'Забули ключ?'):(lockEnglish?'Forgot PIN?':'Забули PIN?'),requestLabel=lockEnglish?'Send code to email':'Надіслати код на email';
     document.body.insertAdjacentHTML('beforeend', `<div id="lock" style="position:fixed;inset:0;z-index:99999;background:radial-gradient(circle at 50% -12%,#17356f 0,#080c1b 43%,#03050b 100%);color:white;display:grid;place-items:center;padding:22px;text-align:center;font-family:Inter,-apple-system,sans-serif;overflow:auto"><div style="position:relative;width:min(100%,390px);padding:30px 22px;border:1px solid #6685ff38;border-radius:30px;background:#090d1dee;box-shadow:0 28px 90px #000b,0 0 70px #3978ff20;backdrop-filter:blur(18px);overflow:hidden"><i aria-hidden="true" style="position:absolute;width:180px;height:180px;border-radius:50%;background:#25d9ff18;filter:blur(12px);top:-90px;left:-70px;animation:signalPinGlow 4s ease-in-out infinite"></i><img src="/signal-premium-logo.png" alt="Signal" width="78" height="78" style="position:relative;display:block;margin:auto;border-radius:22px;box-shadow:0 15px 45px #2d79ff55"><div id="lockTitle" style="position:relative;font:700 27px Space Grotesk,sans-serif;margin-top:18px">${lockTitle}</div><p id="lockHint" style="color:#aebbd5;line-height:1.5;margin:8px 0 0">${lockHint}</p><div id="pinEntry"><div id="pinDots" style="display:flex;justify-content:center;gap:11px;margin:22px 0 18px">${'<span style="width:13px;height:13px;border:1.5px solid #7d8caf;border-radius:50%;transition:.15s"></span>'.repeat(6)}</div><input id="pin" inputmode="numeric" maxlength="6" type="password" autocomplete="off" aria-label="PIN" style="position:absolute;opacity:0;pointer-events:none"><div id="pinPad" style="display:grid;grid-template-columns:repeat(3,1fr);gap:9px;max-width:286px;margin:auto">${[1,2,3,4,5,6,7,8,9].map(n=>`<button type="button" data-pin="${n}" style="height:54px;border:1px solid #7183af3d;border-radius:16px;background:#ffffff09;color:#f7f9ff;font:700 20px Space Grotesk;cursor:pointer;touch-action:manipulation">${n}</button>`).join('')}<button type="button" data-action="clear" style="height:54px;border:0;background:transparent;color:#8e9ab4;font-size:11px;font-weight:700">${lockDelete}</button><button type="button" data-pin="0" style="height:54px;border:1px solid #7183af3d;border-radius:16px;background:#ffffff09;color:#f7f9ff;font:700 20px Space Grotesk;cursor:pointer;touch-action:manipulation">0</button><button type="button" data-action="back" aria-label="${lockDelete}" style="height:54px;border:0;background:transparent;color:#cbd4e8;font-size:23px">⌫</button></div><p id="pinError" style="min-height:18px;color:#ff7185;font-size:12px;margin:11px 0 0"></p><button id="forgotPin" type="button" style="display:inline-flex;align-items:center;gap:8px;justify-content:center;border:1px solid #607cff4a;border-radius:14px;padding:11px 16px;background:linear-gradient(135deg,#172649cc,#15132ccc);color:#bfe9ff;font-weight:800;cursor:pointer;box-shadow:0 10px 28px #0005"><span aria-hidden="true">◇</span>${forgotLabel}</button></div><div id="pinRecovery" hidden style="position:relative;margin-top:20px;padding:18px;border:1px solid #56cfff42;border-radius:20px;background:linear-gradient(145deg,#11213bd9,#15112fd9);box-shadow:inset 0 1px #ffffff0c,0 18px 40px #0005"><div style="width:48px;height:48px;margin:0 auto 11px;border-radius:15px;display:grid;place-items:center;background:linear-gradient(135deg,#27d7ff,#7358ff);box-shadow:0 0 28px #3b9cff66;font-size:23px">⌁</div><b id="pinRecoveryTitle" style="display:block;font-size:17px">${lockEnglish?'PIN recovery':'Відновлення PIN'}</b><p id="pinRecoveryText" style="color:#adbad2;font-size:13px;line-height:1.55;margin:8px 0 14px">${lockEnglish?'The administrator will verify your request. Your old PIN is never sent.':'Адміністратор перевірить запит. Старий PIN нікому не передається.'}</p><button id="requestPinReset" type="button" style="width:100%;border:0;border-radius:14px;padding:13px;background:linear-gradient(135deg,#278cff,#8258ff);color:white;font-weight:800;cursor:pointer">${requestLabel}</button><button id="backToPin" type="button" style="margin-top:10px;border:0;background:transparent;color:#91a0bd;font-weight:700;cursor:pointer">${lockEnglish?'Back to PIN':'Повернутися до PIN'}</button></div><div id="newPinPanel" hidden style="position:relative;margin-top:20px"><div style="width:56px;height:56px;margin:auto;border-radius:18px;display:grid;place-items:center;background:linear-gradient(135deg,#2ce6c2,#477cff);box-shadow:0 0 34px #2ce6c255;font-size:26px">✓</div><h2 style="font-size:20px;margin:13px 0 5px">${lockEnglish?'Create a new PIN':'Створіть новий PIN'}</h2><p style="color:#aebbd5;font-size:13px;line-height:1.5;margin:0 0 14px">${lockEnglish?'Approval is valid for 30 minutes.':'Підтвердження діє 30 хвилин.'}</p><input id="newPin" inputmode="numeric" maxlength="6" type="password" autocomplete="new-password" placeholder="••••••" style="box-sizing:border-box;width:100%;padding:14px;text-align:center;letter-spacing:10px;border:1px solid #6e82b84d;border-radius:14px;background:#ffffff0b;color:white;font-size:22px;outline:none"><input id="confirmNewPin" inputmode="numeric" maxlength="6" type="password" autocomplete="new-password" placeholder="••••••" style="box-sizing:border-box;width:100%;padding:14px;margin-top:10px;text-align:center;letter-spacing:10px;border:1px solid #6e82b84d;border-radius:14px;background:#ffffff0b;color:white;font-size:22px;outline:none"><button id="saveNewPin" type="button" style="width:100%;margin-top:12px;border:0;border-radius:14px;padding:14px;background:linear-gradient(135deg,#22d3b6,#4a76ff);color:white;font-weight:800">${lockEnglish?'Save new PIN':'Зберегти новий PIN'}</button><p id="newPinError" style="min-height:18px;color:#ff8393;font-size:12px;margin:10px 0 0"></p></div><style>@keyframes signalPinGlow{50%{transform:translate(115px,28px) scale(1.12);opacity:.65}}@media(prefers-reduced-motion:reduce){#lock *{animation:none!important}}</style></div></div>`);
+    revealProtectedApp();
     let unlockPatternWidget=null,lockCountdownTimer=null;
     document.getElementById('pinEntry').insertAdjacentHTML('beforebegin',`<div id="patternEntry" ${patternPreferred?'':'hidden'} style="position:relative;margin-top:15px"><div id="unlockPattern"></div><p id="patternError" style="min-height:18px;color:#ff7185;font-size:12px;margin:0 0 10px"></p><button id="forgotPattern" type="button" style="display:inline-flex;align-items:center;gap:8px;justify-content:center;border:1px solid #607cff4a;border-radius:14px;padding:11px 16px;background:linear-gradient(135deg,#172649cc,#15132ccc);color:#bfe9ff;font-weight:800;cursor:pointer"><span aria-hidden="true">◇</span>${forgotLabel}</button></div>`);
     const patternPanel=document.getElementById('patternEntry');
@@ -359,6 +381,7 @@ window.addEventListener('load', async () => {
       }
     });
   } catch (error) {
+    revealProtectedApp();
     console.warn('App lock is temporarily unavailable:', error.message);
   }
 });

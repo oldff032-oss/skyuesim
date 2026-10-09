@@ -729,8 +729,9 @@ function pinResetPublicView(item){
 function latestPinResetRequest(email){
   return (operationsStore.store().pinResetRequests||[]).find(item=>item.email===email)||null;
 }
-const APP_LOCK_MAX_FAILURES=3;
-const APP_LOCK_DURATION_MS=5*60*1000;
+const APP_LOCK_MAX_FAILURES=5;
+const APP_LOCK_SHORT_DURATION_MS=60*1000;
+const APP_LOCK_LONG_DURATION_MS=60*60*1000;
 function normalizeAppPattern(value){
   const nodes=Array.isArray(value)?value.map(String):String(value||'').split(/[^0-9]+/).filter(Boolean);
   if(nodes.length<4||nodes.length>9||nodes.some(node=>!/^[0-8]$/.test(node))||new Set(nodes).size!==nodes.length)return null;
@@ -739,24 +740,25 @@ function normalizeAppPattern(value){
 function appLockPublicState(user){
   const lock=user?.appLock||{},lockedUntil=lock.lockedUntil&&new Date(lock.lockedUntil)>new Date()?lock.lockedUntil:null;
   const preferredMethod=lock.preferredMethod==='pattern'&&lock.patternHash?'pattern':'pin';
-  return {enabled:Boolean(lock.enabled),hasPin:Boolean(lock.pinHash),hasPattern:Boolean(lock.patternHash),preferredMethod,failedAttempts:Number(lock.failedAttempts||0),lockedUntil,retryAfterSeconds:lockedUntil?Math.max(1,Math.ceil((new Date(lockedUntil).getTime()-Date.now())/1000)):0};
+  return {enabled:Boolean(lock.enabled),hasPin:Boolean(lock.pinHash),hasPattern:Boolean(lock.patternHash),preferredMethod,failedAttempts:Number(lock.failedAttempts||0),attemptsRemaining:Math.max(0,APP_LOCK_MAX_FAILURES-Number(lock.failedAttempts||0)),lockoutLevel:Number(lock.lockoutLevel||0),lockedUntil,retryAfterSeconds:lockedUntil?Math.max(1,Math.ceil((new Date(lockedUntil).getTime()-Date.now())/1000)):0};
 }
 async function verifyAppLockCredential(req,res,requestedMethod,rawCredential){
   const user=getUser(req.userEmail),lock=user?.appLock||{},state=appLockPublicState(user);
-  if(state.lockedUntil)return res.status(423).json({error:'Забагато невдалих спроб. Спробуйте через 5 хвилин',...state});
+  if(state.lockedUntil)return res.status(423).json({error:state.retryAfterSeconds>60?'Забагато невдалих спроб. Спробуйте через годину':'Забагато невдалих спроб. Спробуйте через хвилину',...state});
   const method=requestedMethod==='pattern'?'pattern':'pin';
   const credential=method==='pattern'?normalizeAppPattern(rawCredential):String(rawCredential||'');
   const hash=method==='pattern'?lock.patternHash:lock.pinHash;
   const valid=Boolean(hash&&credential&&await bcrypt.compare(credential,hash));
   if(!valid){
     const failedAttempts=Number(lock.failedAttempts||0)+1,shouldLock=failedAttempts>=APP_LOCK_MAX_FAILURES;
-    const lockedUntil=shouldLock?new Date(Date.now()+APP_LOCK_DURATION_MS).toISOString():null;
-    saveUser(req.userEmail,{appLock:{...lock,failedAttempts:shouldLock?0:failedAttempts,lockedUntil,lastFailedAt:new Date().toISOString()}});
+    const lockoutLevel=shouldLock?Number(lock.lockoutLevel||0)+1:Number(lock.lockoutLevel||0),durationMs=lockoutLevel>=2?APP_LOCK_LONG_DURATION_MS:APP_LOCK_SHORT_DURATION_MS;
+    const lockedUntil=shouldLock?new Date(Date.now()+durationMs).toISOString():null;
+    saveUser(req.userEmail,{appLock:{...lock,failedAttempts:shouldLock?0:failedAttempts,lockoutLevel,lockedUntil,lastFailedAt:new Date().toISOString()}});
     recordSecurityFailure(req,method==='pattern'?'app_pattern':'app_pin',method==='pattern'?'INVALID_PATTERN':'INVALID_PIN',req.userEmail);
-    if(shouldLock)return res.status(423).json({error:'Забагато невдалих спроб. Спробуйте через 5 хвилин',failedAttempts:0,attemptsRemaining:0,lockedUntil,retryAfterSeconds:Math.ceil(APP_LOCK_DURATION_MS/1000)});
+    if(shouldLock)return res.status(423).json({error:durationMs===APP_LOCK_LONG_DURATION_MS?'Забагато невдалих спроб. Спробуйте через годину':'Забагато невдалих спроб. Спробуйте через хвилину',failedAttempts:0,attemptsRemaining:0,lockoutLevel,lockedUntil,retryAfterSeconds:Math.ceil(durationMs/1000)});
     return res.status(401).json({error:method==='pattern'?'Невірний графічний ключ':'Невірний PIN',failedAttempts,attemptsRemaining:APP_LOCK_MAX_FAILURES-failedAttempts,lockedUntil:null,retryAfterSeconds:0});
   }
-  saveUser(req.userEmail,{appLock:{...lock,failedAttempts:0,lockedUntil:null,lastUnlockedAt:new Date().toISOString()}});
+  saveUser(req.userEmail,{appLock:{...lock,failedAttempts:0,lockoutLevel:0,lockedUntil:null,lastUnlockedAt:new Date().toISOString()}});
   res.json({ok:true});
 }
 async function issuePinResetEmailCode(item){
@@ -774,11 +776,11 @@ app.put('/api/account/lock', requireUserSession, async (req,res)=>{
   if(method==='pattern'){
     const pattern=normalizeAppPattern(req.body?.pattern??req.body?.credential);
     if(!pattern)return res.status(400).json({error:'Графічний ключ має містити від 4 до 9 різних точок'});
-    saveUser(req.userEmail,{appLock:{...current,enabled:true,patternHash:await bcrypt.hash(pattern,10),preferredMethod:'pattern',failedAttempts:0,lockedUntil:null,updatedAt:new Date().toISOString()}});
+    saveUser(req.userEmail,{appLock:{...current,enabled:true,patternHash:await bcrypt.hash(pattern,10),preferredMethod:'pattern',failedAttempts:0,lockoutLevel:0,lockedUntil:null,updatedAt:new Date().toISOString()}});
   }else{
     const pin=String(req.body?.pin??req.body?.credential??'');
     if(!/^\d{6}$/.test(pin))return res.status(400).json({error:'PIN має містити рівно 6 цифр'});
-    saveUser(req.userEmail,{appLock:{...current,enabled:true,pinHash:await bcrypt.hash(pin,10),preferredMethod:'pin',failedAttempts:0,lockedUntil:null,updatedAt:new Date().toISOString()}});
+    saveUser(req.userEmail,{appLock:{...current,enabled:true,pinHash:await bcrypt.hash(pin,10),preferredMethod:'pin',failedAttempts:0,lockoutLevel:0,lockedUntil:null,updatedAt:new Date().toISOString()}});
   }
   res.json({ok:true,method});
 });
@@ -847,7 +849,7 @@ app.post('/api/account/lock/reset-complete',requireUserSession,rateLimit('app_pi
   if(!item.expiresAt||new Date(item.expiresAt)<=new Date()){item.status='expired';item.updatedAt=new Date().toISOString();await operationsStore.saveNow();return res.status(410).json({error:'Дозвіл на скидання завершився. Надішліть новий запит'});}
   const completedAt=new Date().toISOString();
   const currentLock=getUser(req.userEmail)?.appLock||{};
-  saveUser(req.userEmail,{appLock:{...currentLock,enabled:true,pinHash:await bcrypt.hash(pin,10),preferredMethod:'pin',failedAttempts:0,lockedUntil:null,resetCompletedAt:completedAt}});
+  saveUser(req.userEmail,{appLock:{...currentLock,enabled:true,pinHash:await bcrypt.hash(pin,10),preferredMethod:'pin',failedAttempts:0,lockoutLevel:0,lockedUntil:null,resetCompletedAt:completedAt}});
   item.status='completed';item.completedAt=completedAt;item.updatedAt=completedAt;item.emailCodeHash=null;item.emailCodeExpiresAt=null;await operationsStore.saveNow();
   authService.revokeOtherSessions(req.userEmail,req.sessionToken);
   auditStore.log({adminEmail:item.decidedBy||'system',action:'app_pin_reset_completed',target:req.userEmail,details:{requestId:item.id}});

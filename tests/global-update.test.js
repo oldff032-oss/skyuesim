@@ -55,10 +55,10 @@ test('global update assets use one coherent cache and app version', () => {
   const worker = read('sw.js');
   const pwa = read('pwa.js');
   for (const page of ['/travel-assistant.html','/esim-topup.html','/family-share.html','/notifications.html','/activity.html','/savings.html','/family-center.html']) assert.match(worker, new RegExp(page.replace('.', '\\.')));
-  assert.match(worker, /signal-shell-v107-orbit-home/);
+  assert.match(worker, /signal-shell-v109-unified-nav/);
   assert.match(worker, /neverCache[^\n]+admin-common\.js/);
-  assert.match(pwa, /SIGNAL_FRONTEND_VERSION='4\.5\.0'/);
-  assert.match(pwa, /SIGNAL_SW_VERSION='v107'/);
+  assert.match(pwa, /SIGNAL_FRONTEND_VERSION='4\.7\.0'/);
+  assert.match(pwa, /SIGNAL_SW_VERSION='v109'/);
   assert.match(pwa, /caches\.keys\(\)/);
   assert.match(pwa, /registration=>registration\.unregister\(\)/);
   assert.match(read('security-setup.html'), /Захист акаунта/);

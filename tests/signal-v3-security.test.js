@@ -7,8 +7,10 @@ const read=file=>fs.readFileSync(path.join(root,file),'utf8');
 
 test('Signal V3 protects both PIN and graphical pattern attempts',()=>{
   const server=read('server.js');
-  assert.match(server,/APP_LOCK_MAX_FAILURES=3/);
-  assert.match(server,/APP_LOCK_DURATION_MS=5\*60\*1000/);
+  assert.match(server,/APP_LOCK_MAX_FAILURES=5/);
+  assert.match(server,/APP_LOCK_SHORT_DURATION_MS=60\*1000/);
+  assert.match(server,/APP_LOCK_LONG_DURATION_MS=60\*60\*1000/);
+  assert.match(server,/lockoutLevel>=2\?APP_LOCK_LONG_DURATION_MS:APP_LOCK_SHORT_DURATION_MS/);
   assert.match(server,/app\.post\('\/api\/account\/lock\/verify', requireUserSession, rateLimit/);
   assert.match(server,/patternHash:await bcrypt\.hash\(pattern,10\)/);
   assert.doesNotMatch(server,/patternValue|plainPattern|savedPattern:/);
@@ -24,14 +26,19 @@ test('graphical pattern is validated and shared by setup and unlock screens',()=
   assert.match(setup,/method:'pattern'/);
   assert.match(pwa,/import\('\.\/signal-pattern\.js'\)/);
   assert.match(pwa,/retryAfterSeconds/);
+  assert.match(pwa,/signal-lock-pending/);
+  assert.match(pwa,/signalShouldGateImmediately/);
+  assert.match(pwa,/location\.href='\/security-recovery\.html'/);
 });
 
 test('V3 security screen, animated globe and bilingual registration are wired',()=>{
   const security=read('security.html'),recovery=read('security-recovery.html'),pwa=read('pwa.js'),style=read('style.css'),worker=read('sw.js');
   assert.match(security,/Центр безпеки/);
   assert.match(security,/Довірені пристрої/);
-  assert.match(recovery,/Забагато спроб/);
+  assert.match(recovery,/Відновлення PIN/);
   assert.match(recovery,/Відновити через email/);
+  assert.match(recovery,/6-значний код із листа/);
+  assert.match(recovery,/Повторіть новий PIN/);
   assert.match(pwa,/auth-globe/);
   assert.match(style,/@keyframes authGlobe/);
   assert.match(read('verify-code.html'),/Підтверди email/);
