@@ -4,9 +4,9 @@
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <title>Профіль — Signal</title><link rel="stylesheet" href="style.css"><link rel="stylesheet" href="experience.css"><link rel="manifest" href="/manifest.json"><script src="pwa.js"></script>
 </head>
-<body class="xp-page">
+<body class="xp-page has-bottomnav signal-vision vision-profile">
   <main class="xp-wrap profile-v3-wrap">
-    <header class="xp-head profile-v3-head"><img class="xp-logo" src="signal-premium-logo.png" alt="Signal"><b>Профіль</b><span class="xp-head-spacer"></span><a id="notificationButton" class="xp-icon-button profile-v3-bell" href="notifications.html" aria-label="Сповіщення"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg><span id="badge" class="xp-notification-dot" aria-live="polite" hidden></span></a></header>
+    <header class="xp-head profile-v3-head vision-header"><a class="vision-brand" href="dashboard.html"><img class="xp-logo" src="signal-premium-logo.png" alt="Signal"><span><b>Signal</b><small>eSIM для подорожей</small></span></a><span class="xp-head-spacer"></span><a id="notificationButton" class="xp-icon-button profile-v3-bell" href="notifications.html" aria-label="Сповіщення"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg><span id="badge" class="xp-notification-dot" aria-live="polite" hidden></span></a></header>
     <input id="avatarInput" type="file" accept="image/*,.heic,.heif" hidden>
     <div id="content"><div class="xp-skeleton profile-v3-skeleton"></div><div class="xp-skeleton" style="height:230px;margin-top:16px"></div></div>
   </main>
@@ -48,27 +48,24 @@
       currentProfile=data;
       const i=data.identity||{},s=data.stats||{},a=deck.active||{},percent=Math.max(0,Math.min(100,Number(a.remainingPercent??100))),ringValue=a.totalLabel==='Безлімітний інтернет'?'∞':`${Math.round(percent)}%`,hasPhoto=Boolean(i.avatarDataUrl),name=i.displayName||'Signal Traveler';
       content.innerHTML=`
-        <section class="profile-v3-hero">
+        <section class="profile-v3-hero vision-profile-hero">
           <div class="profile-v3-photo-column">
             <div class="profile-v3-avatar-wrap"><div id="currentAvatar" class="profile-v3-avatar" role="img" aria-label="Фото профілю">${hasPhoto?'':xpEsc(name[0].toUpperCase())}</div><label class="profile-v3-camera" for="avatarInput" aria-label="Змінити фото">${icon('camera')}</label></div>
-            <label class="profile-v3-photo-button" for="avatarInput">Змінити фото</label>
-            ${hasPhoto?'<button class="profile-v3-photo-remove" type="button" onclick="removeProfilePhoto()">Прибрати</button>':''}
           </div>
-          <div class="profile-v3-identity"><h1>${xpEsc(name)}</h1><p>${xpEsc(i.email)}</p><a class="profile-v3-tier" href="signal-club.html">◇&nbsp; ${xpEsc(s.tier)} · ${xpEsc(s.points)} Points <span>›</span></a><small>Подорожуй більше. Живи яскравіше.</small></div>
-          <div class="profile-v3-globe" aria-hidden="true"><i></i><span>БІЛЬШЕ<br>СВОБОДИ<br>В ПОДОРОЖАХ</span></div>
+          <div class="profile-v3-identity"><small>МІЙ ПРОФІЛЬ</small><h1>${xpEsc(name)}</h1><p>${xpEsc(i.email)}</p><a class="profile-v3-tier" href="signal-club.html">✦ ${xpEsc(s.tier)} · ${xpEsc(s.points)} Points <span>›</span></a></div>
+          <div class="vision-photo-actions"><label class="vision-photo-edit" for="avatarInput">Змінити фото</label>${hasPhoto?'<button class="profile-v3-photo-remove" type="button" onclick="removeProfilePhoto()">Прибрати</button>':''}</div>
         </section>
-        <a class="profile-v3-package" href="esim-management.html">
+        <a class="profile-v3-package vision-profile-package" href="esim-management.html">
           <div class="profile-v3-ring" style="--remaining:${percent}"><span><strong>${xpEsc(ringValue)}</strong><small>ЗАЛИШИЛОСЬ</small></span></div>
-          <div class="profile-v3-package-copy"><small>АКТИВНИЙ ПАКЕТ</small><h2>${xpEsc(a.title||data.plan?.name||'Моя eSIM')}</h2><strong>${xpEsc(localData(a.dataLabel||(data.plan?.remainingGb==null?'Безліміт':`${data.plan.remainingGb} GB`)))} <span>залишилось</span></strong><p>${xpEsc(a.daysLabel||statusLabel(data.plan?.status))}</p></div>
-          <div class="profile-v3-package-state"><b>●&nbsp; ${xpEsc(statusLabel(a.status||data.plan?.status))}</b><span>›</span></div>
-          <svg class="profile-v3-map" viewBox="0 0 180 110" aria-hidden="true"><path d="M19 69 34 56l17 2 10-14 23 5 13-18 18 8 7 14 24 4 17 18-14 14-30-5-20 12-19-8-14 8-20-8Z"/><path d="M65 86 78 99M113 84l8 17M91 49l5-20"/><circle cx="98" cy="58" r="3"/><circle cx="132" cy="72" r="2.5"/></svg>
+          <div class="profile-v3-package-copy"><small>АКТИВНИЙ ПАКЕТ</small><h2>${xpEsc(a.title||data.plan?.name||'Моя eSIM')}</h2><strong>${xpEsc(localData(a.dataLabel||(data.plan?.remainingGb==null?'Безліміт':`${data.plan.remainingGb} GB`)))}</strong><p>${xpEsc(a.daysLabel||statusLabel(data.plan?.status))}</p></div>
+          <div class="profile-v3-package-state"><b>● ${xpEsc(statusLabel(a.status||data.plan?.status))}</b><span>›</span></div>
         </a>
-        <section class="profile-v3-quick-grid" aria-label="Швидкі дії">${quick('esim-management.html','sim','Моя eSIM','Керування eSIM')}${quick('plans.html','tiers','Тарифи','Обрати пакет')}${quick('usage.html','usage','Використання','Трафік і статистика')}${quick('wallet-pass.html','card','Travel Pass','Google Wallet')}</section>
+        <section class="profile-v3-quick-grid vision-profile-quick" aria-label="Швидкі дії">${quick('esim-management.html','sim','Моя eSIM','Керування')}${quick('usage.html','usage','Витрати','Статистика')}</section>
         <div class="xp-section-kicker profile-v3-kicker">НАЛАШТУВАННЯ</div>
-        <section class="xp-panel xp-menu profile-v3-menu">${row('signal-club.html','crown','Signal Club','Бонуси, рівні та переваги')}${row('signal-passport.html','passport','Passport','Країни, штампи й історія')}${row('family-center.html','family','Сім’я','eSIM для близьких')}</section>
+        <section class="xp-panel xp-menu profile-v3-menu vision-profile-menu">${row('account-settings.html','shield','Центр безпеки','PIN, Face ID та активні сесії')}${row('language.html','theme','Мова','Українська · English')}${row('notifications.html','bell','Сповіщення',notifications.unread?`${notifications.unread} непрочитаних`:'Усе прочитано')}${row('language.html','theme','Вигляд','Космічна тема Signal')}</section>
         <div class="xp-section-kicker profile-v3-kicker">ДОПОМОГА ТА ІНШЕ</div>
-        <section class="xp-panel xp-menu profile-v3-menu">${row('support.html','help','Підтримка','Звернення й відповіді')}${row('account-settings.html','shield','Акаунт і безпека','Фото, PIN, Face ID та сесії')}${row('payments.html','card','Оплата й підписка','Картка, чеки та історія оплат')}${row('language.html','theme','Мова та вигляд','Українська, English і тема')}</section>
-        <details class="profile-v3-more"><summary>Ще сервіси <span>⌄</span></summary><section class="xp-panel xp-menu profile-v3-menu">${row('savings.html','savings','Моя економія','Орієнтовна вигода в подорожах')}${row('travel-assistant.html','planner','Планувальник подорожі','Дати, напрямок і нагадування')}${row('notifications.html','bell','Сповіщення',notifications.unread?`${notifications.unread} непрочитаних`:'Усе прочитано')}${row('app-tools.html','help','Допомога з підключенням','Мережа, APN і діагностика')}${row('activity.html','planner','Історія активності','Покупки, eSIM, підтримка й Points')}</section></details>
+        <section class="xp-panel xp-menu profile-v3-menu vision-profile-menu">${row('support.html','help','Підтримка','Допомога та звернення')}${row('payments.html','card','Оплата й підписка','Картка, чеки та пакети')}</section>
+        <details class="profile-v3-more"><summary>Більше можливостей <span>⌄</span></summary><section class="xp-panel xp-menu profile-v3-menu">${row('signal-club.html','crown','Signal Club','Бонуси та переваги')}${row('signal-passport.html','passport','Signal Passport','Країни та історія')}${row('family-center.html','family','Сім’я','eSIM для близьких')}${row('savings.html','savings','Моя економія','Орієнтовна вигода')}${row('travel-assistant.html','planner','Планувальник','Майбутні подорожі')}${row('activity.html','planner','Історія активності','Усі події акаунта')}</section></details>
         <button id="logout" class="profile-v3-logout" type="button">Вийти з акаунта</button>`;
       const avatar=document.getElementById('currentAvatar');if(hasPhoto)avatar.style.backgroundImage=`url("${i.avatarDataUrl}")`;
       document.getElementById('logout').onclick=()=>{localStorage.removeItem('signal_session_token');localStorage.removeItem('signal_email');location.href='login.html'};

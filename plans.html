@@ -1,108 +1,35 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="uk">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Тарифи — Сигнал</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=Space+Mono&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css">
-<script src="pwa.js"></script>
-<link rel="manifest" href="/manifest.json">
-<link rel="apple-touch-icon" href="/apple-touch-icon.png">
-<meta name="theme-color" content="#05060d">
-<meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Сигнал">
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>Пакети — Signal</title><link rel="stylesheet" href="style.css"><link rel="manifest" href="/manifest.json"><meta name="theme-color" content="#020713"><script src="pwa.js"></script>
 </head>
-<body class="has-bottomnav">
-  <div class="wrap">
-    <div class="brand"><div class="mark">📶</div><span>Сигнал</span></div>
-    <h1 style="margin-top:20px;">Обери тариф</h1>
-    <p class="lead">Підписка щомісячна, діє у 30+ країнах Європи. Скасувати можна будь-коли в профілі.</p>
-
-    <a href="travel-plans.html" class="glass" style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:15px;margin-top:18px;text-decoration:none;color:inherit;border-color:rgba(52,228,184,.35);width:100%;max-width:100%;min-width:0;box-sizing:border-box;overflow:hidden">
-      <div style="min-width:0"><div style="font-weight:700;overflow-wrap:anywhere">🌍 Більше пакетів для подорожей</div><div class="muted" style="font-size:12px;margin-top:3px;overflow-wrap:anywhere">Країни, регіони, 1–50+ ГБ та різні терміни</div></div><span style="color:var(--success);font-size:20px;flex:0 0 auto">→</span>
-    </a>
-
-    <div class="stagger">
-    <div class="tier glass selected" data-plan="basic" onclick="selectTier(this)">
-      <div class="tier-top">
-        <div><div class="tier-name">Базовий</div><div class="tier-data">10 ГБ / місяць</div></div>
-        <div class="tier-price"><b>$9.99</b><span>/міс</span></div>
-      </div>
-    </div>
-
-    <div class="tier glass" data-plan="standard" onclick="selectTier(this)">
-      <div class="tier-tag">Популярний</div>
-      <div class="tier-top">
-        <div><div class="tier-name">Стандарт</div><div class="tier-data">20 ГБ / місяць</div></div>
-        <div class="tier-price"><b>$19.99</b><span>/міс</span></div>
-      </div>
-    </div>
-
-    <div class="tier glass" data-plan="unlimited" onclick="selectTier(this)">
-      <div class="tier-top">
-        <div><div class="tier-name">Безліміт</div><div class="tier-data">Необмежено</div></div>
-        <div class="tier-price"><b>$34.99</b><span>/міс</span></div>
-      </div>
-    </div>
-    </div>
-
-    <div class="err-text" id="err" style="display:none;"></div>
-
-    <button class="btn" id="payBtn" style="margin-top:22px;" onclick="startCheckout()">Оформити підписку</button>
-    <p class="muted" style="margin-top:14px; text-align:center;">Натискаючи «Оформити підписку», перейдеш на захищену сторінку оплати Stripe.</p>
-  </div>
-
-  <nav class="bottomnav" aria-label="Головна навігація"><a href="dashboard.html" aria-label="Головна" title="Головна" data-nav="dashboard"><span class="nav-icon"><svg class="nav-art nav-vector" viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 10.5 12 3l8.5 7.5"/><path d="M5.5 9.3V21h13V9.3M9.5 21v-6h5v6"/></svg></span></a><a href="plans.html" class="active" aria-label="Тарифи" title="Тарифи" data-nav="plans"><span class="nav-icon"><svg class="nav-art nav-vector" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3.5 12h17M12 3c2.5 2.6 3.8 5.6 3.8 9S14.5 18.4 12 21M12 3C9.5 5.6 8.2 8.6 8.2 12s1.3 6.4 3.8 9"/></svg></span></a><a href="usage.html" aria-label="Витрати" title="Витрати" data-nav="usage"><span class="nav-icon"><svg class="nav-art nav-vector" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V5M16 20v-8M22 20V3M2 20h21"/></svg></span></a><a href="profile.html" aria-label="Профіль" title="Профіль" data-nav="profile"><span class="nav-icon"><svg class="nav-art nav-vector" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="7.5" r="3.5"/><path d="M5 21c.4-4.6 2.8-7 7-7s6.6 2.4 7 7"/></svg></span></a></nav>
-
+<body class="has-bottomnav signal-vision vision-plans">
+  <main class="vision-shell">
+    <header class="vision-header"><a class="vision-brand" href="dashboard.html"><img src="signal-premium-logo.png" alt="Signal"><span><b>Signal</b><small>eSIM для подорожей</small></span></a><a class="vision-header-button" href="notifications.html" aria-label="Сповіщення"><svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg></a></header>
+    <section class="vision-title"><span>ПОДОРОЖУЙ БЕЗ МЕЖ</span><h1>Пакети інтернету</h1><p>Обери потрібний обсяг — підключення займає кілька хвилин.</p></section>
+    <section id="activePackage" class="vision-active-plan" aria-live="polite"><div class="vision-plan-skeleton"></div></section>
+    <div class="vision-section-head"><h2>Обери напрямок</h2><a href="travel-plans.html">Усі країни →</a></div>
+    <div class="vision-filters" role="group" aria-label="Регіони"><button class="active" type="button">Популярні</button><button type="button">Європа</button><button type="button">Азія</button><button type="button">Америка</button></div>
+    <section class="vision-plan-grid">
+      <article class="tier vision-tier selected" data-plan="basic" onclick="selectTier(this)"><span class="vision-tier-icon">◎</span><div><small>ЛЕГКИЙ СТАРТ</small><h3>10 ГБ</h3><p>30 днів · Європа</p></div><strong>$9.99</strong></article>
+      <article class="tier vision-tier featured" data-plan="standard" onclick="selectTier(this)"><i>Найкращий вибір</i><span class="vision-tier-icon">✦</span><div><small>ДЛЯ ПОДОРОЖІ</small><h3>20 ГБ</h3><p>30 днів · 30+ країн</p></div><strong>$19.99</strong></article>
+      <article class="tier vision-tier" data-plan="unlimited" onclick="selectTier(this)"><span class="vision-tier-icon">∞</span><div><small>МАКСИМУМ</small><h3>Безліміт</h3><p>30 днів · Європа</p></div><strong>$34.99</strong></article>
+    </section>
+    <div class="err-text" id="err" hidden></div><button class="vision-primary" id="payBtn" type="button" onclick="startCheckout()">Продовжити з обраним пакетом <span>→</span></button>
+    <a class="vision-support-row" href="support.html"><span>?</span><div><b>Потрібна допомога?</b><small>Підтримка допоможе обрати пакет</small></div><i>›</i></a>
+  </main>
+  <nav class="bottomnav" aria-label="Головна навігація"><a href="dashboard.html" aria-label="Головна"><svg viewBox="0 0 24 24"><path d="M3.5 10.5 12 3l8.5 7.5M5.5 9.3V21h13V9.3M9.5 21v-6h5v6"/></svg><span>Головна</span></a><a class="active" href="plans.html" aria-label="Пакети"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3.5 12h17M12 3c2.5 2.6 3.8 5.6 3.8 9S14.5 18.4 12 21M12 3C9.5 5.6 8.2 8.6 8.2 12s1.3 6.4 3.8 9"/></svg><span>Пакети</span></a><a href="usage.html" aria-label="Витрати"><svg viewBox="0 0 24 24"><path d="M4 20V10M10 20V5M16 20v-8M22 20V3M2 20h21"/></svg><span>Витрати</span></a><a href="profile.html" aria-label="Профіль"><svg viewBox="0 0 24 24"><circle cx="12" cy="7.5" r="3.5"/><path d="M5 21c.4-4.6 2.8-7 7-7s6.6 2.4 7 7"/></svg><span>Профіль</span></a></nav>
   <script src="config.js"></script>
   <script>
-    const email = localStorage.getItem('signal_email');
-    const sessionToken = localStorage.getItem('signal_session_token');
-    if(!email||!sessionToken){ window.location.href = 'login.html'; }
-
-    let selectedPlan = 'basic';
-    function selectTier(el){
-      document.querySelectorAll('.tier').forEach(t=>t.classList.remove('selected'));
-      el.classList.add('selected');
-      selectedPlan = el.dataset.plan;
-      if(typeof signalReportDiagnostic==='function')signalReportDiagnostic('user_action','info','Monthly plan selected',{action:'monthly_plan_selected',plan:selectedPlan});
-    }
-    const requestedPlan = new URLSearchParams(location.search).get('plan');
-    if(['basic','standard','unlimited'].includes(requestedPlan)){
-      const requestedTier = document.querySelector(`.tier[data-plan="${requestedPlan}"]`);
-      if(requestedTier) selectTier(requestedTier);
-    }
-
-    async function startCheckout(){
-      const err = document.getElementById('err');
-      const btn = document.getElementById('payBtn');
-      err.style.display = 'none';
-      if(typeof signalReportDiagnostic==='function')signalReportDiagnostic('user_action','info','Monthly checkout clicked',{action:'monthly_checkout_clicked',plan:selectedPlan});
-
-      btn.classList.add('loading');
-      btn.textContent = 'Зачекай...';
-
-      try{
-        const res = await fetch(`${API_URL}/api/create-subscription`, {
-          method:'POST',
-          headers:{'Content-Type':'application/json','x-session-token':sessionToken},
-          body: JSON.stringify({ plan: selectedPlan })
-        });
-        const data = await res.json();
-        if(!res.ok) throw new Error(data.error || 'Помилка сервера');
-
-        window.location.href = data.url;
-      }catch(e){
-        err.textContent = 'Не вдалося створити оплату: ' + e.message;
-        err.style.display = 'flex';
-        btn.classList.remove('loading');
-        btn.textContent = 'Оформити підписку';
-      }
-    }
+    const email=localStorage.getItem('signal_email'),sessionToken=localStorage.getItem('signal_session_token');if(!email||!sessionToken)location.replace('login.html');
+    const esc=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char])),localData=value=>String(value||'—').replace(/\sGB\b/gi,' ГБ');
+    let selectedPlan='basic';
+    function selectTier(el){document.querySelectorAll('.tier').forEach(t=>t.classList.remove('selected'));el.classList.add('selected');selectedPlan=el.dataset.plan;if(typeof signalReportDiagnostic==='function')signalReportDiagnostic('user_action','info','Monthly plan selected',{action:'monthly_plan_selected',plan:selectedPlan})}
+    const requestedPlan=new URLSearchParams(location.search).get('plan');if(['basic','standard','unlimited'].includes(requestedPlan)){const requestedTier=document.querySelector(`.tier[data-plan="${requestedPlan}"]`);if(requestedTier)selectTier(requestedTier)}
+    async function loadActivePlan(){try{const response=await fetch(`${API_URL}/api/account/home-deck`,{cache:'no-store',headers:{'x-session-token':sessionToken}}),deck=await response.json();if(!response.ok)throw Error(deck.error||'');const card=deck.active||{},remaining=Math.max(0,Math.min(100,Number(card.remainingPercent)||0));document.getElementById('activePackage').innerHTML=`<div class="vision-active-copy"><small>ТВІЙ АКТИВНИЙ ПАКЕТ</small><h2>${esc(card.title||'Моя eSIM')}</h2><p>${esc(localData(card.daysLabel||'Пакет активний'))}</p></div><div class="vision-active-data"><strong>${esc(localData(card.dataLabel||'—'))}</strong><span>залишилось</span></div><div class="vision-active-meter"><i style="width:${remaining}%"></i></div><a href="usage.html">Переглянути витрати <b>›</b></a>`}catch{document.getElementById('activePackage').innerHTML='<div class="vision-active-copy"><small>ТВІЙ АКТИВНИЙ ПАКЕТ</small><h2>Дані оновлюються</h2><p>Перевіримо пакет автоматично</p></div>'}}
+    async function startCheckout(){const err=document.getElementById('err'),btn=document.getElementById('payBtn');err.hidden=true;btn.disabled=true;btn.textContent='Готуємо захищену оплату…';try{const response=await fetch(`${API_URL}/api/create-subscription`,{method:'POST',headers:{'Content-Type':'application/json','x-session-token':sessionToken},body:JSON.stringify({plan:selectedPlan})}),data=await response.json();if(!response.ok)throw Error(data.error||'Помилка сервера');location.href=data.url}catch(error){err.textContent='Не вдалося створити оплату: '+error.message;err.hidden=false;btn.disabled=false;btn.innerHTML='Спробувати ще раз <span>→</span>'}}
+    document.querySelectorAll('.vision-filters button').forEach(button=>button.onclick=()=>{document.querySelectorAll('.vision-filters button').forEach(item=>item.classList.remove('active'));button.classList.add('active')});loadActivePlan();
   </script>
 </body>
 </html>
