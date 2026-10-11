@@ -1,6 +1,6 @@
-// v111 removes the legacy inline PIN reset and adds the glass globe lock screen
-// screen while preserving the customer's account, eSIM and preferences.
-const SIGNAL_RELEASE_ID='v111-glass-pin-lock';
+// v112 ships the approved five-position glass navigation. The release id also
+// invalidates old installed PWA shells so phones cannot keep the oversized orb.
+const SIGNAL_RELEASE_ID='v112-precision-bottom-nav';
 async function signalInstallFreshShell(){
   if(!('serviceWorker' in navigator))return;
   const releaseKey='signal_installed_release';
@@ -11,16 +11,16 @@ async function signalInstallFreshShell(){
     const registrations=await navigator.serviceWorker.getRegistrations();
     await Promise.all(registrations.map(registration=>registration.unregister()));
   }
-  const registration=await navigator.serviceWorker.register('/sw.js?v=111',{updateViaCache:'none'});
+  const registration=await navigator.serviceWorker.register('/sw.js?v=112',{updateViaCache:'none'});
   await registration.update();
   if(needsReset&&!new URL(location.href).searchParams.has('signal_release')){
-    const next=new URL(location.href);next.searchParams.set('signal_release','v111');location.replace(next.href);
+    const next=new URL(location.href);next.searchParams.set('signal_release','v112');location.replace(next.href);
   }
 }
 signalInstallFreshShell().catch(()=>{});
 if('serviceWorker' in navigator)navigator.serviceWorker.addEventListener('controllerchange',()=>{
-  if(sessionStorage.getItem('signal_sw_reloaded_v111')==='1')return;
-  sessionStorage.setItem('signal_sw_reloaded_v111','1');
+  if(sessionStorage.getItem('signal_sw_reloaded_v112')==='1')return;
+  sessionStorage.setItem('signal_sw_reloaded_v112','1');
   location.reload();
 });
 const signalCurrentPage=location.pathname.split('/').pop()||'index.html';
@@ -62,9 +62,9 @@ const signalPlanPages=new Set(['plans.html','esim-topup.html','travel-plans.html
 const signalUsagePages=new Set(['usage.html','traffic-alerts.html','activity.html','savings.html']);
 const signalProfilePages=new Set(['profile.html','account-settings.html','security.html','help.html','support.html','new-ticket.html','ticket.html','feedback.html','payments.html','language.html','device-check.html','family-center.html','wallet-pass.html','signal-passport.html','signal-club.html','app-tools.html']);
 function signalBottomNavItemsMarkup(english=false){
-  const items=Object.entries(signalNavItems).map(([page,item])=>{const label=english?item.labelEn:item.label;return `<a href="${page}" data-nav="${page.replace('.html','')}" aria-label="${label}" title="${label}"><span class="nav-icon" aria-hidden="true">${item.icon}</span><span class="nav-label" data-no-auto-translate>${label}</span></a>`;}).join('');
   const assistLabel=english?'Smart Assist':'Smart Assist';
-  return `${items}<a class="signal-nav-assist" href="smart-assist.html" aria-label="${assistLabel}" title="${assistLabel}"><span class="signal-nav-orb" aria-hidden="true"><img src="/signal-premium-logo.png" alt=""></span><span>${assistLabel}</span></a>`;
+  const itemMarkup=page=>{const item=signalNavItems[page],label=english?item.labelEn:item.label;return `<a href="${page}" data-nav="${page.replace('.html','')}" aria-label="${label}" title="${label}"><span class="nav-icon" aria-hidden="true">${item.icon}</span><span class="nav-label" data-no-auto-translate>${label}</span></a>`;};
+  return `${itemMarkup('dashboard.html')}${itemMarkup('plans.html')}<a class="signal-nav-assist" href="smart-assist.html" aria-label="${assistLabel}" title="${assistLabel}"><span class="signal-nav-orb" aria-hidden="true"><img src="/signal-premium-logo.png" alt=""></span><span data-no-auto-translate>${assistLabel}</span></a>${itemMarkup('usage.html')}${itemMarkup('profile.html')}`;
 }
 function signalBottomNavMarkup(english=false){return `<nav class="bottomnav signal-bottomnav" aria-label="${english?'Main navigation':'Головна навігація'}">${signalBottomNavItemsMarkup(english)}</nav>`;}
 function signalActiveNavPage(current){if(signalHomePages.has(current))return'dashboard.html';if(signalPlanPages.has(current))return'plans.html';if(signalUsagePages.has(current))return'usage.html';if(signalProfilePages.has(current))return'profile.html';return signalNavItems[current]?current:'profile.html';}
@@ -151,7 +151,7 @@ async function signalConsumeMaintenancePreviewCode(){
   url.searchParams.delete('maintenance_preview');history.replaceState(null,'',`${url.pathname}${url.search}${url.hash}`);
   try{const response=await signalOriginalFetch(`${API_URL}/api/maintenance-preview/exchange`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code}),cache:'no-store'}),data=await response.json();if(!response.ok)throw Error(data.error||'Preview failed');sessionStorage.setItem('signal_maintenance_preview_token',data.previewToken);sessionStorage.setItem('signal_maintenance_preview_expires',data.expiresAt);location.replace(url.href);return true;}catch{return false;}
 }
-const SIGNAL_FRONTEND_VERSION='4.8.0',SIGNAL_SW_VERSION='v111',SIGNAL_CACHE_VERSION='signal-shell-v111-glass-pin-lock';
+const SIGNAL_FRONTEND_VERSION='4.9.0',SIGNAL_SW_VERSION='v112',SIGNAL_CACHE_VERSION='signal-shell-v112-precision-bottom-nav';
 window.SIGNAL_APP_VERSION=SIGNAL_FRONTEND_VERSION;
 window.addEventListener('load',async()=>{
   if(typeof API_URL==='undefined')return;
