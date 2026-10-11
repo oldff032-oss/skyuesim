@@ -39,7 +39,7 @@ test('customer pages receive one shared bottom navigation',()=>{
   assert.match(pwa,/nav\.classList\.remove\('o-bottomnav'\)/);
   assert.match(style,/\.signal-bottomnav>a:not\(\.signal-nav-assist\):before\{[^}]+width:auto;height:auto/);
   assert.match(style,/\.signal-bottomnav>\.signal-nav-assist:before\{[^}]+width:auto;height:auto/);
-  assert.match(style,/grid-template-columns:repeat\(5,minmax\(0,1fr\)\)/);
+  assert.match(style,/nav\.bottomnav\.signal-bottomnav\{[^}]+grid-template-columns:repeat\(5,minmax\(0,1fr\)\);grid-template-rows:1fr/);
   assert.match(style,/\.signal-bottomnav:before\{[^}]+left:50%;top:-22px/);
   for(const page of ['dashboard.html','plans.html','usage.html','profile.html'])assert.match(pwa,new RegExp(page.replace('.','\\.')));
   assert.match(experience,/function xpNav\(\)\{return '<nav class="bottomnav"/);
